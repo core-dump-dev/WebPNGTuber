@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "C:\project\simplepngtuber-python-web\main.py", line 163, in open_editor
+    ModelEditor(self.root, on_save=self.on_model_saved)
+  File "C:\project\simplepngtuber-python-web\editor.py", line 29, in __init__
+    self.protocol("WM_DELETE_WINDOW", self.on_close)  # Добавлен обработчик закрытия окна
+AttributeError: 'ModelEditor' object has no attribute 'on_close'
