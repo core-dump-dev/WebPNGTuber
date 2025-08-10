@@ -703,7 +703,6 @@ class ModelEditor(tk.Toplevel):
                 f.write(tb)
             messagebox.showerror("Export error", f"Ошибка при экспорте: {e}. Смотри export_zip_error.log")
 
-    # ------------- preview / autosave loop -------------
     def _preview_loop(self):
         try:
             now = time.time()
