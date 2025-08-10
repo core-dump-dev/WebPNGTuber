@@ -1,19 +1,16 @@
 import threading, time
 import numpy as np
+import sounddevice as sd
 
 class AudioProcessor:
-    def __init__(self, callback=None):
+    def __init__(self, callback=None, device=None):
         self.callback = callback
         self.running = False
         self._level = 0.0
         self._thread = None
-        try:
-            import sounddevice as sd
-            self.sd = sd
-            self.use_sounddevice = True
-        except Exception:
-            self.sd = None
-            self.use_sounddevice = False
+        self.device = device
+        self.noise_gate_threshold = 0.01
+        self.use_sounddevice = True
 
     def start(self):
         """Start audio processing"""
@@ -59,11 +56,12 @@ class AudioProcessor:
             q.put(indata.copy())
         
         try:
-            with self.sd.InputStream(
+            with sd.InputStream(
                 channels=1, 
                 callback=callback, 
                 samplerate=44100, 
-                blocksize=1024
+                blocksize=512,  # Reduced block size for lower latency
+                device=self.device
             ):
                 while self.running:
                     try:
@@ -72,6 +70,11 @@ class AudioProcessor:
                         continue
                     rms = np.sqrt(np.mean(data**2))
                     level = min(1.0, rms*10)
+                    
+                    # Apply noise gate
+                    if level < self.noise_gate_threshold:
+                        level = 0.0
+                    
                     self._level = level
                     if self.callback:
                         try:

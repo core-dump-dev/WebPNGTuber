@@ -6,6 +6,7 @@ from tkinter import ttk, filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
 import shutil
 import math
+import random
 from audio import AudioProcessor
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -35,10 +36,12 @@ class ModelEditor(tk.Toplevel):
         self.imported_files = []
         self.drag_data = {"item": None, "x": 0, "y": 0}
         self.selected_group = None
+        self.current_selection = []
         self.preview_fps = 24
         self.last_autosave = time.time()
         self.autosave_interval = 5.0
         self.audio_level = 0.0
+        self.blink_preview_running = False
 
         # ---- UI layout ----
         left = ttk.Frame(self, width=260)
@@ -127,8 +130,6 @@ class ModelEditor(tk.Toplevel):
         ttk.Checkbutton(props, text="Visible", variable=self.visible_var).pack(anchor="w")
         self.blink_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(props, text="Blink", variable=self.blink_var).pack(anchor="w")
-        self.speech_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(props, text="React to speech", variable=self.speech_var).pack(anchor="w")
         ttk.Button(props, text="Apply to Selection", command=self.apply_props).pack(fill="x", pady=4)
 
         # Group logic editor
@@ -155,9 +156,24 @@ class ModelEditor(tk.Toplevel):
             om.pack(side="left", fill="x", expand=True)
             self.state_optionmenus[s] = om
 
+        # Упрощенный ввод частоты моргания (только поле ввода)
         ttk.Label(self.group_logic_frame, text="Blink frequency (sec, 0=off)").pack(anchor="w", pady=(6, 0))
+        freq_frame = ttk.Frame(self.group_logic_frame)
+        freq_frame.pack(fill="x")
+        
+        # Только поле ввода для частоты моргания
         self.blink_freq = tk.DoubleVar(value=0.0)
-        ttk.Scale(self.group_logic_frame, from_=0.0, to=10.0, variable=self.blink_freq, orient="horizontal").pack(fill="x")
+        self.blink_freq_entry = ttk.Entry(freq_frame, width=8)
+        self.blink_freq_entry.pack(side="left", padx=5)
+        self.blink_freq_entry.insert(0, "0.0")
+        self.blink_freq_entry.bind("<Return>", self.update_blink_freq_from_entry)
+        
+        # Preview button
+        ttk.Button(freq_frame, text="Preview", command=self.show_blink_preview).pack(side="left", padx=5)
+        
+        # Stop preview button
+        ttk.Button(freq_frame, text="Stop", command=self.stop_blink_preview).pack(side="left", padx=5)
+        
         ttk.Button(self.group_logic_frame, text="Apply Group Logic", command=self.apply_group_logic).pack(fill="x", pady=6)
 
         # Start preview loop
@@ -167,9 +183,17 @@ class ModelEditor(tk.Toplevel):
         """Handle window close event"""
         try:
             self.audio_processor.stop()
+            self.stop_blink_preview()
         except Exception as e:
             print("Error stopping audio processor:", e)
-        self.destroy()
+        
+        # Правильно закрываем окно редактора
+        self.grab_release()  # Освобождаем захват фокуса
+        self.destroy()  # Закрываем только окно редактора
+        
+        # Показываем главное окно, если оно скрыто
+        if hasattr(self.master, 'deiconify'):
+            self.master.deiconify()  # Show main window again
 
     def update_test_mode(self):
         """Update test mode based on selection"""
@@ -203,12 +227,36 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
 
     def load_model(self):
-        path = filedialog.askdirectory(title="Select model folder")
-        if not path:
-            return
+        # Show slot selection dialog
+        slot_dialog = tk.Toplevel(self)
+        slot_dialog.title("Load from Slot")
+        slot_dialog.geometry("300x200")
+        slot_dialog.transient(self)
+        slot_dialog.grab_set()
+        
+        ttk.Label(slot_dialog, text="Select a slot to load:").pack(pady=10)
+        
+        for i in range(1, 7):
+            slot_dir = os.path.join(MODELS_DIR, f"slot{i}")
+            json_path = os.path.join(slot_dir, "model.json")
+            
+            if os.path.exists(json_path):
+                btn_text = f"Slot {i} (has model)"
+            else:
+                btn_text = f"Slot {i} (empty)"
+                
+            ttk.Button(
+                slot_dialog, 
+                text=btn_text,
+                command=lambda i=i: self._load_slot(i, slot_dialog)
+            ).pack(fill="x", padx=20, pady=2)
+
+    def _load_slot(self, slot_num, dialog):
+        dialog.destroy()
+        path = os.path.join(MODELS_DIR, f"slot{slot_num}")
         json_path = os.path.join(path, "model.json")
         if not os.path.exists(json_path):
-            messagebox.showerror("Error", "model.json not found in selected folder")
+            messagebox.showerror("Error", "model.json not found in selected slot")
             return
         with open(json_path, "r", encoding="utf-8") as f:
             self.model = json.load(f)
@@ -240,25 +288,26 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
 
     def save_model(self):
+        # Если модель ещё не сохранена, запрашиваем папку
         if not self.model_dir:
             name = self.model.get("name", "model")
             folder = filedialog.askdirectory(title="Choose parent folder for model (a new folder will be created)")
             if not folder:
                 return
-            dest = os.path.join(folder, name.replace(" ", "_"))
-            os.makedirs(dest, exist_ok=True)
-            self.model_dir = dest
+            self.model_dir = os.path.join(folder, name.replace(" ", "_"))
+            os.makedirs(self.model_dir, exist_ok=True)
+        
+        # Сохраняем изображения
         for idx, ci in enumerate(self.items):
             layer = ci.layer
             fname = layer.get("file")
-            if fname and os.path.exists(os.path.join(self.model_dir, fname)):
-                continue
-            if fname:
+            if not fname or not os.path.exists(os.path.join(self.model_dir, fname)):
+                if not fname:
+                    fname = f"layer_{idx}.png"
+                    layer["file"] = fname
                 ci.image.save(os.path.join(self.model_dir, fname))
-            else:
-                fname = f"layer_{idx}.png"
-                ci.image.save(os.path.join(self.model_dir, fname))
-                layer["file"] = fname
+        
+        # Сохраняем структуру модели
         self.model["layers"] = []
         for ci in self.items:
             layer = ci.layer
@@ -266,38 +315,85 @@ class ModelEditor(tk.Toplevel):
             layer["y"] = int(ci.y)
             layer["visible"] = bool(ci.visible)
             self.model["layers"].append(layer)
+        
         with open(os.path.join(self.model_dir, "model.json"), "w", encoding="utf-8") as f:
             json.dump(self.model, f, indent=2, ensure_ascii=False)
         
-        # Create preview
+        # Создаем превью
         self.create_preview()
         
-        # Offer to save to slot
-        slot = simpledialog.askinteger("Save to Slot", 
-                                      "Enter slot number (1-6) to save to:",
-                                      parent=self, minvalue=1, maxvalue=6)
-        if slot:
-            self.save_to_slot(slot)
-            
-        messagebox.showinfo("Saved", f"Model saved to {self.model_dir}")
+        # Всегда предлагаем сохранить в слот
+        self.show_save_slot_dialog()
+        
         if self.on_save:
             self.on_save(self.model, self.model_dir)
         self.last_autosave = time.time()
+    
+    def show_save_slot_dialog(self):
+        """Show slot selection dialog with buttons for saving"""
+        slot_dialog = tk.Toplevel(self)
+        slot_dialog.title("Save to Slot")
+        slot_dialog.geometry("300x250")
+        slot_dialog.transient(self)
+        slot_dialog.grab_set()
         
-    def save_to_slot(self, slot_num):
+        ttk.Label(slot_dialog, text="Select a slot to save to:").pack(pady=10)
+        
+        # Фрейм для кнопок
+        slots_frame = ttk.Frame(slot_dialog)
+        slots_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        for i in range(1, 7):
+            slot_dir = os.path.join(MODELS_DIR, f"slot{i}")
+            json_path = os.path.join(slot_dir, "model.json")
+            
+            if os.path.exists(json_path):
+                btn_text = f"Slot {i} (overwrite)"
+            else:
+                btn_text = f"Slot {i} (new)"
+                
+            btn = ttk.Button(
+                slots_frame, 
+                text=btn_text,
+                width=20,
+                command=lambda i=i: self._save_slot(i, slot_dialog)
+            )
+            btn.pack(fill="x", padx=10, pady=3)
+        
+        # Кнопка отмены
+        ttk.Button(
+            slot_dialog, 
+            text="Cancel", 
+            command=slot_dialog.destroy
+        ).pack(fill="x", padx=20, pady=10)
+    
+    def _save_slot(self, slot_num, dialog):
+        """Save model to selected slot and close dialog"""
+        dialog.destroy()
         slot_dir = os.path.join(MODELS_DIR, f"slot{slot_num}")
         os.makedirs(slot_dir, exist_ok=True)
+        
+        # Копируем все файлы модели в слот
         for fname, _ in self.imported_files:
             src = os.path.join(self.model_dir, fname)
             dst = os.path.join(slot_dir, fname)
-            shutil.copy2(src, dst)
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
+        
+        # Копируем файл модели и превью
         shutil.copy2(os.path.join(self.model_dir, "model.json"), 
                     os.path.join(slot_dir, "model.json"))
+        
         preview_src = os.path.join(self.model_dir, "preview.png")
         preview_dst = os.path.join(slot_dir, "preview.png")
         if os.path.exists(preview_src):
             shutil.copy2(preview_src, preview_dst)
+        
         messagebox.showinfo("Saved", f"Model saved to slot {slot_num}")
+        
+        # Обновляем главное окно
+        if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
+            self.master.app.refresh_slot_buttons()
 
     def create_preview(self):
         if not self.model_dir:
@@ -335,7 +431,7 @@ class ModelEditor(tk.Toplevel):
                 if os.path.abspath(p) != os.path.abspath(dest):
                     img.save(dest)
                 self.imported_files.append((base, img))
-                layer = {"name": os.path.splitext(base)[0], "file": base, "blink": False, "speech": False, "visible": True, "x": 0, "y": 0, "group": None}
+                layer = {"name": os.path.splitext(base)[0], "file": base, "blink": False, "visible": True, "x": 0, "y": 0, "group": None}
                 self.model.setdefault("layers", []).append(layer)
             except Exception as e:
                 print("Import error", e)
@@ -365,31 +461,75 @@ class ModelEditor(tk.Toplevel):
             flags = []
             if layer.get("blink"):
                 flags.append("blink")
-            if layer.get("speech"):
-                flags.append("speech")
             grp = layer.get("group")
             label = f"{name} ({','.join(flags)})" if not grp else f"{name} @ {grp}"
             self.items_listbox.insert("end", label)
 
-    def redraw_canvas(self):
+    def redraw_canvas(self, level=0.0, mode="none"):
         base = Image.new("RGBA", (self.canvas_w, self.canvas_h), (0, 0, 0, 0))
         center_x = self.canvas_w // 2
         center_y = self.canvas_h // 2
-        for ci in self.items:
-            if not ci.visible:
-                continue
-            img = ci.image
-            px = center_x - img.size[0] // 2 + int(ci.x)
-            py = center_y - img.size[1] // 2 + int(ci.y)
-            try:
-                base.alpha_composite(img, (px, py))
-            except Exception:
-                pass
+        
+        # For "none" mode, show all visible layers
+        if mode == "none":
+            for ci in self.items:
+                if not ci.visible:
+                    continue
+                    
+                img = ci.image
+                px = center_x - img.size[0] // 2 + int(ci.x)
+                py = center_y - img.size[1] // 2 + int(ci.y)
+                try:
+                    base.alpha_composite(img, (px, py))
+                except Exception:
+                    pass
+        else:
+            # For other modes, use state logic
+            current_state = "silent"
+            thresholds = self.master.app.thresholds if hasattr(self.master, 'app') else {
+                'silent': 0.05,
+                'whisper': 0.25,
+                'normal': 0.6,
+                'shout': 0.8
+            }
+            
+            if level > thresholds['shout']:
+                current_state = "shout"
+            elif level > thresholds['normal']:
+                current_state = "normal"
+            elif level > thresholds['whisper']:
+                current_state = "whisper"
+            elif level > thresholds['silent']:
+                current_state = "silent"
+            
+            # Render layers with state logic
+            for ci in self.items:
+                if not ci.visible:
+                    continue
+                    
+                # If layer is in a group, check its state
+                group_name = ci.layer.get("group")
+                if group_name:
+                    group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
+                    if group:
+                        logic = group.get("logic", {})
+                        target_layer = logic.get(current_state) or logic.get("normal") or logic.get("whisper") or logic.get("silent")
+                        if ci.layer.get("name") != target_layer:
+                            continue
+                
+                img = ci.image
+                px = center_x - img.size[0] // 2 + int(ci.x)
+                py = center_y - img.size[1] // 2 + int(ci.y)
+                try:
+                    base.alpha_composite(img, (px, py))
+                except Exception:
+                    pass
+        
         self.base_tk = ImageTk.PhotoImage(base)
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, anchor="nw", image=self.base_tk)
-        center_x = self.canvas_w // 2
-        center_y = self.canvas_h // 2
+        
+        # Draw selection
         if self.selected_group:
             for ci in self.items:
                 if ci.layer.get("group") == self.selected_group:
@@ -415,7 +555,7 @@ class ModelEditor(tk.Toplevel):
                         layer = l
                         break
                 if not layer:
-                    layer = {"name": os.path.splitext(fname)[0], "file": fname, "blink": False, "speech": False, "visible": True, "x": 0, "y": 0, "group": None}
+                    layer = {"name": os.path.splitext(fname)[0], "file": fname, "blink": False, "visible": True, "x": 0, "y": 0, "group": None}
                     self.model.setdefault("layers", []).append(layer)
                 ci = CanvasItem(layer, img)
                 self.items.append(ci)
@@ -436,12 +576,20 @@ class ModelEditor(tk.Toplevel):
     # ------------- list selection handling -------------
     def on_list_select(self, event=None):
         sels = list(self.items_listbox.curselection())
+        self.current_selection = []
+        
         if not sels:
             for c in self.items:
                 c.layer["_selected"] = False
             self.selected_group = None
             self.group_label.config(text="(no group)")
             self._clear_group_optionmenus()
+            # Clear property fields
+            self.name_entry.delete(0, "end")
+            self.x_entry.delete(0, "end")
+            self.y_entry.delete(0, "end")
+            self.visible_var.set(True)
+            self.blink_var.set(False)
             self.redraw_canvas()
             return
 
@@ -463,6 +611,15 @@ class ModelEditor(tk.Toplevel):
                     menu.add_command(label=child, command=lambda val=child, v=var: v.set(val))
                 var.set(grp.get("logic", {}).get(s, ""))
             self.blink_freq.set(float(grp.get("blink_freq", 0.0)))
+            self.blink_freq_entry.delete(0, "end")
+            self.blink_freq_entry.insert(0, str(self.blink_freq.get()))
+            
+            # Clear property fields for objects
+            self.name_entry.delete(0, "end")
+            self.x_entry.delete(0, "end")
+            self.y_entry.delete(0, "end")
+            self.visible_var.set(True)
+            self.blink_var.set(False)
         else:
             self.selected_group = None
             sel_layers = set()
@@ -475,17 +632,27 @@ class ModelEditor(tk.Toplevel):
             for ci in self.items:
                 ci.layer["_selected"] = (ci in sel_layers)
             sel = list(sel_layers)
+            self.current_selection = sel
+            
             if sel:
-                first = sel[0]
-                self.name_entry.delete(0, "end")
-                self.name_entry.insert(0, first.layer.get("name", ""))
-                self.x_entry.delete(0, "end")
-                self.x_entry.insert(0, str(first.x))
-                self.y_entry.delete(0, "end")
-                self.y_entry.insert(0, str(first.y))
-                self.visible_var.set(bool(first.visible))
-                self.blink_var.set(bool(first.layer.get("blink", False)))
-                self.speech_var.set(bool(first.layer.get("speech", False)))
+                # Only show properties for single selection
+                if len(sel) == 1:
+                    first = sel[0]
+                    self.name_entry.delete(0, "end")
+                    self.name_entry.insert(0, first.layer.get("name", ""))
+                    self.x_entry.delete(0, "end")
+                    self.x_entry.insert(0, str(first.x))
+                    self.y_entry.delete(0, "end")
+                    self.y_entry.insert(0, str(first.y))
+                    self.visible_var.set(bool(first.visible))
+                    self.blink_var.set(bool(first.layer.get("blink", False)))
+                else:
+                    # Clear fields for multiple selection
+                    self.name_entry.delete(0, "end")
+                    self.x_entry.delete(0, "end")
+                    self.y_entry.delete(0, "end")
+                    self.visible_var.set(True)
+                    self.blink_var.set(False)
             self.group_label.config(text="(no group)")
             self._clear_group_optionmenus()
         self.redraw_canvas()
@@ -499,10 +666,15 @@ class ModelEditor(tk.Toplevel):
 
     # ------------- apply properties -------------
     def apply_props(self):
-        sels = [ci for ci in self.items if ci.layer.get("_selected")]
-        if not sels:
-            messagebox.showwarning("No selection", "Select one or more items from the right list")
+        if not self.current_selection:
+            messagebox.showwarning("No selection", "Select an item first")
             return
+            
+        if len(self.current_selection) > 1:
+            messagebox.showwarning("Multiple selection", "Properties can only be applied to single items")
+            return
+            
+        ci = self.current_selection[0]
         name = self.name_entry.get().strip()
         try:
             x = int(self.x_entry.get().strip())
@@ -512,23 +684,24 @@ class ModelEditor(tk.Toplevel):
             return
         vis = self.visible_var.get()
         blink = self.blink_var.get()
-        speech = self.speech_var.get()
-        for ci in sels:
-            if name:
-                ci.layer["name"] = name
-            ci.x = x
-            ci.y = y
-            ci.visible = vis
-            ci.layer["blink"] = blink
-            ci.layer["speech"] = speech
+        
+        if name:
+            ci.layer["name"] = name
+        ci.x = x
+        ci.y = y
+        ci.visible = vis
+        ci.layer["blink"] = blink
+        
         self.refresh_items_list()
         self.redraw_canvas()
         self.last_autosave = time.time()
 
     # ------------- stacking controls -------------
     def bring_forward(self):
-        sels = [ci for ci in self.items if ci.layer.get("_selected")]
-        for ci in sels:
+        if not self.current_selection:
+            return
+            
+        for ci in self.current_selection:
             idx = self.items.index(ci)
             if idx < len(self.items) - 1:
                 self.items[idx], self.items[idx + 1] = self.items[idx + 1], self.items[idx]
@@ -536,8 +709,10 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
 
     def send_backward(self):
-        sels = [ci for ci in self.items if ci.layer.get("_selected")]
-        for ci in sels:
+        if not self.current_selection:
+            return
+            
+        for ci in self.current_selection:
             idx = self.items.index(ci)
             if idx > 0:
                 self.items[idx], self.items[idx - 1] = self.items[idx - 1], self.items[idx]
@@ -546,10 +721,10 @@ class ModelEditor(tk.Toplevel):
 
     # ------------- grouping -------------
     def group_selected(self):
-        sels = [ci for ci in self.items if ci.layer.get("_selected")]
-        if len(sels) < 1:
+        if not self.current_selection or len(self.current_selection) < 1:
             messagebox.showwarning("Group", "Select at least one item")
             return
+            
         name = simpledialog.askstring("Group name", "Enter group name", parent=self)
         if not name:
             return
@@ -557,12 +732,17 @@ class ModelEditor(tk.Toplevel):
         if name in existing:
             messagebox.showwarning("Group", "Group name already exists")
             return
-        group = {"name": name, "children": [ci.layer.get("name") for ci in sels], "logic": {}, "blink_freq": 0.0}
+            
+        group = {"name": name, "children": [ci.layer.get("name") for ci in self.current_selection], "logic": {}, "blink_freq": 0.0}
         self.model.setdefault("groups", []).append(group)
-        for ci in sels:
+        for ci in self.current_selection:
             ci.layer["group"] = name
+            
+        # Clear selection
         for ci in self.items:
             ci.layer["_selected"] = False
+        self.current_selection = []
+            
         self.selected_group = name
         self.refresh_items_list()
         self.redraw_canvas()
@@ -580,10 +760,11 @@ class ModelEditor(tk.Toplevel):
             self.refresh_items_list()
             self.redraw_canvas()
             return
-        sels = [ci for ci in self.items if ci.layer.get("_selected")]
-        if not sels:
+            
+        if not self.current_selection:
             return
-        for ci in sels:
+            
+        for ci in self.current_selection:
             grp = ci.layer.get("group")
             if grp:
                 for g in list(self.model.get("groups", [])):
@@ -592,6 +773,7 @@ class ModelEditor(tk.Toplevel):
                         if not g["children"]:
                             self.model["groups"].remove(g)
                 ci.layer["group"] = None
+                
         self.refresh_items_list()
         self.redraw_canvas()
 
@@ -609,26 +791,36 @@ class ModelEditor(tk.Toplevel):
                 found = ci
                 break
         if found:
-            if event.state & 0x0004:
+            if event.state & 0x0004:  # Ctrl key
+                # Toggle selection
                 found.layer["_selected"] = not bool(found.layer.get("_selected"))
+                if found.layer["_selected"]:
+                    self.current_selection.append(found)
+                else:
+                    if found in self.current_selection:
+                        self.current_selection.remove(found)
             else:
+                # Single selection
                 for c in self.items:
                     c.layer["_selected"] = False
+                self.current_selection = [found]
                 found.layer["_selected"] = True
+                
             grp = found.layer.get("group")
             if grp:
                 self.selected_group = grp
-                for c in self.items:
-                    c.layer["_selected"] = (c.layer.get("group") == grp)
             else:
                 self.selected_group = None
+                
             self.drag_data["item"] = found
             self.drag_data["x"] = mx
             self.drag_data["y"] = my
             self.on_list_select()
         else:
+            # Clicked on empty space - clear selection
             for c in self.items:
                 c.layer["_selected"] = False
+            self.current_selection = []
             self.selected_group = None
             self.drag_data["item"] = None
             self.on_list_select()
@@ -636,23 +828,24 @@ class ModelEditor(tk.Toplevel):
     def on_canvas_mouse_move(self, event):
         if not self.drag_data.get("item"):
             return
+            
         ci = self.drag_data["item"]
         dx = event.x - self.drag_data["x"]
         dy = event.y - self.drag_data["y"]
         self.drag_data["x"] = event.x
         self.drag_data["y"] = event.y
+        
         if self.selected_group:
             for s in self.items:
                 if s.layer.get("group") == self.selected_group:
                     s.x += dx
                     s.y += dy
         else:
-            sels = [c for c in self.items if c.layer.get("_selected")]
-            if not sels:
-                sels = [ci]
-            for s in sels:
+            # Move all selected items
+            for s in self.current_selection:
                 s.x += dx
                 s.y += dy
+                
         self.refresh_items_list()
         self.redraw_canvas()
 
@@ -663,25 +856,123 @@ class ModelEditor(tk.Toplevel):
     # ------------- group logic apply -------------
     def apply_group_logic(self):
         if not self.selected_group:
-            messagebox.showwarning("No group", "Select a group first (from the right list)")
+            messagebox.showwarning("No group", "Select a group first")
             return
+            
         gname = self.selected_group
         grp = None
         for g in self.model.get("groups", []):
             if g.get("name") == gname:
                 grp = g
                 break
+                
         if not grp:
             messagebox.showerror("Error", "Group not found")
             return
+            
         logic = {}
         for s, var in self.state_vars.items():
             val = var.get().strip()
             if val:
                 logic[s] = val
+                
         grp["logic"] = logic
         grp["blink_freq"] = float(self.blink_freq.get())
         messagebox.showinfo("Group logic", f"Saved logic for group {gname}")
+
+    # ------------- blink preview -------------
+    def show_blink_preview(self):
+        """Show blink preview animation"""
+        if not self.selected_group:
+            return
+            
+        gname = self.selected_group
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == gname), None)
+        if not group:
+            return
+            
+        blink_freq = float(self.blink_freq.get())
+        if blink_freq < 0.1:
+            return
+            
+        # Создаем анимацию моргания
+        self.blink_preview_running = True
+        self._blink_preview_loop()
+        
+    def stop_blink_preview(self):
+        """Stop blink preview animation"""
+        self.blink_preview_running = False
+        
+    def _blink_preview_loop(self):
+        if not self.blink_preview_running:
+            return
+            
+        # Получаем настройки группы
+        gname = self.selected_group
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == gname), None)
+        if not group:
+            return
+            
+        blink_freq = float(group.get("blink_freq", 0.0))
+        if blink_freq < 0.1:
+            return
+            
+        # Показываем состояние "blink"
+        logic = group.get("logic", {})
+        blink_layer = logic.get("blink", "")
+        
+        # Обновляем состояние для предпросмотра
+        for ci in self.items:
+            if ci.layer.get("group") == gname:
+                # Скрываем все слои группы
+                ci.visible = False
+                
+                # Показываем только слой для моргания
+                if ci.layer.get("name") == blink_layer:
+                    ci.visible = True
+        
+        self.redraw_canvas(0, "none")
+        
+        # Ждем 0.2 секунды (длительность моргания)
+        self.after(200, self._show_normal_preview)
+        
+    def _show_normal_preview(self):
+        if not self.blink_preview_running:
+            return
+            
+        # Показываем нормальное состояние
+        gname = self.selected_group
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == gname), None)
+        if not group:
+            return
+            
+        logic = group.get("logic", {})
+        normal_layer = logic.get("normal") or logic.get("whisper") or logic.get("silent")
+        
+        for ci in self.items:
+            if ci.layer.get("group") == gname:
+                # Скрываем все слои группы
+                ci.visible = False
+                
+                # Показываем только слой для нормального состояния
+                if ci.layer.get("name") == normal_layer:
+                    ci.visible = True
+        
+        self.redraw_canvas(0, "none")
+        
+        # Ждем перед следующим морганием
+        blink_freq = float(group.get("blink_freq", 0.0))
+        if blink_freq > 0.1:
+            self.after(int(blink_freq * 1000), self._blink_preview_loop)
+            
+    def update_blink_freq_from_entry(self, event=None):
+        """Update blink frequency from text entry"""
+        try:
+            value = float(self.blink_freq_entry.get())
+            if 0 <= value <= 10:
+                self.blink_freq.set(value)
+        except ValueError:
+            pass
 
     # ------------- export zip -------------
     def export_zip(self):
@@ -691,7 +982,7 @@ class ModelEditor(tk.Toplevel):
             messagebox.showerror("Export error", f"Не удалось импортировать утилиту экспорта: {e}")
             return
         if not self.model_dir:
-            messagebox.showwarning("No model", "Сначала сохраните или импортируйте изображения (чтобы создать model_dir).")
+            messagebox.showwarning("No model", "Сначала сохраните или импортируйте изображения")
             return
         try:
             zip_path = export_model_zip(self.model, self.model_dir)
@@ -703,6 +994,7 @@ class ModelEditor(tk.Toplevel):
                 f.write(tb)
             messagebox.showerror("Export error", f"Ошибка при экспорте: {e}. Смотри export_zip_error.log")
 
+    # ------------- preview / autosave loop -------------
     def _preview_loop(self):
         try:
             now = time.time()
@@ -718,7 +1010,6 @@ class ModelEditor(tk.Toplevel):
                                 "y": int(ci.y),
                                 "visible": bool(ci.visible),
                                 "blink": bool(ci.layer.get("blink", False)),
-                                "speech": bool(ci.layer.get("speech", False)),
                                 "group": ci.layer.get("group", None)
                             })
                         with open(os.path.join(self.model_dir, "model.json"), "w", encoding="utf-8") as f:
@@ -739,7 +1030,8 @@ class ModelEditor(tk.Toplevel):
                 
             self.level_bar["value"] = level * 100
             
-            self.redraw_canvas()
+            # Update preview
+            self.redraw_canvas(level, mode)
         except Exception as e:
             print("Preview loop error", e)
         finally:

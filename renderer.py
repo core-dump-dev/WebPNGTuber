@@ -3,7 +3,7 @@ from PIL import Image, ImageOps, ImageEnhance
 import os, io, math, random
 
 class Renderer:
-    def __init__(self, width=512, height=512, fps=30):
+    def __init__(self, width=700, height=700, fps=60):
         self.width = width
         self.height = height
         self.fps = fps
@@ -22,6 +22,7 @@ class Renderer:
             'normal': 0.6,
             'shout': 0.8
         }
+        self.noise_gate = 0.01
         
         # Active voice states
         self.active_states = {
@@ -33,17 +34,23 @@ class Renderer:
         
         # Ordered states by volume level
         self.state_order = ['silent', 'whisper', 'normal', 'shout']
+        self.effects = {}  # Глобальные эффекты
 
-    def set_active_states(self, active_states):
-        """Set active voice states"""
-        self.active_states = active_states
-        
-        # Update state order based on active states
-        self.state_order = [state for state in self.state_order if active_states.get(state, True)]
+    def set_noise_gate(self, threshold):
+        """Set noise gate threshold"""
+        self.noise_gate = threshold
+
+    def set_effects(self, effects):
+        """Set global effects"""
+        self.effects = effects
 
     def set_thresholds(self, thresholds):
         """Set voice level thresholds"""
         self.thresholds = thresholds
+
+    def set_active_states(self, active_states):
+        """Set which voice states are active"""
+        self.active_states = active_states
 
     def start(self):
         if self._running:
@@ -76,7 +83,9 @@ class Renderer:
                 self.group_blink_until[name] = 0.0
 
     def set_audio_level(self, level):
-        """Set current audio level"""
+        """Set current audio level with noise gate"""
+        if level < self.noise_gate:
+            level = 0.0
         self.audio_level = max(0.0, float(level))
 
     def get_frame_bytes(self):
@@ -124,28 +133,29 @@ class Renderer:
                         if chosen_name:
                             break
         
-        # Handle blinking
-        now = time.time()
-        group_name = group.get("name")
-        blink_freq = float(group.get("blink_freq", 0.0))
-        
-        if group_name not in self.group_blink_timers:
-            self.group_blink_timers[group_name] = now + random.uniform(2.0, 6.0)
-            self.group_blink_until[group_name] = 0.0
+        # Handle blinking only if global blink effect is enabled
+        if self.effects.get('blink', True):
+            now = time.time()
+            group_name = group.get("name")
+            blink_freq = float(group.get("blink_freq", 0.0))
             
-        if blink_freq > 0.001:
-            if now > self.group_blink_timers.get(group_name, 0):
-                self.group_blink_until[group_name] = now + 0.12
-                self.group_blink_timers[group_name] = now + random.uniform(blink_freq * 0.7, blink_freq * 1.3)
-            
-            if now < self.group_blink_until.get(group_name, 0):
-                if "blink" in logic:
-                    chosen_name = logic.get("blink")
-                else:
-                    for child in group.get("children", []):
-                        if any(kw in child.lower() for kw in ["close", "closed", "shut"]):
-                            chosen_name = child
-                            break
+            if group_name not in self.group_blink_timers:
+                self.group_blink_timers[group_name] = now + random.uniform(2.0, 6.0)
+                self.group_blink_until[group_name] = 0.0
+                
+            if blink_freq > 0.001:
+                if now > self.group_blink_timers.get(group_name, 0):
+                    self.group_blink_until[group_name] = now + 0.12
+                    self.group_blink_timers[group_name] = now + blink_freq
+                
+                if now < self.group_blink_until.get(group_name, 0):
+                    if "blink" in logic:
+                        chosen_name = logic.get("blink")
+                    else:
+                        for child in group.get("children", []):
+                            if any(kw in child.lower() for kw in ["close", "closed", "shut"]):
+                                chosen_name = child
+                                break
         
         return chosen_name
 
@@ -193,22 +203,33 @@ class Renderer:
                     if not image:
                         continue
                     
-                    # Apply speech effect if needed
-                    if layer.get("speech"):
-                        scale = 1.0 + max(0, self.audio_level-0.05) * 0.8
-                        w, h = image.size
-                        try:
-                            image = image.resize((int(w), int(h*scale)), resample=Image.BILINEAR)
-                        except:
-                            pass
+                    # Apply global effects
+                    orig_image = image.copy()  # Сохраняем оригинал
+                    
+                    if self.effects.get('shake', False):
+                        # Shake effect
+                        shake_intensity = min(1.0, self.audio_level * 5)
+                        offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
+                        offset_y = int((random.random() - 0.5) * 10 * shake_intensity)
+                    else:
+                        offset_x, offset_y = 0, 0
+                        
+                    if self.effects.get('pulse', False):
+                        # Pulse effect
+                        pulse_scale = 1.0 + (math.sin(time.time() * 5) * 0.1 * self.audio_level)
+                        new_size = (int(image.width * pulse_scale), int(image.height * pulse_scale))
+                        image = image.resize(new_size, Image.LANCZOS)
                     
                     # Position and composite
-                    px = (self.width - image.size[0])//2 + int(layer.get("x", 0))
-                    py = (self.height - image.size[1])//2 + int(layer.get("y", 0))
+                    px = (self.width - image.size[0])//2 + int(layer.get("x", 0)) + offset_x
+                    py = (self.height - image.size[1])//2 + int(layer.get("y", 0)) + offset_y
                     try:
                         img.alpha_composite(image, (px, py))
                     except Exception:
                         pass
+                    
+                    # Восстанавливаем оригинал для следующей итерации
+                    image = orig_image
             
             # Convert to PNG bytes
             with io.BytesIO() as buf:
