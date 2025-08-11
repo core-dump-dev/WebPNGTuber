@@ -192,8 +192,9 @@ class App:
         self.pulse = tk.BooleanVar(value=self.effects.get('pulse', False))
         ttk.Checkbutton(effects_frame, text="Pulse", variable=self.pulse).pack(anchor="w")
         self.blink = tk.BooleanVar(value=self.effects.get('blink', True))
-        ttk.Checkbutton(effects_frame, text="Blink (eyes)", variable=self.blink,
-                       command=lambda: self.renderer.set_effects(self.get_effects())).pack(anchor="w")
+        ttk.Checkbutton(effects_frame, text="Blink (eyes)", variable=self.blink, command=lambda: self.renderer.set_effects(self.get_effects())).pack(anchor="w")
+        self.random_effect = tk.BooleanVar(value=self.effects.get('random_effect', False))
+        ttk.Checkbutton(effects_frame, text="Random State Switching", variable=self.random_effect, command=lambda: self.renderer.set_effects(self.get_effects())).pack(anchor="w")
 
         # Save settings button
         ttk.Button(ctrl_frame, text="Save Settings", command=self.save_settings).pack(fill="x", padx=8, pady=10)
@@ -256,7 +257,8 @@ class App:
             'shake': self.shake.get(),
             'bounce': self.bounce.get(),
             'pulse': self.pulse.get(),
-            'blink': self.blink.get()
+            'blink': self.blink.get(),
+            'random_effect': self.random_effect.get()
         }
         self.renderer.set_effects(effects)
         return effects
@@ -455,25 +457,25 @@ class App:
     def open_editor(self):
         """Open model editor window"""
         try:
-            # Временно отключаем главное окно
             self.root.attributes('-disabled', True)
-
-            # Создаем редактор как модальное окно
-            editor = ModelEditor(self.root, on_save=self.on_model_saved)
-
+            
+            # Передаем текущие настройки микрофона в редактор
+            editor = ModelEditor(
+                self.root, 
+                on_save=self.on_model_saved,
+                device=self.device_var.get(),
+                noise_gate_enabled=self.noise_gate_enabled.get(),
+                sensitivity=self.sensitivity.get(),
+                thresholds=self.thresholds
+            )
+            
             # Даем редактору доступ к главному приложению
             editor.master.app = self
 
-            # Ждем закрытия редактора
             self.root.wait_window(editor)
-
-            # Обновляем слоты после закрытия редактора
             self.refresh_slot_buttons()
-
-            # Восстанавливаем главное окно
             self.root.attributes('-disabled', False)
             self.root.focus_set()
-
         except Exception as e:
             import traceback
             tb = traceback.format_exc()

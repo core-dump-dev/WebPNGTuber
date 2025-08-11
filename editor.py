@@ -3,7 +3,7 @@ import json
 import time
 import tkinter as tk
 from tkinter import ttk, filedialog, simpledialog, messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageSequence
 import shutil
 import math
 import random
@@ -20,14 +20,49 @@ class CanvasItem:
         self.x = int(layer.get("x", 0))
         self.y = int(layer.get("y", 0))
         self.visible = bool(layer.get("visible", True))
+        self.is_gif = bool(layer.get("is_gif", False))
+        self.gif_frames = []
+        self.current_frame = 0
+        self.last_frame_time = 0
+        
+        # Если это GIF, загружаем все кадры
+        if self.is_gif:
+            try:
+                with Image.open(os.path.join(self.layer.get("path", ""), self.layer.get("file", ""))) as gif:
+                    for frame in ImageSequence.Iterator(gif):
+                        self.gif_frames.append(frame.copy().convert("RGBA"))
+            except Exception as e:
+                print(f"Error loading GIF frames: {e}")
+                self.is_gif = False
+
+    def get_current_image(self):
+        """Get current image, handling GIF animation if needed"""
+        if self.is_gif and self.gif_frames:
+            now = time.time()
+            if now - self.last_frame_time > 0.1:  # 10 FPS для анимации
+                self.current_frame = (self.current_frame + 1) % len(self.gif_frames)
+                self.last_frame_time = now
+            return self.gif_frames[self.current_frame]
+        return self.image
 
 class ModelEditor(tk.Toplevel):
-    def __init__(self, master, on_save=None):
+    def __init__(self, master, on_save=None, device='Default', noise_gate_enabled=True, sensitivity=1.0, thresholds=None):
         super().__init__(master)
         self.title("Model Editor")
         self.geometry("1200x750")
         self.on_save = on_save
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # Сохраняем настройки микрофона
+        self.mic_device = device
+        self.mic_noise_gate_enabled = noise_gate_enabled
+        self.mic_sensitivity = sensitivity
+        self.thresholds = thresholds or {
+            'silent': 0.05,
+            'whisper': 0.25,
+            'normal': 0.6,
+            'shout': 0.8
+        }
 
         # Model storage
         self.model = {"name": "Untitled", "layers": [], "groups": []}
@@ -50,7 +85,7 @@ class ModelEditor(tk.Toplevel):
         ttk.Button(left, text="New Model", command=self.new_model).pack(fill="x", pady=2)
         ttk.Button(left, text="Load Model", command=self.load_model).pack(fill="x", pady=2)
         ttk.Button(left, text="Save Model", command=self.save_model).pack(fill="x", pady=2)
-        ttk.Button(left, text="Import PNG(s)", command=self.import_images).pack(fill="x", pady=2)
+        ttk.Button(left, text="Import PNG/GIF(s)", command=self.import_images).pack(fill="x", pady=2)
         ttk.Button(left, text="Export ZIP", command=self.export_zip).pack(fill="x", pady=2)
         
         # Test mode selector with None option
@@ -69,10 +104,14 @@ class ModelEditor(tk.Toplevel):
         self.level_bar = ttk.Progressbar(test_frame, length=200, mode="determinate")
         self.level_bar.pack(fill="x", pady=5)
         
-        # Start audio processor
-        self.audio_processor = AudioProcessor(callback=self.on_audio_level)
+        # Start audio processor with current settings
+        self.audio_processor = AudioProcessor(
+            callback=self.on_audio_level,
+            device=self.mic_device
+        )
+        self.audio_processor.noise_gate_threshold = 0.01 if self.mic_noise_gate_enabled else 0.0
 
-        ttk.Label(left, text="Imported PNGs:").pack(anchor="w", pady=(8, 0))
+        ttk.Label(left, text="Imported Images:").pack(anchor="w", pady=(8, 0))
         self.import_list_frame = ttk.Frame(left)
         self.import_list_frame.pack(fill="both", expand=True)
 
@@ -128,8 +167,8 @@ class ModelEditor(tk.Toplevel):
         self.y_entry.pack(fill="x")
         self.visible_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(props, text="Visible", variable=self.visible_var).pack(anchor="w")
-        self.blink_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(props, text="Blink", variable=self.blink_var).pack(anchor="w")
+        # Убрали чекбокс Blink из свойств элемента
+        
         ttk.Button(props, text="Apply to Selection", command=self.apply_props).pack(fill="x", pady=4)
 
         # Group logic editor
@@ -145,10 +184,11 @@ class ModelEditor(tk.Toplevel):
             "whisper": tk.StringVar(value=""),
             "normal": tk.StringVar(value=""),
             "shout": tk.StringVar(value=""),
-            "blink": tk.StringVar(value="")
+            "blink": tk.StringVar(value=""),
+            "open": tk.StringVar(value="")  # Добавили состояние "open"
         }
         self.state_optionmenus = {}
-        for s in ("silent", "whisper", "normal", "shout", "blink"):
+        for s in ("silent", "whisper", "normal", "shout", "blink", "open"):
             frame = ttk.Frame(self.group_logic_frame)
             frame.pack(fill="x", pady=2)
             ttk.Label(frame, text=s.capitalize(), width=10).pack(side="left")
@@ -156,22 +196,35 @@ class ModelEditor(tk.Toplevel):
             om.pack(side="left", fill="x", expand=True)
             self.state_optionmenus[s] = om
 
-        # Упрощенный ввод частоты моргания (только поле ввода)
-        ttk.Label(self.group_logic_frame, text="Blink frequency (sec, 0=off)").pack(anchor="w", pady=(6, 0))
+        # Random effect settings
+        ttk.Separator(self.group_logic_frame).pack(fill="x", pady=5)
+        self.random_effect_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(self.group_logic_frame, text="Random State Switching", 
+                        variable=self.random_effect_var).pack(anchor="w", pady=(5, 0))
+        
+        random_frame = ttk.Frame(self.group_logic_frame)
+        random_frame.pack(fill="x", pady=2)
+        ttk.Label(random_frame, text="Interval:").pack(side="left")
+        self.random_min_var = tk.DoubleVar(value=5.0)
+        ttk.Entry(random_frame, textvariable=self.random_min_var, width=5).pack(side="left", padx=2)
+        ttk.Label(random_frame, text="to").pack(side="left")
+        self.random_max_var = tk.DoubleVar(value=10.0)
+        ttk.Entry(random_frame, textvariable=self.random_max_var, width=5).pack(side="left", padx=2)
+        ttk.Label(random_frame, text="sec").pack(side="left")
+
+        # Blink settings
+        ttk.Separator(self.group_logic_frame).pack(fill="x", pady=5)
+        ttk.Label(self.group_logic_frame, text="Blink frequency (sec, 0=off)").pack(anchor="w", pady=(5, 0))
         freq_frame = ttk.Frame(self.group_logic_frame)
         freq_frame.pack(fill="x")
         
-        # Только поле ввода для частоты моргания
         self.blink_freq = tk.DoubleVar(value=0.0)
         self.blink_freq_entry = ttk.Entry(freq_frame, width=8)
         self.blink_freq_entry.pack(side="left", padx=5)
         self.blink_freq_entry.insert(0, "0.0")
         self.blink_freq_entry.bind("<Return>", self.update_blink_freq_from_entry)
         
-        # Preview button
         ttk.Button(freq_frame, text="Preview", command=self.show_blink_preview).pack(side="left", padx=5)
-        
-        # Stop preview button
         ttk.Button(freq_frame, text="Stop", command=self.stop_blink_preview).pack(side="left", padx=5)
         
         ttk.Button(self.group_logic_frame, text="Apply Group Logic", command=self.apply_group_logic).pack(fill="x", pady=6)
@@ -208,10 +261,12 @@ class ModelEditor(tk.Toplevel):
                 self.level_bar["value"] = 0
 
     def on_audio_level(self, level):
-        """Callback for audio level updates"""
-        self.audio_level = level
+        """Callback for audio level updates with sensitivity applied"""
+        # Apply sensitivity setting
+        level_scaled = level * self.mic_sensitivity
         if self.test_mode_var.get() == "microphone":
-            self.level_bar["value"] = level * 100
+            self.level_bar["value"] = level_scaled * 100
+        self.audio_level = level_scaled
 
     # ---------------- Model management ----------------
     def new_model(self):
@@ -267,20 +322,29 @@ class ModelEditor(tk.Toplevel):
             if not os.path.exists(fp):
                 continue
             try:
-                img = Image.open(fp).convert("RGBA")
-                ci = CanvasItem(layer, img)
+                # Проверяем, является ли файл GIF
+                with Image.open(fp) as img:
+                    is_gif = img.format == "GIF" and img.is_animated
+                    img.seek(0)
+                    preview_img = img.copy().convert("RGBA")
+                
+                ci = CanvasItem(layer, preview_img)
                 ci.x = int(layer.get("x", 0))
                 ci.y = int(layer.get("y", 0))
                 ci.visible = bool(layer.get("visible", True))
+                ci.is_gif = is_gif
                 self.items.append(ci)
             except Exception as e:
                 print("Load image error", e)
         self.imported_files.clear()
         for f in os.listdir(self.model_dir):
-            if f.lower().endswith(".png"):
+            if f.lower().endswith((".png", ".gif")):
                 try:
-                    img = Image.open(os.path.join(self.model_dir, f)).convert("RGBA")
-                    self.imported_files.append((f, img))
+                    with Image.open(os.path.join(self.model_dir, f)) as img:
+                        is_gif = img.format == "GIF" and img.is_animated
+                        img.seek(0)
+                        preview_img = img.copy().convert("RGBA")
+                    self.imported_files.append((f, preview_img, is_gif))
                 except Exception:
                     pass
         self.refresh_import_list()
@@ -314,6 +378,7 @@ class ModelEditor(tk.Toplevel):
             layer["x"] = int(ci.x)
             layer["y"] = int(ci.y)
             layer["visible"] = bool(ci.visible)
+            layer["is_gif"] = ci.is_gif
             self.model["layers"].append(layer)
         
         with open(os.path.join(self.model_dir, "model.json"), "w", encoding="utf-8") as f:
@@ -416,7 +481,10 @@ class ModelEditor(tk.Toplevel):
         base.save(preview_path)
 
     def import_images(self):
-        files = filedialog.askopenfilenames(title="Select PNG images", filetypes=[("PNG", "*.png"), ("All", "*.*")])
+        files = filedialog.askopenfilenames(
+            title="Select PNG or GIF images", 
+            filetypes=[("Images", "*.png *.gif"), ("All", "*.*")]
+        )
         if not files:
             return
         if not self.model_dir:
@@ -425,13 +493,33 @@ class ModelEditor(tk.Toplevel):
             self.model_dir = tmp
         for p in files:
             try:
-                img = Image.open(p).convert("RGBA")
+                img = Image.open(p)
+                is_gif = img.format == "GIF" and img.is_animated
+                
+                # Для GIF сохраняем первый кадр как превью
+                if is_gif:
+                    img.seek(0)
+                    preview_img = img.convert("RGBA")
+                else:
+                    preview_img = img.convert("RGBA")
+                
                 base = os.path.basename(p)
                 dest = os.path.join(self.model_dir, base)
                 if os.path.abspath(p) != os.path.abspath(dest):
                     img.save(dest)
-                self.imported_files.append((base, img))
-                layer = {"name": os.path.splitext(base)[0], "file": base, "blink": False, "visible": True, "x": 0, "y": 0, "group": None}
+                
+                self.imported_files.append((base, preview_img, is_gif))
+                layer = {
+                    "name": os.path.splitext(base)[0], 
+                    "file": base, 
+                    "path": self.model_dir,
+                    "blink": False, 
+                    "visible": True, 
+                    "x": 0, 
+                    "y": 0, 
+                    "group": None,
+                    "is_gif": is_gif
+                }
                 self.model.setdefault("layers", []).append(layer)
             except Exception as e:
                 print("Import error", e)
@@ -442,12 +530,21 @@ class ModelEditor(tk.Toplevel):
     def refresh_import_list(self):
         for w in self.import_inner.winfo_children():
             w.destroy()
-        for i, (fname, img) in enumerate(self.imported_files):
+        for i, (fname, img, is_gif) in enumerate(self.imported_files):
             row = ttk.Frame(self.import_inner)
             row.pack(fill="x", padx=2, pady=2)
-            ttk.Label(row, text=fname, width=18).pack(side="left")
+            
+            # Отображаем иконку GIF для анимированных изображений
+            if is_gif:
+                icon = "GIF"
+            else:
+                icon = "PNG"
+                
+            ttk.Label(row, text=f"{icon}: {fname}", width=20).pack(side="left")
             ttk.Button(row, text="+", width=2, command=lambda f=fname: self.add_to_canvas(f)).pack(side="left", padx=2)
             ttk.Button(row, text="-", width=2, command=lambda f=fname: self.remove_from_canvas_by_file(f)).pack(side="left", padx=2)
+            # Кнопка корзины для удаления файла
+            ttk.Button(row, text="🗑️", width=2, command=lambda f=fname: self.delete_file(f)).pack(side="left", padx=2)
 
     def refresh_items_list(self):
         self.items_listbox.delete(0, "end")
@@ -458,11 +555,28 @@ class ModelEditor(tk.Toplevel):
         for i, ci in enumerate(reversed(self.items)):
             layer = ci.layer
             name = layer.get("name", f"layer{i}")
+            grp = layer.get("group")
+            
+            # Добавляем информацию о состоянии группы
+            state_info = ""
+            if grp:
+                group_obj = next((g for g in self.model["groups"] if g["name"] == grp), None)
+                if group_obj:
+                    # Получаем текущее состояние для этого элемента
+                    for state, child in group_obj.get("logic", {}).items():
+                        if child == name:
+                            state_info = f" @ {grp} {{{state}}}"
+                            break
+            
+            # Формируем метку
             flags = []
             if layer.get("blink"):
                 flags.append("blink")
-            grp = layer.get("group")
-            label = f"{name} ({','.join(flags)})" if not grp else f"{name} @ {grp}"
+            if ci.is_gif:
+                flags.append("GIF")
+                
+            flag_text = f" ({','.join(flags)})" if flags else ""
+            label = f"{name}{flag_text}{state_info}"
             self.items_listbox.insert("end", label)
 
     def redraw_canvas(self, level=0.0, mode="none"):
@@ -475,8 +589,10 @@ class ModelEditor(tk.Toplevel):
             for ci in self.items:
                 if not ci.visible:
                     continue
+                
+                # Для GIF получаем текущий кадр
+                img = ci.get_current_image() if ci.is_gif else ci.image
                     
-                img = ci.image
                 px = center_x - img.size[0] // 2 + int(ci.x)
                 py = center_y - img.size[1] // 2 + int(ci.y)
                 try:
@@ -486,20 +602,14 @@ class ModelEditor(tk.Toplevel):
         else:
             # For other modes, use state logic
             current_state = "silent"
-            thresholds = self.master.app.thresholds if hasattr(self.master, 'app') else {
-                'silent': 0.05,
-                'whisper': 0.25,
-                'normal': 0.6,
-                'shout': 0.8
-            }
             
-            if level > thresholds['shout']:
+            if level > self.thresholds['shout']:
                 current_state = "shout"
-            elif level > thresholds['normal']:
+            elif level > self.thresholds['normal']:
                 current_state = "normal"
-            elif level > thresholds['whisper']:
+            elif level > self.thresholds['whisper']:
                 current_state = "whisper"
-            elif level > thresholds['silent']:
+            elif level > self.thresholds['silent']:
                 current_state = "silent"
             
             # Render layers with state logic
@@ -514,10 +624,17 @@ class ModelEditor(tk.Toplevel):
                     if group:
                         logic = group.get("logic", {})
                         target_layer = logic.get(current_state) or logic.get("normal") or logic.get("whisper") or logic.get("silent")
+                        # Если есть состояние "open", используем его как основное
+                        open_layer = logic.get("open")
+                        if open_layer and current_state != "blink":
+                            target_layer = open_layer
+                            
                         if ci.layer.get("name") != target_layer:
                             continue
                 
-                img = ci.image
+                # Для GIF получаем текущий кадр
+                img = ci.get_current_image() if ci.is_gif else ci.image
+                    
                 px = center_x - img.size[0] // 2 + int(ci.x)
                 py = center_y - img.size[1] // 2 + int(ci.y)
                 try:
@@ -547,7 +664,7 @@ class ModelEditor(tk.Toplevel):
 
     # ------------- canvas & items operations -------------
     def add_to_canvas(self, filename):
-        for fname, img in self.imported_files:
+        for fname, img, is_gif in self.imported_files:
             if fname == filename:
                 layer = None
                 for l in self.model.get("layers", []):
@@ -555,9 +672,19 @@ class ModelEditor(tk.Toplevel):
                         layer = l
                         break
                 if not layer:
-                    layer = {"name": os.path.splitext(fname)[0], "file": fname, "blink": False, "visible": True, "x": 0, "y": 0, "group": None}
+                    layer = {
+                        "name": os.path.splitext(fname)[0], 
+                        "file": fname, 
+                        "blink": False, 
+                        "visible": True, 
+                        "x": 0, 
+                        "y": 0, 
+                        "group": None,
+                        "is_gif": is_gif
+                    }
                     self.model.setdefault("layers", []).append(layer)
                 ci = CanvasItem(layer, img)
+                ci.is_gif = is_gif
                 self.items.append(ci)
                 self.refresh_items_list()
                 self.redraw_canvas()
@@ -570,6 +697,28 @@ class ModelEditor(tk.Toplevel):
             for l in self.model.get("layers", []):
                 if l.get("file") == filename:
                     l["_selected"] = False
+            self.refresh_items_list()
+            self.redraw_canvas()
+            
+    def delete_file(self, filename):
+        """Delete file from model and disk"""
+        if messagebox.askyesno("Delete File", f"Delete {filename} permanently?"):
+            # Remove from canvas
+            self.remove_from_canvas_by_file(filename)
+            
+            # Remove from imported files
+            self.imported_files = [f for f in self.imported_files if f[0] != filename]
+            
+            # Delete physical file
+            if self.model_dir:
+                file_path = os.path.join(self.model_dir, filename)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            
+            # Remove from model layers
+            self.model["layers"] = [l for l in self.model["layers"] if l.get("file") != filename]
+            
+            self.refresh_import_list()
             self.refresh_items_list()
             self.redraw_canvas()
 
@@ -589,7 +738,6 @@ class ModelEditor(tk.Toplevel):
             self.x_entry.delete(0, "end")
             self.y_entry.delete(0, "end")
             self.visible_var.set(True)
-            self.blink_var.set(False)
             self.redraw_canvas()
             return
 
@@ -610,6 +758,13 @@ class ModelEditor(tk.Toplevel):
                 for child in children:
                     menu.add_command(label=child, command=lambda val=child, v=var: v.set(val))
                 var.set(grp.get("logic", {}).get(s, ""))
+            
+            # Загружаем настройки случайного эффекта
+            self.random_effect_var.set(grp.get("random_effect", False))
+            self.random_min_var.set(grp.get("random_min", 5.0))
+            self.random_max_var.set(grp.get("random_max", 10.0))
+            
+            # Загружаем настройки моргания
             self.blink_freq.set(float(grp.get("blink_freq", 0.0)))
             self.blink_freq_entry.delete(0, "end")
             self.blink_freq_entry.insert(0, str(self.blink_freq.get()))
@@ -619,7 +774,6 @@ class ModelEditor(tk.Toplevel):
             self.x_entry.delete(0, "end")
             self.y_entry.delete(0, "end")
             self.visible_var.set(True)
-            self.blink_var.set(False)
         else:
             self.selected_group = None
             sel_layers = set()
@@ -645,14 +799,12 @@ class ModelEditor(tk.Toplevel):
                     self.y_entry.delete(0, "end")
                     self.y_entry.insert(0, str(first.y))
                     self.visible_var.set(bool(first.visible))
-                    self.blink_var.set(bool(first.layer.get("blink", False)))
                 else:
                     # Clear fields for multiple selection
                     self.name_entry.delete(0, "end")
                     self.x_entry.delete(0, "end")
                     self.y_entry.delete(0, "end")
                     self.visible_var.set(True)
-                    self.blink_var.set(False)
             self.group_label.config(text="(no group)")
             self._clear_group_optionmenus()
         self.redraw_canvas()
@@ -683,14 +835,12 @@ class ModelEditor(tk.Toplevel):
             messagebox.showwarning("Invalid", "X and Y must be integers")
             return
         vis = self.visible_var.get()
-        blink = self.blink_var.get()
         
         if name:
             ci.layer["name"] = name
         ci.x = x
         ci.y = y
         ci.visible = vis
-        ci.layer["blink"] = blink
         
         self.refresh_items_list()
         self.redraw_canvas()
@@ -733,7 +883,15 @@ class ModelEditor(tk.Toplevel):
             messagebox.showwarning("Group", "Group name already exists")
             return
             
-        group = {"name": name, "children": [ci.layer.get("name") for ci in self.current_selection], "logic": {}, "blink_freq": 0.0}
+        group = {
+            "name": name, 
+            "children": [ci.layer.get("name") for ci in self.current_selection], 
+            "logic": {}, 
+            "blink_freq": 0.0,
+            "random_effect": False,
+            "random_min": 5.0,
+            "random_max": 10.0
+        }
         self.model.setdefault("groups", []).append(group)
         for ci in self.current_selection:
             ci.layer["group"] = name
@@ -878,6 +1036,12 @@ class ModelEditor(tk.Toplevel):
                 
         grp["logic"] = logic
         grp["blink_freq"] = float(self.blink_freq.get())
+        
+        # Сохраняем настройки случайного эффекта
+        grp["random_effect"] = self.random_effect_var.get()
+        grp["random_min"] = self.random_min_var.get()
+        grp["random_max"] = self.random_max_var.get()
+        
         messagebox.showinfo("Group logic", f"Saved logic for group {gname}")
 
     # ------------- blink preview -------------
@@ -947,15 +1111,16 @@ class ModelEditor(tk.Toplevel):
             return
             
         logic = group.get("logic", {})
-        normal_layer = logic.get("normal") or logic.get("whisper") or logic.get("silent")
+        # Используем состояние "open" если оно определено, иначе "normal"
+        open_layer = logic.get("open") or logic.get("normal") or logic.get("whisper") or logic.get("silent")
         
         for ci in self.items:
             if ci.layer.get("group") == gname:
                 # Скрываем все слои группы
                 ci.visible = False
                 
-                # Показываем только слой для нормального состояния
-                if ci.layer.get("name") == normal_layer:
+                # Показываем только слой для открытого состояния
+                if ci.layer.get("name") == open_layer:
                     ci.visible = True
         
         self.redraw_canvas(0, "none")
@@ -1009,7 +1174,7 @@ class ModelEditor(tk.Toplevel):
                                 "x": int(ci.x),
                                 "y": int(ci.y),
                                 "visible": bool(ci.visible),
-                                "blink": bool(ci.layer.get("blink", False)),
+                                "is_gif": ci.is_gif,
                                 "group": ci.layer.get("group", None)
                             })
                         with open(os.path.join(self.model_dir, "model.json"), "w", encoding="utf-8") as f:
@@ -1025,11 +1190,12 @@ class ModelEditor(tk.Toplevel):
             elif mode == "simulate":
                 t = time.time()
                 level = (math.sin(t * 2) + 1) / 2
+                # Apply sensitivity for simulation
+                level = level * self.mic_sensitivity
+                self.level_bar["value"] = level * 100
             else:  # none
                 level = 0.0
                 
-            self.level_bar["value"] = level * 100
-            
             # Update preview
             self.redraw_canvas(level, mode)
         except Exception as e:
