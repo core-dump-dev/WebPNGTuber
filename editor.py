@@ -120,9 +120,27 @@ class ModelEditor(tk.Toplevel):
         self.blink_preview_running = False
 
         # ---- UI layout ----
-        left = ttk.Frame(self, width=260)
-        left.pack(side="left", fill="y", padx=6, pady=6)
+        # Главный контейнер с сеткой
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        
+        # Настройка сетки
+        main_frame.columnconfigure(1, weight=1)  # Центральная колонка растягивается
+        main_frame.rowconfigure(0, weight=1)     # Единственная строка растягивается
+        
+        # Левая панель (уменьшена)
+        left = ttk.Frame(main_frame, width=200)
+        left.grid(row=0, column=0, sticky="ns", padx=(0, 6), pady=0)
+        
+        # Центральная панель
+        center = ttk.Frame(main_frame)
+        center.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
+        
+        # Правая панель (уменьшена)
+        right = ttk.Frame(main_frame, width=300)
+        right.grid(row=0, column=2, sticky="ns", padx=(6, 0), pady=0)
 
+        # ---- Левая панель ----
         ttk.Button(left, text="New Model", command=self.new_model).pack(fill="x", pady=2)
         ttk.Button(left, text="Load Model", command=self.load_model).pack(fill="x", pady=2)
         ttk.Button(left, text="Save Model", command=self.save_model).pack(fill="x", pady=2)
@@ -142,7 +160,7 @@ class ModelEditor(tk.Toplevel):
                        value="none", command=self.update_test_mode).pack(anchor="w")
         
         # Audio level indicator
-        self.level_bar = ttk.Progressbar(test_frame, length=200, mode="determinate")
+        self.level_bar = ttk.Progressbar(test_frame, length=180, mode="determinate")
         self.level_bar.pack(fill="x", pady=5)
         
         # Start audio processor with current settings
@@ -153,21 +171,23 @@ class ModelEditor(tk.Toplevel):
         self.audio_processor.noise_gate_threshold = 0.01 if self.mic_noise_gate_enabled else 0.0
 
         ttk.Label(left, text="Imported Images:").pack(anchor="w", pady=(8, 0))
-        self.import_list_frame = ttk.Frame(left)
-        self.import_list_frame.pack(fill="both", expand=True)
-
-        self.import_canvas = tk.Canvas(self.import_list_frame, width=240, height=320)
-        self.import_vscroll = ttk.Scrollbar(self.import_list_frame, orient="vertical", command=self.import_canvas.yview)
+        
+        # Контейнер для списка импортированных изображений с прокруткой
+        import_frame = ttk.Frame(left)
+        import_frame.pack(fill="both", expand=True)
+        
+        self.import_canvas = tk.Canvas(import_frame, width=180, height=250)
+        self.import_vscroll = ttk.Scrollbar(import_frame, orient="vertical", command=self.import_canvas.yview)
         self.import_canvas.configure(yscrollcommand=self.import_vscroll.set)
+        
         self.import_vscroll.pack(side="right", fill="y")
         self.import_canvas.pack(side="left", fill="both", expand=True)
+        
         self.import_inner = ttk.Frame(self.import_canvas)
         self.import_canvas.create_window((0, 0), window=self.import_inner, anchor="nw")
         self.import_inner.bind("<Configure>", lambda e: self.import_canvas.configure(scrollregion=self.import_canvas.bbox("all")))
 
-        # Center: canvas preview
-        center = ttk.Frame(self)
-        center.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+        # ---- Центральная панель ----
         preview_frame = ttk.LabelFrame(center, text="Canvas Preview")
         preview_frame.pack(fill="both", expand=True)
         self.canvas_w = 700
@@ -178,57 +198,92 @@ class ModelEditor(tk.Toplevel):
         self.canvas.bind("<B1-Motion>", self.on_canvas_mouse_move)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_mouse_up)
 
-        # Right: items & properties
-        right = ttk.Frame(self, width=340)
-        right.pack(side="right", fill="y", padx=6, pady=6)
-
-        items_frame = ttk.LabelFrame(right, text="Canvas Items (top → bottom)")
-        items_frame.pack(fill="both", expand=True)
-        self.items_listbox = tk.Listbox(items_frame, selectmode="extended", height=20)
-        self.items_listbox.pack(fill="both", expand=True)
+        # ---- Правая панель ----
+        # Вкладки для лучшей организации
+        notebook = ttk.Notebook(right)
+        notebook.pack(fill="both", expand=True)
+        
+        # Вкладка 1: Управление элементами
+        items_tab = ttk.Frame(notebook)
+        notebook.add(items_tab, text="Items")
+        
+        # Вкладка 2: Логика групп
+        groups_tab = ttk.Frame(notebook)
+        notebook.add(groups_tab, text="Group Logic")
+        
+        # ---- Вкладка "Items" ----
+        items_frame = ttk.LabelFrame(items_tab, text="Canvas Items")
+        items_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Список элементов с прокруткой
+        items_list_frame = ttk.Frame(items_frame)
+        items_list_frame.pack(fill="both", expand=True, pady=(0, 5))
+        
+        self.items_listbox = tk.Listbox(items_list_frame, selectmode="extended", height=15)
+        scrollbar = ttk.Scrollbar(items_list_frame, orient="vertical", command=self.items_listbox.yview)
+        self.items_listbox.configure(yscrollcommand=scrollbar.set)
+        
+        scrollbar.pack(side="right", fill="y")
+        self.items_listbox.pack(side="left", fill="both", expand=True)
         self.items_listbox.bind("<<ListboxSelect>>", self.on_list_select)
 
-        btns = ttk.Frame(items_frame)
-        btns.pack(fill="x")
-        ttk.Button(btns, text="Bring Forward", command=self.bring_forward).pack(side="left", padx=2, pady=4)
-        ttk.Button(btns, text="Send Backward", command=self.send_backward).pack(side="left", padx=2, pady=4)
-        ttk.Button(btns, text="Group Selected", command=self.group_selected).pack(side="left", padx=2, pady=4)
-        ttk.Button(btns, text="Ungroup Selected", command=self.ungroup_selected).pack(side="left", padx=2, pady=4)
+        # Кнопки управления элементами
+        btns_frame = ttk.Frame(items_frame)
+        btns_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Button(btns_frame, text="↑", width=3, command=self.bring_forward).pack(side="left", padx=2)
+        ttk.Button(btns_frame, text="↓", width=3, command=self.send_backward).pack(side="left", padx=2)
+        ttk.Button(btns_frame, text="Group", command=self.group_selected).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(btns_frame, text="Ungroup", command=self.ungroup_selected).pack(side="left", padx=2, fill="x", expand=True)
 
-        props = ttk.LabelFrame(right, text="Selected Properties")
-        props.pack(fill="x", pady=6)
-        ttk.Label(props, text="Name").pack(anchor="w")
-        self.name_entry = ttk.Entry(props)
-        self.name_entry.pack(fill="x")
-        ttk.Label(props, text="X").pack(anchor="w")
-        self.x_entry = ttk.Entry(props)
-        self.x_entry.pack(fill="x")
-        ttk.Label(props, text="Y").pack(anchor="w")
-        self.y_entry = ttk.Entry(props)
-        self.y_entry.pack(fill="x")
+        # Свойства выбранного элемента
+        props = ttk.LabelFrame(items_frame, text="Selected Properties")
+        props.pack(fill="x", pady=(0, 5))
         
-        # Добавлены поля для масштабирования и поворота
-        ttk.Label(props, text="Scale (0.1-5.0)").pack(anchor="w")
-        self.scale_entry = ttk.Entry(props)
-        self.scale_entry.pack(fill="x")
+        grid_frame = ttk.Frame(props)
+        grid_frame.pack(fill="x", padx=5, pady=5)
         
-        ttk.Label(props, text="Rotation (0-360)").pack(anchor="w")
-        self.rotation_entry = ttk.Entry(props)
-        self.rotation_entry.pack(fill="x")
+        ttk.Label(grid_frame, text="Name:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        self.name_entry = ttk.Entry(grid_frame)
+        self.name_entry.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
+        
+        ttk.Label(grid_frame, text="X:").grid(row=1, column=0, sticky="w", padx=2, pady=2)
+        self.x_entry = ttk.Entry(grid_frame)
+        self.x_entry.grid(row=1, column=1, sticky="ew", padx=2, pady=2)
+        
+        ttk.Label(grid_frame, text="Y:").grid(row=2, column=0, sticky="w", padx=2, pady=2)
+        self.y_entry = ttk.Entry(grid_frame)
+        self.y_entry.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
+        
+        ttk.Label(grid_frame, text="Scale:").grid(row=3, column=0, sticky="w", padx=2, pady=2)
+        self.scale_entry = ttk.Entry(grid_frame)
+        self.scale_entry.grid(row=3, column=1, sticky="ew", padx=2, pady=2)
+        
+        ttk.Label(grid_frame, text="Rotation:").grid(row=4, column=0, sticky="w", padx=2, pady=2)
+        self.rotation_entry = ttk.Entry(grid_frame)
+        self.rotation_entry.grid(row=4, column=1, sticky="ew", padx=2, pady=2)
         
         self.visible_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(props, text="Visible", variable=self.visible_var).pack(anchor="w")
+        ttk.Checkbutton(props, text="Visible", variable=self.visible_var).pack(anchor="w", padx=5, pady=(0, 5))
         
-        ttk.Button(props, text="Apply to Selection", command=self.apply_props).pack(fill="x", pady=4)
+        ttk.Button(props, text="Apply to Selection", command=self.apply_props).pack(fill="x", padx=5, pady=5)
 
-        # Group logic editor
-        self.group_logic_frame = ttk.LabelFrame(right, text="Group Logic (select a group)")
-        self.group_logic_frame.pack(fill="x", pady=6)
-        ttk.Label(self.group_logic_frame, text="Selected Group:").pack(anchor="w")
-        self.group_label = ttk.Label(self.group_logic_frame, text="(no group)")
-        self.group_label.pack(anchor="w")
+        # ---- Вкладка "Group Logic" ----
+        groups_frame = ttk.LabelFrame(groups_tab, text="Group Logic")
+        groups_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Выбранная группа
+        group_info_frame = ttk.Frame(groups_frame)
+        group_info_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Label(group_info_frame, text="Selected Group:").pack(side="left", padx=(0, 5))
+        self.group_label = ttk.Label(group_info_frame, text="(no group)", font=("Arial", 9, "bold"))
+        self.group_label.pack(side="left")
 
-        ttk.Label(self.group_logic_frame, text="Map state → child layer").pack(anchor="w", pady=(6, 0))
+        # Настройки логики
+        logic_frame = ttk.LabelFrame(groups_frame, text="Map State → Child Layer")
+        logic_frame.pack(fill="x", pady=(0, 10))
+        
         self.state_vars = {
             "silent": tk.StringVar(value=""),
             "whisper": tk.StringVar(value=""),
@@ -237,47 +292,63 @@ class ModelEditor(tk.Toplevel):
             "blink": tk.StringVar(value=""),
             "open": tk.StringVar(value="")
         }
-        self.state_optionmenus = {}
-        for s in ("silent", "whisper", "normal", "shout", "blink", "open"):
-            frame = ttk.Frame(self.group_logic_frame)
-            frame.pack(fill="x", pady=2)
-            ttk.Label(frame, text=s.capitalize(), width=10).pack(side="left")
-            om = ttk.OptionMenu(frame, self.state_vars[s], "")
+        
+        # Сетка для настроек состояний
+        for i, s in enumerate(("silent", "whisper", "normal", "shout", "blink", "open")):
+            row = ttk.Frame(logic_frame)
+            row.pack(fill="x", padx=5, pady=2)
+            
+            ttk.Label(row, text=s.capitalize() + ":", width=8).pack(side="left")
+            
+            # Создаем OptionMenu с пустым значением по умолчанию
+            om = ttk.OptionMenu(row, self.state_vars[s], "")
             om.pack(side="left", fill="x", expand=True)
-            self.state_optionmenus[s] = om
-
-        # Random effect settings
-        ttk.Separator(self.group_logic_frame).pack(fill="x", pady=5)
+            
+            # Сохраняем ссылку на меню для последующего обновления
+            setattr(self, f"{s}_menu", om)
+        
+        # Настройки случайного эффекта
+        random_frame = ttk.LabelFrame(groups_frame, text="Random Effect")
+        random_frame.pack(fill="x", pady=(0, 10))
+        
         self.random_effect_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(self.group_logic_frame, text="Random State Switching", 
-                        variable=self.random_effect_var).pack(anchor="w", pady=(5, 0))
+        ttk.Checkbutton(random_frame, text="Enable Random State Switching", 
+                        variable=self.random_effect_var).pack(anchor="w", padx=5, pady=2)
         
-        random_frame = ttk.Frame(self.group_logic_frame)
-        random_frame.pack(fill="x", pady=2)
-        ttk.Label(random_frame, text="Interval:").pack(side="left")
+        interval_frame = ttk.Frame(random_frame)
+        interval_frame.pack(fill="x", padx=5, pady=2)
+        
+        ttk.Label(interval_frame, text="Interval:").pack(side="left")
         self.random_min_var = tk.DoubleVar(value=5.0)
-        ttk.Entry(random_frame, textvariable=self.random_min_var, width=5).pack(side="left", padx=2)
-        ttk.Label(random_frame, text="to").pack(side="left")
+        ttk.Entry(interval_frame, textvariable=self.random_min_var, width=5).pack(side="left", padx=2)
+        ttk.Label(interval_frame, text="to").pack(side="left")
         self.random_max_var = tk.DoubleVar(value=10.0)
-        ttk.Entry(random_frame, textvariable=self.random_max_var, width=5).pack(side="left", padx=2)
-        ttk.Label(random_frame, text="sec").pack(side="left")
+        ttk.Entry(interval_frame, textvariable=self.random_max_var, width=5).pack(side="left", padx=2)
+        ttk.Label(interval_frame, text="sec").pack(side="left")
 
-        # Blink settings
-        ttk.Separator(self.group_logic_frame).pack(fill="x", pady=5)
-        ttk.Label(self.group_logic_frame, text="Blink frequency (sec, 0=off)").pack(anchor="w", pady=(5, 0))
-        freq_frame = ttk.Frame(self.group_logic_frame)
-        freq_frame.pack(fill="x")
+        # Настройки моргания
+        blink_frame = ttk.LabelFrame(groups_frame, text="Blink Settings")
+        blink_frame.pack(fill="x", pady=(0, 10))
         
+        freq_frame = ttk.Frame(blink_frame)
+        freq_frame.pack(fill="x", padx=5, pady=2)
+        
+        ttk.Label(freq_frame, text="Frequency:").pack(side="left")
         self.blink_freq = tk.DoubleVar(value=0.0)
-        self.blink_freq_entry = ttk.Entry(freq_frame, width=8)
-        self.blink_freq_entry.pack(side="left", padx=5)
+        self.blink_freq_entry = ttk.Entry(freq_frame, width=6)
+        self.blink_freq_entry.pack(side="left", padx=2)
         self.blink_freq_entry.insert(0, "0.0")
         self.blink_freq_entry.bind("<Return>", self.update_blink_freq_from_entry)
+        ttk.Label(freq_frame, text="sec (0=off)").pack(side="left", padx=(5, 0))
         
-        ttk.Button(freq_frame, text="Preview", command=self.show_blink_preview).pack(side="left", padx=5)
-        ttk.Button(freq_frame, text="Stop", command=self.stop_blink_preview).pack(side="left", padx=5)
+        btn_frame = ttk.Frame(blink_frame)
+        btn_frame.pack(fill="x", padx=5, pady=(0, 5))
         
-        ttk.Button(self.group_logic_frame, text="Apply Group Logic", command=self.apply_group_logic).pack(fill="x", pady=6)
+        ttk.Button(btn_frame, text="Preview", width=8, command=self.show_blink_preview).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="Stop", width=8, command=self.stop_blink_preview).pack(side="left", padx=2)
+
+        # Кнопка применения
+        ttk.Button(groups_frame, text="Apply Group Logic", command=self.apply_group_logic).pack(fill="x", pady=10)
 
         # Start preview loop
         self.after(100, self._preview_loop)
@@ -616,7 +687,7 @@ class ModelEditor(tk.Toplevel):
             else:
                 icon = "PNG"
                 
-            ttk.Label(row, text=f"{icon}: {fname}", width=20).pack(side="left")
+            ttk.Label(row, text=f"{icon}: {fname}", width=15).pack(side="left")
             ttk.Button(row, text="+", width=2, command=lambda f=fname: self.add_to_canvas(f)).pack(side="left", padx=2)
             ttk.Button(row, text="-", width=2, command=lambda f=fname: self.remove_from_canvas_by_file(f)).pack(side="left", padx=2)
             # Кнопка корзины для удаления файла
@@ -814,7 +885,6 @@ class ModelEditor(tk.Toplevel):
                 c.layer["_selected"] = False
             self.selected_group = None
             self.group_label.config(text="(no group)")
-            self._clear_group_optionmenus()
             # Clear property fields
             self.name_entry.delete(0, "end")
             self.x_entry.delete(0, "end")
@@ -835,20 +905,34 @@ class ModelEditor(tk.Toplevel):
                 ci.layer["_selected"] = (ci.layer.get("group") == gname)
             self.group_label.config(text=gname)
             children = [ci.layer.get("name") for ci in self.items if ci.layer.get("group") == gname]
-            for s, var in self.state_vars.items():
-                menu = self.state_optionmenus[s]["menu"]
-                menu.delete(0, "end")
-                menu.add_command(label="", command=lambda v=var: v.set(""))
-                for child in children:
-                    menu.add_command(label=child, command=lambda val=child, v=var: v.set(val))
-                var.set(grp.get("logic", {}).get(s, ""))
             
-            # Загружаем настройки случайного эффекта
+            # ВАЖНОЕ ИСПРАВЛЕНИЕ: Обновляем выпадающие меню для всех состояний
+            for state in ("silent", "whisper", "normal", "shout", "blink", "open"):
+                # Получаем виджет OptionMenu для этого состояния
+                om = getattr(self, f"{state}_menu")
+                menu = om["menu"]
+                
+                # Очищаем текущее меню
+                menu.delete(0, "end")
+                
+                # Добавляем пустой элемент
+                menu.add_command(label="", command=lambda v=self.state_vars[state]: v.set(""))
+                
+                # Добавляем все дочерние элементы группы
+                for child in children:
+                    menu.add_command(
+                        label=child,
+                        command=lambda val=child, v=self.state_vars[state]: v.set(val)
+                    )
+                
+                # Восстанавливаем сохраненное значение
+                saved_value = grp.get("logic", {}).get(state, "")
+                self.state_vars[state].set(saved_value)
+            
+            # Обновляем остальные настройки группы
             self.random_effect_var.set(grp.get("random_effect", False))
             self.random_min_var.set(grp.get("random_min", 5.0))
             self.random_max_var.set(grp.get("random_max", 10.0))
-            
-            # Загружаем настройки моргания
             self.blink_freq.set(float(grp.get("blink_freq", 0.0)))
             self.blink_freq_entry.delete(0, "end")
             self.blink_freq_entry.insert(0, str(self.blink_freq.get()))
@@ -898,15 +982,7 @@ class ModelEditor(tk.Toplevel):
                     self.rotation_entry.delete(0, "end")
                     self.visible_var.set(True)
             self.group_label.config(text="(no group)")
-            self._clear_group_optionmenus()
         self.redraw_canvas()
-
-    def _clear_group_optionmenus(self):
-        for s, var in self.state_vars.items():
-            var.set("")
-            menu = self.state_optionmenus[s]["menu"]
-            menu.delete(0, "end")
-            menu.add_command(label="", command=lambda v=var: v.set(""))
 
     # ------------- apply properties -------------
     def apply_props(self):
