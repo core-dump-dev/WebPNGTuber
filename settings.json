@@ -16,7 +16,7 @@
     "bounce": false,
     "pulse": false,
     "blink": true,
-    "random_effect": false
+    "random_effect": true
   },
   "sensitivity": 1.567632850241546,
   "noise_gate_enabled": true,

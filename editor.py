@@ -13,9 +13,9 @@ MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 class CanvasItem:
-    def __init__(self, layer, image):
+    def __init__(self, layer, image_path):
         self.layer = layer
-        self.original_image = image
+        self.image_path = image_path
         self.is_gif = bool(layer.get("is_gif", False))
         self.scale = float(layer.get("scale", 1.0))
         self.rotation = int(layer.get("rotation", 0))
@@ -48,8 +48,7 @@ class CanvasItem:
         """Обновляет изображение после изменения трансформаций"""
         if self.is_gif:
             try:
-                gif_path = os.path.join(self.layer.get("path", ""), self.layer.get("file", ""))
-                with Image.open(gif_path) as gif:
+                with Image.open(self.image_path) as gif:
                     self.gif_frames = []
                     self.frame_durations = []
                     
@@ -68,9 +67,11 @@ class CanvasItem:
                 print(f"Error loading GIF frames: {e}")
                 self.is_gif = False
                 # Если не удалось загрузить GIF, используем статическое изображение
-                self.image = self.apply_transformations(self.original_image)
+                img = Image.open(self.image_path).convert("RGBA")
+                self.image = self.apply_transformations(img)
         else:
-            self.image = self.apply_transformations(self.original_image)
+            img = Image.open(self.image_path).convert("RGBA")
+            self.image = self.apply_transformations(img)
         
         # Создаем Tkinter-совместимое изображение
         self.tkimage = ImageTk.PhotoImage(self.get_current_image())
@@ -391,7 +392,7 @@ class ModelEditor(tk.Toplevel):
                     img.seek(0)
                     preview_img = img.copy().convert("RGBA")
                 
-                ci = CanvasItem(layer, preview_img)
+                ci = CanvasItem(layer, fp)
                 self.items.append(ci)
             except Exception as e:
                 print("Load image error", e)
@@ -399,7 +400,8 @@ class ModelEditor(tk.Toplevel):
         for f in os.listdir(self.model_dir):
             if f.lower().endswith((".png", ".gif")):
                 try:
-                    with Image.open(os.path.join(self.model_dir, f)) as img:
+                    fp = os.path.join(self.model_dir, f)
+                    with Image.open(fp) as img:
                         is_gif = img.format == "GIF" and img.is_animated
                         img.seek(0)
                         preview_img = img.copy().convert("RGBA")
@@ -429,7 +431,13 @@ class ModelEditor(tk.Toplevel):
                     fname = f"layer_{idx}.png"
                     layer["file"] = fname
                 # Сохраняем оригинальное изображение (без трансформаций)
-                ci.original_image.save(os.path.join(self.model_dir, fname))
+                if ci.is_gif:
+                    # Для GIF просто копируем исходный файл
+                    shutil.copy2(ci.image_path, os.path.join(self.model_dir, fname))
+                else:
+                    # Для PNG сохраняем как есть
+                    img = Image.open(ci.image_path).convert("RGBA")
+                    img.save(os.path.join(self.model_dir, fname))
         
         # Сохраняем структуру модели
         self.model["layers"] = []
@@ -555,20 +563,24 @@ class ModelEditor(tk.Toplevel):
             self.model_dir = tmp
         for p in files:
             try:
-                img = Image.open(p)
-                is_gif = img.format == "GIF" and img.is_animated
-                
-                # Для GIF сохраняем первый кадр как превью
-                if is_gif:
-                    img.seek(0)
-                    preview_img = img.convert("RGBA")
-                else:
-                    preview_img = img.convert("RGBA")
-                
+                # Определяем тип файла
                 base = os.path.basename(p)
                 dest = os.path.join(self.model_dir, base)
+                
+                # Копируем файл в папку модели
                 if os.path.abspath(p) != os.path.abspath(dest):
-                    img.save(dest)
+                    shutil.copy2(p, dest)
+                
+                # Проверяем, является ли файл анимированным GIF
+                is_gif = False
+                if base.lower().endswith('.gif'):
+                    with Image.open(p) as img:
+                        is_gif = img.is_animated
+                
+                # Создаем превью
+                with Image.open(p) as img:
+                    img.seek(0)
+                    preview_img = img.copy().convert("RGBA")
                 
                 self.imported_files.append((base, preview_img, is_gif))
                 layer = {
@@ -753,7 +765,8 @@ class ModelEditor(tk.Toplevel):
                         "is_gif": is_gif
                     }
                     self.model.setdefault("layers", []).append(layer)
-                ci = CanvasItem(layer, img)
+                image_path = os.path.join(self.model_dir, fname)
+                ci = CanvasItem(layer, image_path)
                 self.items.append(ci)
                 self.refresh_items_list()
                 self.redraw_canvas()
