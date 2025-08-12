@@ -10,17 +10,22 @@ class AudioProcessor:
         self._thread = None
         self.device = device
         self.noise_gate_threshold = 0.01
-        self.use_sounddevice = True
+        self.device_index = None  # Для хранения индекса устройства
+
+        # Получаем индекс устройства по имени
+        if device and device != "Default":
+            devices = sd.query_devices()
+            for i, dev in enumerate(devices):
+                if dev['name'] == device and dev['max_input_channels'] > 0:
+                    self.device_index = i
+                    break
 
     def start(self):
         """Start audio processing"""
         if self.running:
             return
         self.running = True
-        if self.use_sounddevice:
-            self._thread = threading.Thread(target=self._capture_loop, daemon=True)
-        else:
-            self._thread = threading.Thread(target=self._simulate_loop, daemon=True)
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
 
     def stop(self):
@@ -56,12 +61,16 @@ class AudioProcessor:
             q.put(indata.copy())
         
         try:
+            device_params = {}
+            if self.device_index is not None:
+                device_params['device'] = self.device_index
+                
             with sd.InputStream(
                 channels=1, 
                 callback=callback, 
                 samplerate=44100, 
                 blocksize=512,  # Reduced block size for lower latency
-                device=self.device
+                **device_params
             ):
                 while self.running:
                     try:
@@ -83,5 +92,5 @@ class AudioProcessor:
                             pass
         except Exception as e:
             print("Audio capture error:", e)
-            self.use_sounddevice = False
+            # Fallback на симуляцию при ошибке
             self._simulate_loop()

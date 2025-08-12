@@ -222,13 +222,17 @@ class App:
         """Get list of available audio input devices"""
         try:
             devices = sd.query_devices()
-            input_devices = []
+            input_devices = ["Default"]  # Всегда добавляем Default
+            
             for i, dev in enumerate(devices):
-                # dev is a dict-like object
-                if isinstance(dev, dict) and dev.get('max_input_channels', 0) > 0:
-                    input_devices.append(dev.get('name'))
-            if not input_devices:
-                return ["Default"]
+                # Фильтруем только реальные микрофоны (игнорируем виртуальные)
+                if dev.get('max_input_channels', 0) > 0:
+                    name = dev.get('name', '')
+                    # Исключаем виртуальные устройства по ключевым словам
+                    if "CABLE" in name or "VB-Audio" in name or "Voicemee" in name or "virtual" in name.lower():
+                        continue
+                    input_devices.append(name)
+            
             return input_devices
         except Exception:
             return ["Default"]
@@ -476,6 +480,18 @@ class App:
             self.refresh_slot_buttons()
             self.root.attributes('-disabled', False)
             self.root.focus_set()
+            
+            # Восстанавливаем аудио обработчик после закрытия редактора
+            try:
+                self.audio.stop()
+            except:
+                pass
+            self.audio = AudioProcessor(
+                callback=self.on_audio_level,
+                device=self.device_var.get()
+            )
+            self.audio.noise_gate_threshold = 0.01 if self.noise_gate_enabled.get() else 0.0
+            self.audio.start()
         except Exception as e:
             import traceback
             tb = traceback.format_exc()

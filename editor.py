@@ -15,31 +15,71 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 class CanvasItem:
     def __init__(self, layer, image):
         self.layer = layer
-        self.image = image
-        self.tkimage = ImageTk.PhotoImage(self.image)
+        self.original_image = image
+        self.is_gif = bool(layer.get("is_gif", False))
+        self.scale = float(layer.get("scale", 1.0))
+        self.rotation = int(layer.get("rotation", 0))
         self.x = int(layer.get("x", 0))
         self.y = int(layer.get("y", 0))
         self.visible = bool(layer.get("visible", True))
-        self.is_gif = bool(layer.get("is_gif", False))
+        
+        # Инициализация атрибутов для GIF
         self.gif_frames = []
         self.current_frame = 0
         self.last_frame_time = 0
+        self.frame_durations = []
         
-        # Если это GIF, загружаем все кадры
+        # Загрузка изображения с трансформациями
+        self.image = None
+        self.tkimage = None
+        self.update_image()
+
+    def apply_transformations(self, img):
+        """Применяет масштаб и поворот к изображению"""
+        if self.scale != 1.0:
+            new_width = int(img.width * self.scale)
+            new_height = int(img.height * self.scale)
+            img = img.resize((new_width, new_height), Image.LANCZOS)
+        if self.rotation != 0:
+            img = img.rotate(self.rotation, expand=True)
+        return img
+
+    def update_image(self):
+        """Обновляет изображение после изменения трансформаций"""
         if self.is_gif:
             try:
-                with Image.open(os.path.join(self.layer.get("path", ""), self.layer.get("file", ""))) as gif:
-                    for frame in ImageSequence.Iterator(gif):
-                        self.gif_frames.append(frame.copy().convert("RGBA"))
+                gif_path = os.path.join(self.layer.get("path", ""), self.layer.get("file", ""))
+                with Image.open(gif_path) as gif:
+                    self.gif_frames = []
+                    self.frame_durations = []
+                    
+                    for frame in range(gif.n_frames):
+                        gif.seek(frame)
+                        frame_img = gif.copy().convert("RGBA")
+                        frame_img = self.apply_transformations(frame_img)
+                        self.gif_frames.append(frame_img)
+                        
+                        try:
+                            duration = gif.info.get('duration', 100) / 1000.0
+                            self.frame_durations.append(duration)
+                        except:
+                            self.frame_durations.append(0.1)
             except Exception as e:
                 print(f"Error loading GIF frames: {e}")
                 self.is_gif = False
+                # Если не удалось загрузить GIF, используем статическое изображение
+                self.image = self.apply_transformations(self.original_image)
+        else:
+            self.image = self.apply_transformations(self.original_image)
+        
+        # Создаем Tkinter-совместимое изображение
+        self.tkimage = ImageTk.PhotoImage(self.get_current_image())
 
     def get_current_image(self):
-        """Get current image, handling GIF animation if needed"""
+        """Возвращает текущий кадр (для GIF) или изображение"""
         if self.is_gif and self.gif_frames:
             now = time.time()
-            if now - self.last_frame_time > 0.1:  # 10 FPS для анимации
+            if now - self.last_frame_time > self.frame_durations[self.current_frame]:
                 self.current_frame = (self.current_frame + 1) % len(self.gif_frames)
                 self.last_frame_time = now
             return self.gif_frames[self.current_frame]
@@ -165,9 +205,18 @@ class ModelEditor(tk.Toplevel):
         ttk.Label(props, text="Y").pack(anchor="w")
         self.y_entry = ttk.Entry(props)
         self.y_entry.pack(fill="x")
+        
+        # Добавлены поля для масштабирования и поворота
+        ttk.Label(props, text="Scale (0.1-5.0)").pack(anchor="w")
+        self.scale_entry = ttk.Entry(props)
+        self.scale_entry.pack(fill="x")
+        
+        ttk.Label(props, text="Rotation (0-360)").pack(anchor="w")
+        self.rotation_entry = ttk.Entry(props)
+        self.rotation_entry.pack(fill="x")
+        
         self.visible_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(props, text="Visible", variable=self.visible_var).pack(anchor="w")
-        # Убрали чекбокс Blink из свойств элемента
         
         ttk.Button(props, text="Apply to Selection", command=self.apply_props).pack(fill="x", pady=4)
 
@@ -185,7 +234,7 @@ class ModelEditor(tk.Toplevel):
             "normal": tk.StringVar(value=""),
             "shout": tk.StringVar(value=""),
             "blink": tk.StringVar(value=""),
-            "open": tk.StringVar(value="")  # Добавили состояние "open"
+            "open": tk.StringVar(value="")
         }
         self.state_optionmenus = {}
         for s in ("silent", "whisper", "normal", "shout", "blink", "open"):
@@ -252,7 +301,17 @@ class ModelEditor(tk.Toplevel):
         """Update test mode based on selection"""
         mode = self.test_mode_var.get()
         if mode == "microphone":
-            self.audio_processor.start()
+            try:
+                # Перезапускаем процессор с актуальными настройками
+                self.audio_processor.stop()
+                self.audio_processor = AudioProcessor(
+                    callback=self.on_audio_level,
+                    device=self.mic_device
+                )
+                self.audio_processor.noise_gate_threshold = 0.01 if self.mic_noise_gate_enabled else 0.0
+                self.audio_processor.start()
+            except Exception as e:
+                print("Error restarting audio processor:", e)
         else:
             self.audio_processor.stop()
             if mode == "none":
@@ -322,6 +381,10 @@ class ModelEditor(tk.Toplevel):
             if not os.path.exists(fp):
                 continue
             try:
+                # Убедимся, что путь установлен
+                if "path" not in layer:
+                    layer["path"] = self.model_dir
+                    
                 # Проверяем, является ли файл GIF
                 with Image.open(fp) as img:
                     is_gif = img.format == "GIF" and img.is_animated
@@ -329,10 +392,6 @@ class ModelEditor(tk.Toplevel):
                     preview_img = img.copy().convert("RGBA")
                 
                 ci = CanvasItem(layer, preview_img)
-                ci.x = int(layer.get("x", 0))
-                ci.y = int(layer.get("y", 0))
-                ci.visible = bool(layer.get("visible", True))
-                ci.is_gif = is_gif
                 self.items.append(ci)
             except Exception as e:
                 print("Load image error", e)
@@ -369,7 +428,8 @@ class ModelEditor(tk.Toplevel):
                 if not fname:
                     fname = f"layer_{idx}.png"
                     layer["file"] = fname
-                ci.image.save(os.path.join(self.model_dir, fname))
+                # Сохраняем оригинальное изображение (без трансформаций)
+                ci.original_image.save(os.path.join(self.model_dir, fname))
         
         # Сохраняем структуру модели
         self.model["layers"] = []
@@ -379,6 +439,8 @@ class ModelEditor(tk.Toplevel):
             layer["y"] = int(ci.y)
             layer["visible"] = bool(ci.visible)
             layer["is_gif"] = ci.is_gif
+            layer["scale"] = float(ci.scale)
+            layer["rotation"] = int(ci.rotation)
             self.model["layers"].append(layer)
         
         with open(os.path.join(self.model_dir, "model.json"), "w", encoding="utf-8") as f:
@@ -469,7 +531,7 @@ class ModelEditor(tk.Toplevel):
         for ci in self.items:
             if not ci.visible:
                 continue
-            img = ci.image
+            img = ci.get_current_image()
             px = center_x - img.size[0] // 2 + int(ci.x)
             py = center_y - img.size[1] // 2 + int(ci.y)
             try:
@@ -516,7 +578,9 @@ class ModelEditor(tk.Toplevel):
                     "blink": False, 
                     "visible": True, 
                     "x": 0, 
-                    "y": 0, 
+                    "y": 0,
+                    "scale": 1.0,
+                    "rotation": 0,
                     "group": None,
                     "is_gif": is_gif
                 }
@@ -552,6 +616,8 @@ class ModelEditor(tk.Toplevel):
         for g in groups:
             name = g.get("name", "(group)")
             self.items_listbox.insert("end", f"[Group] {name}")
+        
+        # Добавляем индикатор видимости и информации о группе
         for i, ci in enumerate(reversed(self.items)):
             layer = ci.layer
             name = layer.get("name", f"layer{i}")
@@ -568,7 +634,8 @@ class ModelEditor(tk.Toplevel):
                             state_info = f" @ {grp} {{{state}}}"
                             break
             
-            # Формируем метку
+            # Формируем метку с информацией о видимости
+            visible_flag = "✔" if ci.visible else "✘"
             flags = []
             if layer.get("blink"):
                 flags.append("blink")
@@ -576,7 +643,7 @@ class ModelEditor(tk.Toplevel):
                 flags.append("GIF")
                 
             flag_text = f" ({','.join(flags)})" if flags else ""
-            label = f"{name}{flag_text}{state_info}"
+            label = f"{visible_flag} {name}{flag_text}{state_info}"
             self.items_listbox.insert("end", label)
 
     def redraw_canvas(self, level=0.0, mode="none"):
@@ -591,7 +658,7 @@ class ModelEditor(tk.Toplevel):
                     continue
                 
                 # Для GIF получаем текущий кадр
-                img = ci.get_current_image() if ci.is_gif else ci.image
+                img = ci.get_current_image()
                     
                 px = center_x - img.size[0] // 2 + int(ci.x)
                 py = center_y - img.size[1] // 2 + int(ci.y)
@@ -633,7 +700,7 @@ class ModelEditor(tk.Toplevel):
                             continue
                 
                 # Для GIF получаем текущий кадр
-                img = ci.get_current_image() if ci.is_gif else ci.image
+                img = ci.get_current_image()
                     
                 px = center_x - img.size[0] // 2 + int(ci.x)
                 py = center_y - img.size[1] // 2 + int(ci.y)
@@ -650,14 +717,14 @@ class ModelEditor(tk.Toplevel):
         if self.selected_group:
             for ci in self.items:
                 if ci.layer.get("group") == self.selected_group:
-                    img = ci.image
+                    img = ci.get_current_image()
                     px = center_x - img.size[0] // 2 + int(ci.x)
                     py = center_y - img.size[1] // 2 + int(ci.y)
                     self.canvas.create_rectangle(px, py, px + img.size[0], py + img.size[1], outline="orange", width=2)
         else:
             for ci in self.items:
                 if ci.layer.get("_selected"):
-                    img = ci.image
+                    img = ci.get_current_image()
                     px = center_x - img.size[0] // 2 + int(ci.x)
                     py = center_y - img.size[1] // 2 + int(ci.y)
                     self.canvas.create_rectangle(px, py, px + img.size[0], py + img.size[1], outline="cyan", width=2)
@@ -675,16 +742,18 @@ class ModelEditor(tk.Toplevel):
                     layer = {
                         "name": os.path.splitext(fname)[0], 
                         "file": fname, 
+                        "path": self.model_dir,  # Добавляем путь
                         "blink": False, 
                         "visible": True, 
                         "x": 0, 
-                        "y": 0, 
+                        "y": 0,
+                        "scale": 1.0,
+                        "rotation": 0,
                         "group": None,
                         "is_gif": is_gif
                     }
                     self.model.setdefault("layers", []).append(layer)
                 ci = CanvasItem(layer, img)
-                ci.is_gif = is_gif
                 self.items.append(ci)
                 self.refresh_items_list()
                 self.redraw_canvas()
@@ -737,6 +806,8 @@ class ModelEditor(tk.Toplevel):
             self.name_entry.delete(0, "end")
             self.x_entry.delete(0, "end")
             self.y_entry.delete(0, "end")
+            self.scale_entry.delete(0, "end")
+            self.rotation_entry.delete(0, "end")
             self.visible_var.set(True)
             self.redraw_canvas()
             return
@@ -773,6 +844,8 @@ class ModelEditor(tk.Toplevel):
             self.name_entry.delete(0, "end")
             self.x_entry.delete(0, "end")
             self.y_entry.delete(0, "end")
+            self.scale_entry.delete(0, "end")
+            self.rotation_entry.delete(0, "end")
             self.visible_var.set(True)
         else:
             self.selected_group = None
@@ -798,12 +871,18 @@ class ModelEditor(tk.Toplevel):
                     self.x_entry.insert(0, str(first.x))
                     self.y_entry.delete(0, "end")
                     self.y_entry.insert(0, str(first.y))
+                    self.scale_entry.delete(0, "end")
+                    self.scale_entry.insert(0, str(first.scale))
+                    self.rotation_entry.delete(0, "end")
+                    self.rotation_entry.insert(0, str(first.rotation))
                     self.visible_var.set(bool(first.visible))
                 else:
                     # Clear fields for multiple selection
                     self.name_entry.delete(0, "end")
                     self.x_entry.delete(0, "end")
                     self.y_entry.delete(0, "end")
+                    self.scale_entry.delete(0, "end")
+                    self.rotation_entry.delete(0, "end")
                     self.visible_var.set(True)
             self.group_label.config(text="(no group)")
             self._clear_group_optionmenus()
@@ -831,8 +910,10 @@ class ModelEditor(tk.Toplevel):
         try:
             x = int(self.x_entry.get().strip())
             y = int(self.y_entry.get().strip())
+            scale = float(self.scale_entry.get().strip())
+            rotation = int(self.rotation_entry.get().strip())
         except Exception:
-            messagebox.showwarning("Invalid", "X and Y must be integers")
+            messagebox.showwarning("Invalid", "X and Y must be integers, scale float, rotation integer")
             return
         vis = self.visible_var.get()
         
@@ -841,6 +922,12 @@ class ModelEditor(tk.Toplevel):
         ci.x = x
         ci.y = y
         ci.visible = vis
+        
+        # Apply transformations if changed
+        if scale != ci.scale or rotation != ci.rotation:
+            ci.scale = scale
+            ci.rotation = rotation
+            ci.update_image()
         
         self.refresh_items_list()
         self.redraw_canvas()
@@ -942,7 +1029,7 @@ class ModelEditor(tk.Toplevel):
         center_y = self.canvas_h // 2
         found = None
         for ci in reversed(self.items):
-            img = ci.image
+            img = ci.get_current_image()
             px = center_x - img.size[0] // 2 + int(ci.x)
             py = center_y - img.size[1] // 2 + int(ci.y)
             if px <= mx <= px + img.size[0] and py <= my <= py + img.size[1]:
@@ -1175,6 +1262,8 @@ class ModelEditor(tk.Toplevel):
                                 "y": int(ci.y),
                                 "visible": bool(ci.visible),
                                 "is_gif": ci.is_gif,
+                                "scale": float(ci.scale),
+                                "rotation": int(ci.rotation),
                                 "group": ci.layer.get("group", None)
                             })
                         with open(os.path.join(self.model_dir, "model.json"), "w", encoding="utf-8") as f:
