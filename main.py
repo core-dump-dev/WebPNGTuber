@@ -200,7 +200,10 @@ class App:
         idle_frame.pack(fill="x", padx=8, pady=6)
 
         self.idle_enabled = tk.BooleanVar(value=self.settings.get('idle_enabled', False))
-        ttk.Checkbutton(idle_frame, text="Включить затемнение в idle", variable=self.idle_enabled).pack(anchor="w", padx=5, pady=2)
+        
+        # ДОБАВЛЕНА КОМАНДА ДЛЯ ОБНОВЛЕНИЯ РЕНДЕРЕРА ПРИ ИЗМЕНЕНИИ ГАЛОЧКИ
+        ttk.Checkbutton(idle_frame, text="Включить затемнение в idle", variable=self.idle_enabled,
+                       command=self.update_idle_setting).pack(anchor="w", padx=5, pady=2)
 
         ttk.Label(idle_frame, text="Время до затемнения (сек):").pack(anchor="w", padx=5)
         self.idle_timeout = tk.DoubleVar(value=self.settings.get('idle_timeout', 60.0))
@@ -275,6 +278,12 @@ class App:
         self.renderer.set_effects(effects)
         return effects
 
+    # ДОБАВЛЕН НОВЫЙ МЕТОД ДЛЯ ОБНОВЛЕНИЯ НАСТРОЙКИ IDLE
+    def update_idle_setting(self):
+        """Обновление настройки idle-режима"""
+        enabled = self.idle_enabled.get()
+        self.renderer.set_idle(enabled, self.idle_timeout.get())
+
     def load_settings(self):
         """Загрузка настроек"""
         if os.path.exists(SETTINGS_FILE):
@@ -284,7 +293,7 @@ class App:
             except:
                 pass
         return {}
-
+    
     def save_settings(self):
         """Сохранение настроек"""
         settings = {

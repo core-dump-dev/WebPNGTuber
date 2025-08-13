@@ -57,6 +57,15 @@ class Renderer:
         self.idle_timeout = timeout
         # Сбросим таймер при изменении настроек
         self.last_activity_time = time.time()
+        
+        # Принудительно обновим состояние активности
+        if enabled:
+            # Если включен, сбрасываем таймер
+            self.last_activity_time = time.time()
+        else:
+            # Если выключен, сбрасываем состояние бездействия
+            # Это нужно, чтобы изображение сразу вернулось к нормальному виду
+            pass
 
     def set_noise_gate(self, threshold):
         """Установка порога подавления шума"""
@@ -327,8 +336,8 @@ class Renderer:
                     
                     image = orig_image
             
-            # Применяем idle-режим (затемнение) если нужно
-            if self.idle_enabled:
+            # ПРИМЕНЕНИЕ IDLE-РЕЖИМА ТОЛЬКО ЕСЛИ ОН ВКЛЮЧЕН
+            if self.idle_enabled:  # <-- ДОБАВЛЕНО ПРОВЕРКА СОСТОЯНИЯ
                 current_time = time.time()
                 if current_time - self.last_activity_time > self.idle_timeout:
                     # Создаем полупрозрачный черный слой
