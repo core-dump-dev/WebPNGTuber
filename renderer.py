@@ -24,7 +24,7 @@ class Renderer:
         }
         self.noise_gate = 0.01
         
-        # Active voice states
+        # Активные состояния голоса
         self.active_states = {
             'silent': True,
             'whisper': True,
@@ -32,7 +32,7 @@ class Renderer:
             'shout': True
         }
         
-        # Ordered states by volume level
+        # Порядок состояний по громкости
         self.state_order = ['silent', 'whisper', 'normal', 'shout']
         self.effects = {}
         
@@ -47,18 +47,23 @@ class Renderer:
         self._gif_current_frame = {}
 
     def set_noise_gate(self, threshold):
+        """Установка порога подавления шума"""
         self.noise_gate = threshold
 
     def set_effects(self, effects):
+        """Установка эффектов"""
         self.effects = effects
 
     def set_thresholds(self, thresholds):
+        """Установка порогов голоса"""
         self.thresholds = thresholds
 
     def set_active_states(self, active_states):
+        """Установка активных состояний"""
         self.active_states = active_states
 
     def start(self):
+        """Запуск рендерера"""
         if self._running:
             return
         self._running = True
@@ -66,11 +71,13 @@ class Renderer:
         self._thread.start()
 
     def stop(self):
+        """Остановка рендерера"""
         self._running = False
         if self._thread:
             self._thread.join(timeout=1.0)
 
     def load_model(self, model_json, model_dir):
+        """Загрузка модели"""
         self.model = model_json
         self.model_dir = model_dir
         self._image_cache = {}
@@ -80,14 +87,19 @@ class Renderer:
         self._gif_current_frame = {}
         
         for layer in self.model.get("layers", []):
-            fp = os.path.join(self.model_dir, layer.get("file") or "")
+            filename = layer.get("file")
+            if not filename:
+                continue
+                
+            fp = os.path.join(self.model_dir, filename)
             if not os.path.exists(fp):
                 continue
+                
             try:
                 scale = float(layer.get("scale", 1.0))
                 rotation = int(layer.get("rotation", 0))
 
-                # Обработка GIF-анимаций
+                # Обработка GIF
                 if layer.get("is_gif", False):
                     self._gif_frames[layer.get("name")] = []
                     self._gif_frame_times[layer.get("name")] = []
@@ -95,11 +107,9 @@ class Renderer:
                     self._gif_last_update[layer.get("name")] = 0
                     img = Image.open(fp)
                     
-                    # Извлекаем все кадры и их длительности
                     for frame in range(img.n_frames):
                         img.seek(frame)
                         frame_img = img.copy().convert("RGBA")
-                        # Применяем масштаб и поворот
                         if scale != 1.0:
                             new_width = int(frame_img.width * scale)
                             new_height = int(frame_img.height * scale)
@@ -114,7 +124,6 @@ class Renderer:
                             self._gif_frame_times[layer.get("name")].append(0.1)
                 else:
                     image = Image.open(fp).convert("RGBA")
-                    # Применяем масштаб и поворот
                     if scale != 1.0:
                         new_width = int(image.width * scale)
                         new_height = int(image.height * scale)
@@ -123,7 +132,7 @@ class Renderer:
                         image = image.rotate(rotation, expand=True)
                     self._image_cache[layer.get("name")] = image
             except Exception as e:
-                print(f"Error loading image: {e}")
+                print(f"Ошибка загрузки изображения: {e}")
         
         # Инициализация эффектов
         for g in self.model.get("groups", []):
@@ -138,15 +147,18 @@ class Renderer:
                 self.group_random_current[name] = None
 
     def set_audio_level(self, level):
+        """Установка уровня аудио"""
         if level < self.noise_gate:
             level = 0.0
         self.audio_level = max(0.0, float(level))
 
     def get_frame_bytes(self):
+        """Получение кадра в виде байтов"""
         with self._lock:
             return self._frame_bytes
 
     def _choose_group_child(self, group):
+        """Выбор дочернего элемента группы"""
         group_name = group.get("name")
         logic = group.get("logic", {})
         
@@ -172,7 +184,7 @@ class Renderer:
                             if any(kw in child.lower() for kw in ["close", "closed", "shut", "blink"]):
                                 return child
         
-        # Используем состояние "open" если оно определено
+        # Использование состояния "open"
         open_layer = logic.get("open")
         if open_layer:
             return open_layer
@@ -217,13 +229,14 @@ class Renderer:
         for state in reversed(self.state_order):
             if state == current_state:
                 continue
-            if self.audio_level >= self.thresholds.get(state, 0) and self.active_states.get(state, True):
+            if self.audio_level >= self.thresholds.get(state, 0) and self.active_stats.get(state, True):
                 if state in logic:
                     return logic.get(state)
         
         return logic.get("silent")
 
     def _get_layer_image(self, layer_name):
+        """Получение изображения слоя"""
         if layer_name in self._gif_frames:
             now = time.time()
             frames = self._gif_frames[layer_name]
@@ -244,6 +257,7 @@ class Renderer:
         return None
 
     def _loop(self):
+        """Основной цикл рендеринга"""
         frame_time = 1.0 / self.fps
         while self._running:
             start = time.time()
@@ -294,7 +308,7 @@ class Renderer:
                     try:
                         img.alpha_composite(image, (px, py))
                     except Exception as e:
-                        print(f"Error compositing layer {name}: {e}")
+                        print(f"Ошибка композиции слоя {name}: {e}")
                     
                     image = orig_image
             

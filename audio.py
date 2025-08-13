@@ -10,10 +10,10 @@ class AudioProcessor:
         self._thread = None
         self.device = device
         self.noise_gate_threshold = 0.01
-        self.device_index = None  # Для хранения индекса устройства
+        self.device_index = None  # Индекс устройства
 
-        # Получаем индекс устройства по имени
-        if device and device != "Default":
+        # Получение индекса устройства по имени
+        if device and device != "По умолчанию":
             devices = sd.query_devices()
             for i, dev in enumerate(devices):
                 if dev['name'] == device and dev['max_input_channels'] > 0:
@@ -21,7 +21,7 @@ class AudioProcessor:
                     break
 
     def start(self):
-        """Start audio processing"""
+        """Запуск обработки аудио"""
         if self.running:
             return
         self.running = True
@@ -29,14 +29,14 @@ class AudioProcessor:
         self._thread.start()
 
     def stop(self):
-        """Stop audio processing"""
+        """Остановка обработки аудио"""
         self.running = False
         if self._thread:
             self._thread.join(timeout=1.0)
         self._thread = None
 
     def _simulate_loop(self):
-        """Simulated audio loop (for testing)"""
+        """Симуляция аудио (для тестирования)"""
         t = 0.0
         while self.running:
             t += 0.1
@@ -50,12 +50,12 @@ class AudioProcessor:
             time.sleep(0.05)
 
     def _capture_loop(self):
-        """Real audio capture loop"""
+        """Основной цикл захвата аудио"""
         import queue
         q = queue.Queue()
         
         def callback(indata, frames, time_info, status):
-            """Audio callback function"""
+            """Аудио callback функция"""
             if not self.running:
                 return
             q.put(indata.copy())
@@ -69,7 +69,7 @@ class AudioProcessor:
                 channels=1, 
                 callback=callback, 
                 samplerate=44100, 
-                blocksize=512,  # Reduced block size for lower latency
+                blocksize=512,  # Уменьшенный размер блока для снижения задержки
                 **device_params
             ):
                 while self.running:
@@ -80,7 +80,7 @@ class AudioProcessor:
                     rms = np.sqrt(np.mean(data**2))
                     level = min(1.0, rms*10)
                     
-                    # Apply noise gate
+                    # Применение подавления шума
                     if level < self.noise_gate_threshold:
                         level = 0.0
                     
@@ -91,6 +91,5 @@ class AudioProcessor:
                         except:
                             pass
         except Exception as e:
-            print("Audio capture error:", e)
-            # Fallback на симуляцию при ошибке
+            print("Ошибка захвата аудио:", e)
             self._simulate_loop()

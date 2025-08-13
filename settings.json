@@ -7,9 +7,9 @@
   },
   "active_states": {
     "silent": true,
-    "whisper": false,
-    "normal": false,
-    "shout": false
+    "whisper": true,
+    "normal": true,
+    "shout": true
   },
   "effects": {
     "shake": false,

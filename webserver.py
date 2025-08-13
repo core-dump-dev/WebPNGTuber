@@ -3,7 +3,7 @@ from flask import Flask, Response
 import time
 import logging
 
-# Отключаем логирование Flask
+# Отключение логирования Flask
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
@@ -15,7 +15,7 @@ class WebServer:
         self._thread = None
         self.app = Flask("SimplePNGTuberStream")
         self.is_running = False
-        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Отключаем кэширование
+        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Отключение кэширования
 
         @self.app.route("/stream")
         def stream():
@@ -37,7 +37,7 @@ class WebServer:
 </html>"""
 
     def mjpeg_generator(self):
-        """Generate MJPEG stream"""
+        """Генератор MJPEG потока"""
         while self.is_running:
             frame = self.renderer.get_frame_bytes()
             if frame:
@@ -47,6 +47,7 @@ class WebServer:
             time.sleep(1.0 / self.renderer.fps)
                 
     def start(self):
+        """Запуск веб-сервера"""
         if self.is_running:
             return
         def run():
@@ -66,4 +67,5 @@ class WebServer:
         self._thread.start()
 
     def stop(self):
+        """Остановка веб-сервера"""
         self.is_running = False
