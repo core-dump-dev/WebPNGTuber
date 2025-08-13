@@ -1,4 +1,3 @@
-# main.py
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -196,6 +195,17 @@ class App:
         self.random_effect = tk.BooleanVar(value=self.effects.get('random_effect', False))
         ttk.Checkbutton(effects_frame, text="Случайная смена состояний", variable=self.random_effect, command=lambda: self.renderer.set_effects(self.get_effects())).pack(anchor="w")
 
+        # Настройки idle-режима
+        idle_frame = ttk.LabelFrame(ctrl_frame, text="Idle-режим")
+        idle_frame.pack(fill="x", padx=8, pady=6)
+
+        self.idle_enabled = tk.BooleanVar(value=self.settings.get('idle_enabled', False))
+        ttk.Checkbutton(idle_frame, text="Включить затемнение в idle", variable=self.idle_enabled).pack(anchor="w", padx=5, pady=2)
+
+        ttk.Label(idle_frame, text="Время до затемнения (сек):").pack(anchor="w", padx=5)
+        self.idle_timeout = tk.DoubleVar(value=self.settings.get('idle_timeout', 60.0))
+        ttk.Entry(idle_frame, textvariable=self.idle_timeout, width=8).pack(anchor="w", padx=5, pady=2)
+
         # Сохранение настроек
         ttk.Button(ctrl_frame, text="Сохранить настройки", command=self.save_settings).pack(fill="x", padx=8, pady=10)
 
@@ -207,6 +217,7 @@ class App:
         self.renderer.start()
         self.renderer.set_thresholds(self.thresholds)
         self.renderer.set_noise_gate(0.01 if self.noise_gate_enabled.get() else 0.0)
+        self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
 
         # Применение начальных состояний
         self.update_active_states()
@@ -282,7 +293,9 @@ class App:
             'effects': self.get_effects(),
             'sensitivity': self.sensitivity.get(),
             'noise_gate_enabled': self.noise_gate_enabled.get(),
-            'mic_device': self.device_var.get()
+            'mic_device': self.device_var.get(),
+            'idle_enabled': self.idle_enabled.get(),
+            'idle_timeout': self.idle_timeout.get()
         }
         try:
             with open(SETTINGS_FILE, 'w') as f:

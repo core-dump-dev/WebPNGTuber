@@ -46,6 +46,18 @@ class Renderer:
         self._gif_last_update = {}
         self._gif_current_frame = {}
 
+        # Idle режим
+        self.idle_enabled = False
+        self.idle_timeout = 60.0  # seconds
+        self.last_activity_time = time.time()
+        self.idle_alpha = 128  # Прозрачность затемнения (0-255)
+
+    def set_idle(self, enabled, timeout):
+        self.idle_enabled = enabled
+        self.idle_timeout = timeout
+        # Сбросим таймер при изменении настроек
+        self.last_activity_time = time.time()
+
     def set_noise_gate(self, threshold):
         """Установка порога подавления шума"""
         self.noise_gate = threshold
@@ -151,6 +163,9 @@ class Renderer:
         if level < self.noise_gate:
             level = 0.0
         self.audio_level = max(0.0, float(level))
+        # Если есть звук выше порога шумодава, обновляем время активности
+        if level > self.noise_gate:
+            self.last_activity_time = time.time()
 
     def get_frame_bytes(self):
         """Получение кадра в виде байтов"""
@@ -229,7 +244,7 @@ class Renderer:
         for state in reversed(self.state_order):
             if state == current_state:
                 continue
-            if self.audio_level >= self.thresholds.get(state, 0) and self.active_stats.get(state, True):
+            if self.audio_level >= self.thresholds.get(state, 0) and self.active_states.get(state, True):
                 if state in logic:
                     return logic.get(state)
         
@@ -312,6 +327,14 @@ class Renderer:
                     
                     image = orig_image
             
+            # Применяем idle-режим (затемнение) если нужно
+            if self.idle_enabled:
+                current_time = time.time()
+                if current_time - self.last_activity_time > self.idle_timeout:
+                    # Создаем полупрозрачный черный слой
+                    overlay = Image.new('RGBA', (self.width, self.height), (0, 0, 0, self.idle_alpha))
+                    img = Image.alpha_composite(img, overlay)
+
             with io.BytesIO() as buf:
                 img.save(buf, format="PNG")
                 data = buf.getvalue()

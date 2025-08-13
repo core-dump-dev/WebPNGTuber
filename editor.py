@@ -21,7 +21,11 @@ class CanvasItem:
         self.rotation = int(layer.get("rotation", 0))
         self.x = int(layer.get("x", 0))
         self.y = int(layer.get("y", 0))
+        
+        # Загружаем видимость из модели, но для слоев моргания принудительно устанавливаем невидимыми
         self.visible = bool(layer.get("visible", True))
+        if layer.get("blink", False) or "blink" in layer.get("name", "").lower():
+            self.visible = False
         
         # Атрибуты для GIF
         self.gif_frames = []
