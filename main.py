@@ -461,11 +461,15 @@ class App:
     def open_editor(self):
         """Open model editor window"""
         try:
-            self.root.attributes('-disabled', True)
+            # Сохраняем ссылку на главное окно
+            main_window = self.root
+            
+            # Отключаем главное окно
+            main_window.attributes('-disabled', True)
             
             # Передаем текущие настройки микрофона в редактор
             editor = ModelEditor(
-                self.root, 
+                main_window, 
                 on_save=self.on_model_saved,
                 device=self.device_var.get(),
                 noise_gate_enabled=self.noise_gate_enabled.get(),
@@ -473,19 +477,38 @@ class App:
                 thresholds=self.thresholds
             )
             
-            # Даем редактору доступ к главному приложению
-            editor.master.app = self
-
-            self.root.wait_window(editor)
-            self.refresh_slot_buttons()
-            self.root.attributes('-disabled', False)
-            self.root.focus_set()
+            # Настраиваем поведение при закрытии редактора
+            editor.protocol("WM_DELETE_WINDOW", lambda: self.on_editor_close(editor))
             
-            # Восстанавливаем аудио обработчик после закрытия редактора
-            try:
-                self.audio.stop()
-            except:
-                pass
+            # Ждем закрытия редактора
+            editor.wait_window(editor)
+            
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            with open("error.log", "w", encoding="utf-8") as f:
+                f.write(tb)
+            messagebox.showerror("Editor error", f"Failed to open editor: {e}. See error.log")
+            main_window.attributes('-disabled', False)
+
+    def on_editor_close(self, editor):
+        """Handle editor window closing"""
+        try:
+            # Останавливаем аудиопроцессор редактора
+            editor.audio_processor.stop()
+        except Exception:
+            pass
+        
+        # Включаем главное окно
+        self.root.attributes('-disabled', False)
+        self.root.focus_set()
+        
+        # Обновляем UI главного окна
+        self.refresh_slot_buttons()
+        
+        # Перезапускаем аудио главного окна
+        try:
+            self.audio.stop()
             self.audio = AudioProcessor(
                 callback=self.on_audio_level,
                 device=self.device_var.get()
@@ -493,12 +516,10 @@ class App:
             self.audio.noise_gate_threshold = 0.01 if self.noise_gate_enabled.get() else 0.0
             self.audio.start()
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            with open("error.log", "w", encoding="utf-8") as f:
-                f.write(tb)
-            messagebox.showerror("Editor error", f"Failed to open editor: {e}. See error.log")
-            self.root.attributes('-disabled', False)
+            print("Audio restart error:", e)
+        
+        # Закрываем окно редактора
+        editor.destroy()
 
     def on_model_saved(self, model_data, model_dir):
         """Callback when model is saved from editor"""

@@ -364,10 +364,6 @@ class ModelEditor(tk.Toplevel):
         # Правильно закрываем окно редактора
         self.grab_release()  # Освобождаем захват фокуса
         self.destroy()  # Закрываем только окно редактора
-        
-        # Показываем главное окно, если оно скрыто
-        if hasattr(self.master, 'deiconify'):
-            self.master.deiconify()  # Show main window again
 
     def update_test_mode(self):
         """Update test mode based on selection"""
@@ -485,6 +481,7 @@ class ModelEditor(tk.Toplevel):
 
     def save_model(self):
         # Если модель ещё не сохранена, запрашиваем папку
+        old_dir = self.model_dir
         if not self.model_dir:
             name = self.model.get("name", "model")
             folder = filedialog.askdirectory(title="Choose parent folder for model (a new folder will be created)")
@@ -493,22 +490,18 @@ class ModelEditor(tk.Toplevel):
             self.model_dir = os.path.join(folder, name.replace(" ", "_"))
             os.makedirs(self.model_dir, exist_ok=True)
         
-        # Сохраняем изображения
-        for idx, ci in enumerate(self.items):
-            layer = ci.layer
-            fname = layer.get("file")
-            if not fname or not os.path.exists(os.path.join(self.model_dir, fname)):
-                if not fname:
-                    fname = f"layer_{idx}.png"
-                    layer["file"] = fname
-                # Сохраняем оригинальное изображение (без трансформаций)
-                if ci.is_gif:
-                    # Для GIF просто копируем исходный файл
-                    shutil.copy2(ci.image_path, os.path.join(self.model_dir, fname))
-                else:
-                    # Для PNG сохраняем как есть
-                    img = Image.open(ci.image_path).convert("RGBA")
-                    img.save(os.path.join(self.model_dir, fname))
+        # Если была старая папка (временная) и она отличается от новой, копируем файлы
+        if old_dir and old_dir != self.model_dir:
+            # Копируем все файлы из старой папки в новую
+            for fname in os.listdir(old_dir):
+                src = os.path.join(old_dir, fname)
+                dst = os.path.join(self.model_dir, fname)
+                if os.path.isfile(src):
+                    shutil.copy2(src, dst)
+            # Теперь удаляем временную папку? Или оставляем? Пока оставим.
+        else:
+            # Просто убедимся, что файлы на месте: возможно, мы сохраняем в ту же папку.
+            pass
         
         # Сохраняем структуру модели
         self.model["layers"] = []
@@ -580,7 +573,7 @@ class ModelEditor(tk.Toplevel):
         os.makedirs(slot_dir, exist_ok=True)
         
         # Копируем все файлы модели в слот
-        for fname, _ in self.imported_files:
+        for fname, _, _ in self.imported_files:
             src = os.path.join(self.model_dir, fname)
             dst = os.path.join(slot_dir, fname)
             if os.path.exists(src):
@@ -610,7 +603,11 @@ class ModelEditor(tk.Toplevel):
         for ci in self.items:
             if not ci.visible:
                 continue
-            img = ci.get_current_image()
+            # Для превью используем базовое изображение (для GIF - первый кадр)
+            if ci.is_gif and ci.gif_frames:
+                img = ci.gif_frames[0]
+            else:
+                img = ci.image
             px = center_x - img.size[0] // 2 + int(ci.x)
             py = center_y - img.size[1] // 2 + int(ci.y)
             try:
@@ -668,9 +665,15 @@ class ModelEditor(tk.Toplevel):
                     "is_gif": is_gif
                 }
                 self.model.setdefault("layers", []).append(layer)
+                # Создаем CanvasItem
+                image_path = os.path.join(self.model_dir, base)
+                ci = CanvasItem(layer, image_path)
+                self.items.append(ci)
             except Exception as e:
                 print("Import error", e)
         self.refresh_import_list()
+        self.refresh_items_list()
+        self.redraw_canvas()
         self.last_autosave = time.time()
 
     # ------------- UI refresh helpers -------------
