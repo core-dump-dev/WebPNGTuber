@@ -7,9 +7,17 @@ from PIL import Image, ImageTk, ImageSequence
 import shutil
 import math
 import random
+import threading
+import sys
 from audio import AudioProcessor
 
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+# Определение базовой директории
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 class CanvasItem:
@@ -304,7 +312,7 @@ class ModelEditor(tk.Toplevel):
         
         try:
             # Установка иконки для редактора
-            self.iconbitmap('favicon.ico')
+            self.iconbitmap(os.path.join(BASE_DIR, 'favicon.ico'))
         except Exception:
             pass
 

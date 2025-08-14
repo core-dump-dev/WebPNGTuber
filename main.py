@@ -9,10 +9,17 @@ import os
 import json
 from PIL import Image, ImageTk
 import sounddevice as sd
+import sys
 
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+# Определение базовой директории
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
-SETTINGS_FILE = "settings.json"
+SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 
 class App:
     def __init__(self, root):
@@ -59,7 +66,7 @@ class App:
 
         try:
             # Установка иконки для главного окна
-            root.iconbitmap('favicon.ico')
+            root.iconbitmap(os.path.join(BASE_DIR, 'favicon.ico'))
         except Exception as e:
             print(f"Ошибка загрузки иконки: {e}")
 
@@ -206,8 +213,6 @@ class App:
         idle_frame.pack(fill="x", padx=8, pady=6)
 
         self.idle_enabled = tk.BooleanVar(value=self.settings.get('idle_enabled', False))
-        
-        # ДОБАВЛЕНА КОМАНДА ДЛЯ ОБНОВЛЕНИЯ РЕНДЕРЕРА ПРИ ИЗМЕНЕНИИ ГАЛОЧКИ
         ttk.Checkbutton(idle_frame, text="Включить затемнение в idle", variable=self.idle_enabled,
                        command=self.update_idle_setting).pack(anchor="w", padx=5, pady=2)
 
@@ -284,7 +289,6 @@ class App:
         self.renderer.set_effects(effects)
         return effects
 
-    # ДОБАВЛЕН НОВЫЙ МЕТОД ДЛЯ ОБНОВЛЕНИЯ НАСТРОЙКИ IDLE
     def update_idle_setting(self):
         """Обновление настройки idle-режима"""
         enabled = self.idle_enabled.get()

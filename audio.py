@@ -1,6 +1,7 @@
 import threading, time
 import numpy as np
 import sounddevice as sd
+import sys
 
 class AudioProcessor:
     def __init__(self, callback=None, device=None):
@@ -11,6 +12,10 @@ class AudioProcessor:
         self.device = device
         self.noise_gate_threshold = 0.01
         self.device_index = None  # Индекс устройства
+
+        # Подавление вывода ошибок для EXE
+        if getattr(sys, 'frozen', False):
+            sys.stderr = open(os.devnull, 'w')
 
         # Получение индекса устройства по имени
         if device and device != "По умолчанию":
@@ -34,6 +39,10 @@ class AudioProcessor:
         if self._thread:
             self._thread.join(timeout=1.0)
         self._thread = None
+
+        # Восстановление stderr для EXE
+        if getattr(sys, 'frozen', False):
+            sys.stderr = sys.__stderr__
 
     def _simulate_loop(self):
         """Симуляция аудио (для тестирования)"""
