@@ -57,6 +57,12 @@ class App:
         self.model_slots = []
         self.slot_previews = [None] * 6
 
+        try:
+            # Установка иконки для главного окна
+            root.iconbitmap('favicon.ico')
+        except Exception as e:
+            print(f"Ошибка загрузки иконки: {e}")
+
         for r in range(3):
             for c in range(2):
                 idx = r*2 + c

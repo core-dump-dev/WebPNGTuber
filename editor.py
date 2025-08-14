@@ -302,6 +302,12 @@ class ModelEditor(tk.Toplevel):
             "open": "Открыто"
         }
         
+        try:
+            # Установка иконки для редактора
+            self.iconbitmap('favicon.ico')
+        except Exception:
+            pass
+
         for i, s in enumerate(states.keys()):
             row = ttk.Frame(logic_frame)
             row.pack(fill="x", padx=5, pady=2)
