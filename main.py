@@ -17,7 +17,7 @@ SETTINGS_FILE = "settings.json"
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("SimplePNGTuber (Python)")
+        root.title("WebPNGTuber TG: @memory_not_found")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Загрузка настроек

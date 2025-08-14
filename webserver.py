@@ -13,7 +13,7 @@ class WebServer:
         self.host = host
         self.port = port
         self._thread = None
-        self.app = Flask("SimplePNGTuberStream")
+        self.app = Flask("WebPNGTuberStream")
         self.is_running = False
         self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Отключение кэширования
 
@@ -28,7 +28,7 @@ class WebServer:
         def index():
             return """<html>
 <head>
-    <title>SimplePNGTuber</title>
+    <title>WebPNGTuber</title>
     <style>body { margin: 0; background: #000; }</style>
 </head>
 <body>
