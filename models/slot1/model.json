@@ -1,0 +1,118 @@
+{
+  "name": "1model",
+  "layers": [
+    {
+      "name": "body",
+      "file": "body.png",
+      "x": 0,
+      "y": 0,
+      "visible": true,
+      "is_gif": false,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": null
+    },
+    {
+      "name": "closed-eye",
+      "file": "closed-eye.png",
+      "x": 2,
+      "y": 16,
+      "visible": true,
+      "is_gif": false,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "eye"
+    },
+    {
+      "name": "open-eye",
+      "file": "open-eye.png",
+      "x": 2,
+      "y": 16,
+      "visible": true,
+      "is_gif": false,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "eye"
+    },
+    {
+      "name": "closed-mouth",
+      "file": "closed-mouth.png",
+      "x": -8,
+      "y": 11,
+      "visible": true,
+      "is_gif": false,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "mouth"
+    },
+    {
+      "name": "open-mouth-bigger",
+      "file": "open-mouth-bigger.png",
+      "x": -8,
+      "y": 11,
+      "visible": true,
+      "is_gif": false,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "mouth"
+    },
+    {
+      "name": "open-mouth-max",
+      "file": "open-mouth-max.png",
+      "x": -8,
+      "y": 11,
+      "visible": true,
+      "is_gif": false,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "mouth"
+    },
+    {
+      "name": "open-mouth-min",
+      "file": "open-mouth-min.png",
+      "x": -8,
+      "y": 11,
+      "visible": true,
+      "is_gif": false,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "mouth"
+    }
+  ],
+  "groups": [
+    {
+      "name": "mouth",
+      "children": [
+        "open-mouth-min",
+        "open-mouth-max",
+        "open-mouth-bigger",
+        "closed-mouth"
+      ],
+      "logic": {
+        "silent": "closed-mouth",
+        "whisper": "open-mouth-min",
+        "normal": "open-mouth-bigger",
+        "shout": "open-mouth-max"
+      },
+      "blink_freq": 0.0,
+      "random_effect": false,
+      "random_min": 5.0,
+      "random_max": 10.0
+    },
+    {
+      "name": "eye",
+      "children": [
+        "closed-eye",
+        "open-eye"
+      ],
+      "logic": {
+        "blink": "closed-eye",
+        "open": "open-eye"
+      },
+      "blink_freq": 3.0,
+      "random_effect": false,
+      "random_min": 5.0,
+      "random_max": 10.0
+    }
+  ]
+}

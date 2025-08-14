@@ -18,9 +18,9 @@
     "blink": true,
     "random_effect": false
   },
-  "sensitivity": 2.430316742081448,
+  "sensitivity": 1.5,
   "noise_gate_enabled": true,
-  "mic_device": "Microphone (SHEM-BOY)",
+  "mic_device": "",
   "idle_enabled": false,
   "idle_timeout": 5.0
 }
