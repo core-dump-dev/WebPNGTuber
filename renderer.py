@@ -1,5 +1,5 @@
 import threading, time
-from PIL import Image, ImageOps, ImageEnhance, ImageSequence
+from PIL import Image, ImageEnhance, ImageSequence
 import os, io, math, random
 
 class Renderer:
@@ -50,7 +50,7 @@ class Renderer:
         self.idle_enabled = False
         self.idle_timeout = 60.0  # seconds
         self.last_activity_time = time.time()
-        self.idle_alpha = 128  # Прозрачность затемнения (0-255)
+        self.idle_brightness = 0.5  # Яркость в idle-режиме (0.0 - черный, 1.0 - оригинал)
 
     def set_idle(self, enabled, timeout):
         self.idle_enabled = enabled
@@ -336,13 +336,13 @@ class Renderer:
                     
                     image = orig_image
             
-            # ПРИМЕНЕНИЕ IDLE-РЕЖИМА ТОЛЬКО ЕСЛИ ОН ВКЛЮЧЕН
-            if self.idle_enabled:  # <-- ДОБАВЛЕНО ПРОВЕРКА СОСТОЯНИЯ
+            # ПРИМЕНЕНИЕ IDLE-РЕЖИМА К МОДЕЛИ
+            if self.idle_enabled:
                 current_time = time.time()
                 if current_time - self.last_activity_time > self.idle_timeout:
-                    # Создаем полупрозрачный черный слой
-                    overlay = Image.new('RGBA', (self.width, self.height), (0, 0, 0, self.idle_alpha))
-                    img = Image.alpha_composite(img, overlay)
+                    # Уменьшаем яркость изображения модели
+                    enhancer = ImageEnhance.Brightness(img)
+                    img = enhancer.enhance(self.idle_brightness)
 
             with io.BytesIO() as buf:
                 img.save(buf, format="PNG")
