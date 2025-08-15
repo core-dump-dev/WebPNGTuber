@@ -1,7 +1,9 @@
 from threading import Thread
-from flask import Flask, Response
+from flask import Flask, Response, send_from_directory
 import time
 import logging
+import os
+import sys
 
 # Отключение логирования Flask
 log = logging.getLogger('werkzeug')
@@ -16,6 +18,12 @@ class WebServer:
         self.app = Flask("WebPNGTuberStream")
         self.is_running = False
         self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Отключение кэширования
+        
+        # Определение базовой директории
+        if getattr(sys, 'frozen', False):
+            self.base_dir = os.path.dirname(sys.executable)
+        else:
+            self.base_dir = os.path.dirname(os.path.abspath(__file__))
 
         @self.app.route("/stream")
         def stream():
@@ -29,6 +37,7 @@ class WebServer:
             return """<html>
 <head>
     <title>WebPNGTuber</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>body { margin: 0; background: #000; }</style>
 </head>
 <body>
@@ -36,6 +45,14 @@ class WebServer:
 </body>
 </html>"""
 
+        @self.app.route("/favicon.ico")
+        def favicon():
+            return send_from_directory(
+                self.base_dir,
+                'favicon.ico',
+                mimetype='image/vnd.microsoft.icon'
+            )
+                
     def mjpeg_generator(self):
         """Генератор MJPEG потока"""
         while self.is_running:

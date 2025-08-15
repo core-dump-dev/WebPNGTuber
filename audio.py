@@ -2,6 +2,7 @@ import threading, time
 import numpy as np
 import sounddevice as sd
 import sys
+import os
 
 class AudioProcessor:
     def __init__(self, callback=None, device=None):
