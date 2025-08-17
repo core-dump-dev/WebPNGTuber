@@ -9,6 +9,7 @@ import math
 import random
 import threading
 import sys
+import glob
 from audio import AudioProcessor
 
 # Определение базовой директории
@@ -118,6 +119,7 @@ class ModelEditor(tk.Toplevel):
         # Данные модели
         self.model = {"name": "Без названия", "layers": [], "groups": []}
         self.model_dir = None
+        self.original_slot = None  # Добавляем для отслеживания исходного слота
         self.items = []
         self.imported_files = []
         self.drag_data = {"item": None, "x": 0, "y": 0}
@@ -381,8 +383,22 @@ class ModelEditor(tk.Toplevel):
         except Exception as e:
             print("Ошибка остановки аудио:", e)
         
+        # Удаляем все временные папки
+        self.cleanup_temp_folders()
+        
         self.grab_release()
         self.destroy()
+
+    def cleanup_temp_folders(self):
+        """Удаление всех временных папок в models"""
+        temp_folders = glob.glob(os.path.join(MODELS_DIR, "temp_*"))
+        for folder in temp_folders:
+            try:
+                if os.path.isdir(folder):
+                    shutil.rmtree(folder)
+                    print(f"Удалена временная папка: {folder}")
+            except Exception as e:
+                print(f"Ошибка удаления временной папки {folder}: {e}")
 
     def update_test_mode(self):
         """Обновление режима тестирования"""
@@ -418,6 +434,7 @@ class ModelEditor(tk.Toplevel):
             return
         self.model = {"name": name, "layers": [], "groups": []}
         self.model_dir = None
+        self.original_slot = None  # Сбрасываем исходный слот
         self.items.clear()
         self.imported_files.clear()
         self.refresh_import_list()
@@ -456,13 +473,25 @@ class ModelEditor(tk.Toplevel):
         if not os.path.exists(json_path):
             messagebox.showerror("Ошибка", "model.json не найден в выбранном слоте")
             return
+            
         with open(json_path, "r", encoding="utf-8") as f:
             self.model = json.load(f)
-        self.model_dir = path
-        self.items.clear()
+            
+        # Создаем временную папку для работы
+        temp_dir = os.path.join(MODELS_DIR, f"temp_{int(time.time())}_slot{slot_num}")
+        os.makedirs(temp_dir, exist_ok=True)
         
+        # Копируем все файлы во временную папку
+        for f in os.listdir(path):
+            src = os.path.join(path, f)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(temp_dir, f))
+        
+        self.model_dir = temp_dir
+        self.original_slot = slot_num  # Сохраняем исходный слот
+        
+        self.items.clear()
         for layer in self.model.get("layers", []):
-            # Используем относительные пути
             filename = layer.get("file")
             if not filename:
                 continue
@@ -583,27 +612,35 @@ class ModelEditor(tk.Toplevel):
         slot_dir = os.path.join(MODELS_DIR, f"slot{slot_num}")
         os.makedirs(slot_dir, exist_ok=True)
         
-        # Копируем файлы модели
-        for fname, _, _ in self.imported_files:
-            src = os.path.join(self.model_dir, fname)
-            dst = os.path.join(slot_dir, fname)
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
+        # Очищаем слот перед сохранением
+        for f in os.listdir(slot_dir):
+            file_path = os.path.join(slot_dir, f)
+            try:
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+            except Exception as e:
+                print(f"Не удалось удалить {file_path}: {e}")
         
-        # Копируем файл модели и превью
-        shutil.copy2(os.path.join(self.model_dir, "model.json"), 
-                    os.path.join(slot_dir, "model.json"))
-        
-        preview_src = os.path.join(self.model_dir, "preview.png")
-        preview_dst = os.path.join(slot_dir, "preview.png")
-        if os.path.exists(preview_src):
-            shutil.copy2(preview_src, preview_dst)
+        # Копируем файлы из временной папки в слот
+        for f in os.listdir(self.model_dir):
+            src = os.path.join(self.model_dir, f)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(slot_dir, f))
         
         messagebox.showinfo("Сохранено", f"Модель сохранена в слот {slot_num}")
         
         # Обновляем главное окно
         if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
             self.master.app.refresh_slot_buttons()
+            
+        # Удаляем временную папку после сохранения
+        if "temp_" in self.model_dir:
+            try:
+                shutil.rmtree(self.model_dir)
+                print(f"Удалена временная папка: {self.model_dir}")
+            except Exception as e:
+                print(f"Ошибка удаления временной папки {self.model_dir}: {e}")
+            self.model_dir = None
 
     def create_preview(self):
         """Создание превью модели"""
