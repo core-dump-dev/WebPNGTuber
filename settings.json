@@ -16,11 +16,11 @@
     "bounce": false,
     "pulse": false,
     "blink": true,
-    "random_effect": false
+    "random_effect": true
   },
-  "sensitivity": 1.5,
+  "sensitivity": 0.5,
   "noise_gate_enabled": true,
   "mic_device": "",
-  "idle_enabled": false,
+  "idle_enabled": true,
   "idle_timeout": 5.0
 }

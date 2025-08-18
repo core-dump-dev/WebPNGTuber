@@ -955,13 +955,26 @@ class ModelEditor(tk.Toplevel):
                 menu = om["menu"]
                 menu.delete(0, "end")
                 menu.add_command(label="", command=lambda v=self.state_vars[state]: v.set(""))
+                
+                # Добавляем слои и группы в выпадающий список
                 for child in children:
                     menu.add_command(
-                        label=child,
+                        label=f"Слой: {child}",
                         command=lambda val=child, v=self.state_vars[state]: v.set(val)
                     )
-                saved_value = grp.get("logic", {}).get(state, "")
-                self.state_vars[state].set(saved_value)
+                
+                # Добавляем все группы кроме текущей
+                for group in self.model.get("groups", []):
+                    if group["name"] != gname:
+                        menu.add_command(
+                            label=f"Группа: {group['name']}",
+                            command=lambda val=group['name'], v=self.state_vars[state]: v.set(val)
+                        )
+            
+            saved_logic = grp.get("logic", {})
+            for state in saved_logic:
+                if state in self.state_vars:
+                    self.state_vars[state].set(saved_logic[state])
             
             self.random_effect_var.set(grp.get("random_effect", False))
             self.random_min_var.set(grp.get("random_min", 5.0))

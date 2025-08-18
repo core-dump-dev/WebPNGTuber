@@ -1,115 +1,194 @@
 {
-  "name": "1model",
+  "name": "modelupgrade",
   "layers": [
     {
       "name": "body",
       "file": "body.png",
+      "blink": false,
+      "visible": true,
       "x": 0,
       "y": 0,
-      "visible": true,
-      "is_gif": false,
       "scale": 1.0,
       "rotation": 0,
-      "group": null
+      "group": null,
+      "is_gif": false,
+      "_selected": false
     },
     {
       "name": "closed-eye",
       "file": "closed-eye.png",
-      "x": 2,
-      "y": 16,
+      "blink": false,
       "visible": true,
-      "is_gif": false,
+      "x": 0,
+      "y": 0,
       "scale": 1.0,
       "rotation": 0,
-      "group": "eye"
+      "group": "eye",
+      "is_gif": false,
+      "_selected": false
     },
     {
-      "name": "open-eye",
-      "file": "open-eye.png",
-      "x": 2,
-      "y": 16,
+      "name": "open-eye-right",
+      "file": "open-eye-right.png",
+      "blink": false,
       "visible": true,
-      "is_gif": false,
+      "x": 0,
+      "y": 0,
       "scale": 1.0,
       "rotation": 0,
-      "group": "eye"
+      "group": "eye",
+      "is_gif": false,
+      "_selected": false
+    },
+    {
+      "name": "open-eye-left",
+      "file": "open-eye-left.png",
+      "blink": false,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "eye",
+      "is_gif": false,
+      "_selected": false
     },
     {
       "name": "closed-mouth",
       "file": "closed-mouth.png",
-      "x": -8,
-      "y": 11,
+      "blink": false,
       "visible": true,
-      "is_gif": false,
+      "x": 0,
+      "y": 0,
       "scale": 1.0,
       "rotation": 0,
-      "group": "mouth"
+      "group": "mouth",
+      "is_gif": false,
+      "_selected": false
+    },
+    {
+      "name": "smiled-mouth",
+      "file": "smiled-mouth.png",
+      "blink": false,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "mouth",
+      "is_gif": false,
+      "_selected": false
     },
     {
       "name": "open-mouth-bigger",
       "file": "open-mouth-bigger.png",
-      "x": -8,
-      "y": 11,
+      "blink": false,
       "visible": true,
-      "is_gif": false,
+      "x": 0,
+      "y": 0,
       "scale": 1.0,
       "rotation": 0,
-      "group": "mouth"
+      "group": "mouth",
+      "is_gif": false,
+      "_selected": false
     },
     {
       "name": "open-mouth-max",
       "file": "open-mouth-max.png",
-      "x": -8,
-      "y": 11,
+      "blink": false,
       "visible": true,
-      "is_gif": false,
+      "x": 0,
+      "y": 0,
       "scale": 1.0,
       "rotation": 0,
-      "group": "mouth"
+      "group": "mouth",
+      "is_gif": false,
+      "_selected": false
     },
     {
       "name": "open-mouth-min",
       "file": "open-mouth-min.png",
-      "x": -8,
-      "y": 11,
+      "blink": false,
       "visible": true,
-      "is_gif": false,
+      "x": 0,
+      "y": 0,
       "scale": 1.0,
       "rotation": 0,
-      "group": "mouth"
+      "group": "mouth",
+      "is_gif": false,
+      "_selected": false
+    },
+    {
+      "name": "загружено",
+      "file": "загружено.gif",
+      "blink": false,
+      "visible": true,
+      "x": 143,
+      "y": 15,
+      "scale": 0.3,
+      "rotation": 0,
+      "group": null,
+      "is_gif": true,
+      "_selected": false
     }
   ],
   "groups": [
     {
-      "name": "mouth",
+      "name": "2eye",
       "children": [
-        "open-mouth-min",
-        "open-mouth-max",
-        "open-mouth-bigger",
-        "closed-mouth"
+        "open-eye-left",
+        "open-eye-right"
+      ],
+      "logic": {},
+      "blink_freq": 0.0,
+      "random_effect": true,
+      "random_min": 3.0,
+      "random_max": 6.0
+    },
+    {
+      "name": "eye",
+      "children": [
+        "open-eye-left",
+        "open-eye-right",
+        "closed-eye"
       ],
       "logic": {
-        "silent": "closed-mouth",
-        "whisper": "open-mouth-min",
-        "normal": "open-mouth-bigger",
-        "shout": "open-mouth-max"
+        "blink": "closed-eye",
+        "open": "2eye"
       },
-      "blink_freq": 0.0,
+      "blink_freq": 5.0,
       "random_effect": false,
       "random_min": 5.0,
       "random_max": 10.0
     },
     {
-      "name": "eye",
+      "name": "close_mouth",
       "children": [
-        "closed-eye",
-        "open-eye"
+        "closed-mouth",
+        "smiled-mouth"
+      ],
+      "logic": {},
+      "blink_freq": 0.0,
+      "random_effect": true,
+      "random_min": 10.0,
+      "random_max": 90.0
+    },
+    {
+      "name": "mouth",
+      "children": [
+        "smiled-mouth",
+        "open-mouth-max",
+        "open-mouth-min",
+        "open-mouth-bigger",
+        "closed-mouth"
       ],
       "logic": {
-        "blink": "closed-eye",
-        "open": "open-eye"
+        "silent": "close_mouth",
+        "whisper": "open-mouth-min",
+        "normal": "open-mouth-bigger",
+        "shout": "open-mouth-max"
       },
-      "blink_freq": 3.0,
+      "blink_freq": 0.0,
       "random_effect": false,
       "random_min": 5.0,
       "random_max": 10.0

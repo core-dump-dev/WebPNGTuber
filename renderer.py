@@ -52,6 +52,10 @@ class Renderer:
         self.last_activity_time = time.time()
         self.idle_brightness = 0.5  # Яркость в idle-режиме (0.0 - черный, 1.0 - оригинал)
 
+        # Словари для быстрого доступа
+        self.layers_by_name = {}
+        self.groups_by_name = {}
+
     def set_idle(self, enabled, timeout):
         self.idle_enabled = enabled
         self.idle_timeout = timeout
@@ -106,6 +110,10 @@ class Renderer:
         self._gif_frame_times = {}
         self._gif_last_update = {}
         self._gif_current_frame = {}
+        
+        # Создаем словари для быстрого доступа
+        self.layers_by_name = {l.get('name'): l for l in self.model.get('layers', [])}
+        self.groups_by_name = {g.get('name'): g for g in self.model.get('groups', [])}
         
         for layer in self.model.get("layers", []):
             filename = layer.get("file")
@@ -181,8 +189,31 @@ class Renderer:
         with self._lock:
             return self._frame_bytes
 
+    def _resolve_to_layer(self, name, group_name, visited=None):
+        """Рекурсивно разрешает имя группы до имени слоя"""
+        if visited is None:
+            visited = set()
+        
+        # Если имя уже посещено - возвращаем None (защита от циклов)
+        if name in visited:
+            return None
+        visited.add(name)
+        
+        # Если это слой - возвращаем его
+        if name in self.layers_by_name:
+            return name
+            
+        # Если это группа - обрабатываем рекурсивно
+        if name in self.groups_by_name:
+            group = self.groups_by_name[name]
+            chosen = self._choose_group_child(group)
+            if chosen:
+                return self._resolve_to_layer(chosen, group_name, visited)
+                
+        return None
+
     def _choose_group_child(self, group):
-        """Выбор дочернего элемента группы"""
+        """Выбор дочернего элемента группы с поддержкой вложенных групп"""
         group_name = group.get("name")
         logic = group.get("logic", {})
         
@@ -291,7 +322,10 @@ class Renderer:
                 for group in self.model.get("groups", []):
                     chosen = self._choose_group_child(group)
                     if chosen:
-                        group_choices[group['name']] = chosen
+                        # Разрешаем вложенные группы до конкретного слоя
+                        resolved = self._resolve_to_layer(chosen, group['name'])
+                        if resolved:
+                            group_choices[group['name']] = resolved
                 
                 layers_by_name = {l.get("name"): l for l in self.model.get("layers", [])}
                 for layer in self.model.get("layers", []):
