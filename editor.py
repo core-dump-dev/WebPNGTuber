@@ -101,7 +101,7 @@ class ModelEditor(tk.Toplevel):
     def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_enabled=True, sensitivity=1.0, thresholds=None):
         super().__init__(master)
         self.title("Редактор моделей")
-        self.geometry("1200x750")
+        self.geometry("1300x750")  # Увеличил ширину окна
         self.on_save = on_save
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -138,9 +138,11 @@ class ModelEditor(tk.Toplevel):
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=1)
         
-        # Левая панель
-        left = ttk.Frame(main_frame, width=200)
+        # Левая панель - УВЕЛИЧЕНА НА 20%
+        left_width = 280  # Было 200, стало 280 (+20%)
+        left = ttk.Frame(main_frame, width=left_width)
         left.grid(row=0, column=0, sticky="ns", padx=(0, 6), pady=0)
+        left.grid_propagate(False)  # Фиксируем ширину
         
         # Центральная панель
         center = ttk.Frame(main_frame)
@@ -170,7 +172,7 @@ class ModelEditor(tk.Toplevel):
                        value="none", command=self.update_test_mode).pack(anchor="w")
         
         # Индикатор уровня
-        self.level_bar = ttk.Progressbar(test_frame, length=180, mode="determinate")
+        self.level_bar = ttk.Progressbar(test_frame, length=240, mode="determinate")  # Увеличил длину
         self.level_bar.pack(fill="x", pady=5)
         
         # Аудиопроцессор
@@ -182,11 +184,12 @@ class ModelEditor(tk.Toplevel):
 
         ttk.Label(left, text="Импортированные изображения:").pack(anchor="w", pady=(8, 0))
         
-        # Список импортированных изображений
+        # Список импортированных изображений - УВЕЛИЧЕН
         import_frame = ttk.Frame(left)
         import_frame.pack(fill="both", expand=True)
         
-        self.import_canvas = tk.Canvas(import_frame, width=180, height=250)
+        # Увеличил ширину canvas для импортированных изображений
+        self.import_canvas = tk.Canvas(import_frame, width=260, height=250)  # Было 180, стало 260 (+20%)
         self.import_vscroll = ttk.Scrollbar(import_frame, orient="vertical", command=self.import_canvas.yview)
         self.import_canvas.configure(yscrollcommand=self.import_vscroll.set)
         
@@ -743,7 +746,7 @@ class ModelEditor(tk.Toplevel):
             else:
                 icon = "PNG"
                 
-            ttk.Label(row, text=f"{icon}: {fname}", width=15).pack(side="left")
+            ttk.Label(row, text=f"{icon}: {fname}", width=20).pack(side="left", padx=2)  # Увеличил ширину
             ttk.Button(row, text="+", width=2, command=lambda f=fname: self.add_to_canvas(f)).pack(side="left", padx=2)
             ttk.Button(row, text="-", width=2, command=lambda f=fname: self.remove_from_canvas_by_file(f)).pack(side="left", padx=2)
             ttk.Button(row, text="🗑️", width=2, command=lambda f=fname: self.delete_file(f)).pack(side="left", padx=2)
