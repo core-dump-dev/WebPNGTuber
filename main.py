@@ -50,7 +50,8 @@ class App:
             'shake': False,
             'bounce': False,
             'pulse': False,
-            'blink': True
+            'blink': True,
+            'random_effect': False
         })
         self.renderer.set_effects(self.effects)
 
@@ -65,10 +66,9 @@ class App:
         self.slot_previews = [None] * 6
 
         try:
-            # Установка иконки для главного окна
             root.iconbitmap(os.path.join(BASE_DIR, 'favicon.ico'))
-        except Exception as e:
-            print(f"Ошибка загрузки иконки: {e}")
+        except Exception:
+            pass
 
         for r in range(3):
             for c in range(2):
@@ -120,7 +120,9 @@ class App:
 
         self.sensitivity = tk.DoubleVar(value=self.settings.get('sensitivity', 1.0))
         ttk.Label(mic_frame, text="Чувствительность").pack(anchor="w")
-        ttk.Scale(mic_frame, from_=0.1, to=5.0, variable=self.sensitivity, orient="horizontal").pack(fill="x")
+        sens_scale = ttk.Scale(mic_frame, from_=0.1, to=5.0, variable=self.sensitivity, orient="horizontal")
+        sens_scale.pack(fill="x")
+        sens_scale.bind("<ButtonRelease-1>", lambda e: self.on_sensitivity_change())
 
         # Подавление шума
         self.noise_gate_enabled = tk.BooleanVar(value=self.settings.get('noise_gate_enabled', True))
@@ -152,19 +154,27 @@ class App:
 
         ttk.Label(thresh_frame, text="Тишина:").grid(row=0, column=0, sticky="w", padx=2)
         self.silent_thresh = tk.DoubleVar(value=self.thresholds['silent'])
-        ttk.Entry(thresh_frame, textvariable=self.silent_thresh, width=8).grid(row=0, column=1, padx=2)
+        silent_entry = ttk.Entry(thresh_frame, textvariable=self.silent_thresh, width=8)
+        silent_entry.grid(row=0, column=1, padx=2)
+        silent_entry.bind("<Return>", lambda e: self.update_thresholds())
 
         ttk.Label(thresh_frame, text="Шёпот:").grid(row=0, column=2, sticky="w", padx=2)
         self.whisper_thresh = tk.DoubleVar(value=self.thresholds['whisper'])
-        ttk.Entry(thresh_frame, textvariable=self.whisper_thresh, width=8).grid(row=0, column=3, padx=2)
+        whisper_entry = ttk.Entry(thresh_frame, textvariable=self.whisper_thresh, width=8)
+        whisper_entry.grid(row=0, column=3, padx=2)
+        whisper_entry.bind("<Return>", lambda e: self.update_thresholds())
 
         ttk.Label(thresh_frame, text="Норма:").grid(row=1, column=0, sticky="w", padx=2)
         self.normal_thresh = tk.DoubleVar(value=self.thresholds['normal'])
-        ttk.Entry(thresh_frame, textvariable=self.normal_thresh, width=8).grid(row=1, column=1, padx=2)
+        normal_entry = ttk.Entry(thresh_frame, textvariable=self.normal_thresh, width=8)
+        normal_entry.grid(row=1, column=1, padx=2)
+        normal_entry.bind("<Return>", lambda e: self.update_thresholds())
 
         ttk.Label(thresh_frame, text="Крик:").grid(row=1, column=2, sticky="w", padx=2)
         self.shout_thresh = tk.DoubleVar(value=self.thresholds['shout'])
-        ttk.Entry(thresh_frame, textvariable=self.shout_thresh, width=8).grid(row=1, column=3, padx=2)
+        shout_entry = ttk.Entry(thresh_frame, textvariable=self.shout_thresh, width=8)
+        shout_entry.grid(row=1, column=3, padx=2)
+        shout_entry.bind("<Return>", lambda e: self.update_thresholds())
 
         ttk.Button(thresh_frame, text="Применить", command=self.update_thresholds).grid(
             row=2, column=0, columnspan=4, pady=4, sticky="ew")
@@ -187,26 +197,38 @@ class App:
             'shout': tk.BooleanVar(value=self.settings.get('active_states', {}).get('shout', True))
         }
 
-        ttk.Checkbutton(states_frame, text="Тишина", variable=self.state_vars['silent']).grid(row=0, column=0, sticky="w", padx=5)
-        ttk.Checkbutton(states_frame, text="Шёпот", variable=self.state_vars['whisper']).grid(row=0, column=1, sticky="w", padx=5)
-        ttk.Checkbutton(states_frame, text="Норма", variable=self.state_vars['normal']).grid(row=1, column=0, sticky="w", padx=5)
-        ttk.Checkbutton(states_frame, text="Крик", variable=self.state_vars['shout']).grid(row=1, column=1, sticky="w", padx=5)
-
-        ttk.Button(states_frame, text="Применить состояния", command=self.update_active_states).grid(row=2, column=0, columnspan=2, pady=5)
+        ttk.Checkbutton(states_frame, text="Тишина", variable=self.state_vars['silent'],
+                       command=self.update_active_states).grid(row=0, column=0, sticky="w", padx=5)
+        ttk.Checkbutton(states_frame, text="Шёпот", variable=self.state_vars['whisper'],
+                       command=self.update_active_states).grid(row=0, column=1, sticky="w", padx=5)
+        ttk.Checkbutton(states_frame, text="Норма", variable=self.state_vars['normal'],
+                       command=self.update_active_states).grid(row=1, column=0, sticky="w", padx=5)
+        ttk.Checkbutton(states_frame, text="Крик", variable=self.state_vars['shout'],
+                       command=self.update_active_states).grid(row=1, column=1, sticky="w", padx=5)
 
         # Глобальные эффекты
         effects_frame = ttk.LabelFrame(ctrl_frame, text="Глобальные эффекты")
         effects_frame.pack(fill="x", padx=8, pady=6)
+        
         self.shake = tk.BooleanVar(value=self.effects.get('shake', False))
-        ttk.Checkbutton(effects_frame, text="Дрожание", variable=self.shake).pack(anchor="w")
+        ttk.Checkbutton(effects_frame, text="Дрожание", variable=self.shake,
+                       command=self.update_effects).pack(anchor="w")
+        
         self.bounce = tk.BooleanVar(value=self.effects.get('bounce', False))
-        ttk.Checkbutton(effects_frame, text="Прыжки", variable=self.bounce).pack(anchor="w")
+        ttk.Checkbutton(effects_frame, text="Прыжки", variable=self.bounce,
+                       command=self.update_effects).pack(anchor="w")
+        
         self.pulse = tk.BooleanVar(value=self.effects.get('pulse', False))
-        ttk.Checkbutton(effects_frame, text="Пульсация", variable=self.pulse).pack(anchor="w")
+        ttk.Checkbutton(effects_frame, text="Пульсация", variable=self.pulse,
+                       command=self.update_effects).pack(anchor="w")
+        
         self.blink = tk.BooleanVar(value=self.effects.get('blink', True))
-        ttk.Checkbutton(effects_frame, text="Моргание (глаза)", variable=self.blink, command=lambda: self.renderer.set_effects(self.get_effects())).pack(anchor="w")
+        ttk.Checkbutton(effects_frame, text="Моргание (глаза)", variable=self.blink,
+                       command=self.update_effects).pack(anchor="w")
+        
         self.random_effect = tk.BooleanVar(value=self.effects.get('random_effect', False))
-        ttk.Checkbutton(effects_frame, text="Случайная смена состояний", variable=self.random_effect, command=lambda: self.renderer.set_effects(self.get_effects())).pack(anchor="w")
+        ttk.Checkbutton(effects_frame, text="Случайная смена состояний", variable=self.random_effect,
+                       command=self.update_effects).pack(anchor="w")
 
         # Настройки idle-режима
         idle_frame = ttk.LabelFrame(ctrl_frame, text="Idle-режим")
@@ -218,7 +240,9 @@ class App:
 
         ttk.Label(idle_frame, text="Время до затемнения (сек):").pack(anchor="w", padx=5)
         self.idle_timeout = tk.DoubleVar(value=self.settings.get('idle_timeout', 60.0))
-        ttk.Entry(idle_frame, textvariable=self.idle_timeout, width=8).pack(anchor="w", padx=5, pady=2)
+        idle_entry = ttk.Entry(idle_frame, textvariable=self.idle_timeout, width=8)
+        idle_entry.pack(anchor="w", padx=5, pady=2)
+        idle_entry.bind("<Return>", lambda e: self.update_idle_setting())
 
         # Сохранение настроек
         ttk.Button(ctrl_frame, text="Сохранить настройки", command=self.save_settings).pack(fill="x", padx=8, pady=10)
@@ -270,6 +294,10 @@ class App:
         self.toggle_noise_gate()
         self.audio.start()
 
+    def on_sensitivity_change(self):
+        """Изменение чувствительности"""
+        self.audio.set_sensitivity(self.sensitivity.get())
+
     def toggle_noise_gate(self):
         """Переключение подавления шума"""
         enabled = self.noise_gate_enabled.get()
@@ -277,8 +305,8 @@ class App:
         self.audio.noise_gate_threshold = threshold
         self.renderer.set_noise_gate(threshold)
 
-    def get_effects(self):
-        """Получение текущих эффектов"""
+    def update_effects(self):
+        """Обновление эффектов"""
         effects = {
             'shake': self.shake.get(),
             'bounce': self.bounce.get(),
@@ -287,12 +315,12 @@ class App:
             'random_effect': self.random_effect.get()
         }
         self.renderer.set_effects(effects)
-        return effects
 
     def update_idle_setting(self):
         """Обновление настройки idle-режима"""
         enabled = self.idle_enabled.get()
-        self.renderer.set_idle(enabled, self.idle_timeout.get())
+        timeout = self.idle_timeout.get()
+        self.renderer.set_idle(enabled, timeout)
 
     def load_settings(self):
         """Загрузка настроек"""
@@ -309,7 +337,13 @@ class App:
         settings = {
             'thresholds': self.thresholds,
             'active_states': {state: var.get() for state, var in self.state_vars.items()},
-            'effects': self.get_effects(),
+            'effects': {
+                'shake': self.shake.get(),
+                'bounce': self.bounce.get(),
+                'pulse': self.pulse.get(),
+                'blink': self.blink.get(),
+                'random_effect': self.random_effect.get()
+            },
             'sensitivity': self.sensitivity.get(),
             'noise_gate_enabled': self.noise_gate_enabled.get(),
             'mic_device': self.device_var.get(),
@@ -363,6 +397,7 @@ class App:
         for state, var in self.state_vars.items():
             active_states[state] = var.get()
         self.renderer.set_active_states(active_states)
+        self.update_threshold_visuals()  # Обновляем визуализацию порогов
 
     def update_thresholds(self):
         """Обновление порогов голоса"""
@@ -376,14 +411,21 @@ class App:
         self.update_threshold_visuals()
 
     def update_threshold_visuals(self):
-        """Обновление визуализации порогов"""
+        """Обновление визуализации порогов - только активные состояния"""
         canvas_width = self.level_canvas.winfo_width()
         if canvas_width < 10:
             return
 
+        # Удаляем старые метки
         self.level_canvas.delete("threshold_label")
 
         for key in self.thresholds:
+            # Показываем только активные состояния
+            if not self.state_vars.get(key, tk.BooleanVar(value=True)).get():
+                # Скрываем линию неактивного состояния
+                self.level_canvas.coords(self.threshold_lines[key], -10, 0, -10, 40)
+                continue
+                
             try:
                 val = float(self.thresholds[key])
             except Exception:
@@ -472,9 +514,7 @@ class App:
             except:
                 pass
 
-            messagebox.showinfo("Загружено", f"Модель загружена из слота {idx+1}")
-        else:
-            messagebox.showwarning("Нет модели", f"Превью не найдено в {slot_dir}")
+        messagebox.showinfo("Загружено", f"Модель загружена из слота {idx+1}")
 
     def open_editor(self):
         """Открытие редактора моделей"""
@@ -491,8 +531,31 @@ class App:
                 thresholds=self.thresholds
             )
             
-            editor.protocol("WM_DELETE_WINDOW", lambda: self.on_editor_close(editor))
-            editor.wait_window(editor)
+            def on_editor_close():
+                try:
+                    editor.audio_processor.stop()
+                except Exception:
+                    pass
+                
+                main_window.attributes('-disabled', False)
+                main_window.focus_set()
+                self.refresh_slot_buttons()
+                
+                try:
+                    self.audio.stop()
+                    self.audio = AudioProcessor(
+                        callback=self.on_audio_level,
+                        device=self.device_var.get()
+                    )
+                    self.audio.noise_gate_threshold = 0.01 if self.noise_gate_enabled.get() else 0.0
+                    self.audio.set_sensitivity(self.sensitivity.get())
+                    self.audio.start()
+                except Exception as e:
+                    print("Ошибка перезапуска аудио:", e)
+                
+                editor.destroy()
+            
+            editor.protocol("WM_DELETE_WINDOW", on_editor_close)
             
         except Exception as e:
             import traceback
@@ -500,31 +563,7 @@ class App:
             with open("error.log", "w", encoding="utf-8") as f:
                 f.write(tb)
             messagebox.showerror("Ошибка редактора", f"Не удалось открыть редактор: {e}. Смотри error.log")
-            main_window.attributes('-disabled', False)
-
-    def on_editor_close(self, editor):
-        """Обработка закрытия редактора"""
-        try:
-            editor.audio_processor.stop()
-        except Exception:
-            pass
-        
-        self.root.attributes('-disabled', False)
-        self.root.focus_set()
-        self.refresh_slot_buttons()
-        
-        try:
-            self.audio.stop()
-            self.audio = AudioProcessor(
-                callback=self.on_audio_level,
-                device=self.device_var.get()
-            )
-            self.audio.noise_gate_threshold = 0.01 if self.noise_gate_enabled.get() else 0.0
-            self.audio.start()
-        except Exception as e:
-            print("Ошибка перезапуска аудио:", e)
-        
-        editor.destroy()
+            self.root.attributes('-disabled', False)
 
     def on_model_saved(self, model_data, model_dir):
         """Обработка сохранения модели"""

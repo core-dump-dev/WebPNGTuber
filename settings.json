@@ -6,7 +6,7 @@
     "shout": 0.9
   },
   "active_states": {
-    "silent": true,
+    "silent": false,
     "whisper": true,
     "normal": true,
     "shout": true
@@ -18,9 +18,9 @@
     "blink": true,
     "random_effect": true
   },
-  "sensitivity": 0.5,
-  "noise_gate_enabled": true,
-  "mic_device": "",
+  "sensitivity": 2.095475113122172,
+  "noise_gate_enabled": false,
+  "mic_device": "Microphone (SHEM-BOY)",
   "idle_enabled": true,
   "idle_timeout": 5.0
 }

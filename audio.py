@@ -12,7 +12,8 @@ class AudioProcessor:
         self._thread = None
         self.device = device
         self.noise_gate_threshold = 0.01
-        self.device_index = None  # Индекс устройства
+        self.device_index = None
+        self.sensitivity = 1.0
 
         # Подавление вывода ошибок для EXE
         if getattr(sys, 'frozen', False):
@@ -25,6 +26,10 @@ class AudioProcessor:
                 if dev['name'] == device and dev['max_input_channels'] > 0:
                     self.device_index = i
                     break
+
+    def set_sensitivity(self, sensitivity):
+        """Установка чувствительности"""
+        self.sensitivity = max(0.1, min(5.0, sensitivity))
 
     def start(self):
         """Запуск обработки аудио"""
@@ -50,14 +55,24 @@ class AudioProcessor:
         t = 0.0
         while self.running:
             t += 0.1
-            level = (np.sin(t)+1)/2
+            # Более реалистичная симуляция с разными уровнями
+            if int(t) % 10 < 3:
+                level = 0.1  # Тишина
+            elif int(t) % 10 < 6:
+                level = 0.4  # Шёпот
+            elif int(t) % 10 < 8:
+                level = 0.7  # Норма
+            else:
+                level = 0.9  # Крик
+                
+            level = level * self.sensitivity
             self._level = level
             if self.callback:
                 try:
                     self.callback(level)
                 except:
                     pass
-            time.sleep(0.05)
+            time.sleep(0.1)
 
     def _capture_loop(self):
         """Основной цикл захвата аудио"""
@@ -79,7 +94,7 @@ class AudioProcessor:
                 channels=1, 
                 callback=callback, 
                 samplerate=44100, 
-                blocksize=512,  # Уменьшенный размер блока для снижения задержки
+                blocksize=1024,
                 **device_params
             ):
                 while self.running:
@@ -87,10 +102,11 @@ class AudioProcessor:
                         data = q.get(timeout=0.5)
                     except queue.Empty:
                         continue
-                    rms = np.sqrt(np.mean(data**2))
-                    level = min(1.0, rms*10)
                     
-                    # Применение подавления шума
+                    rms = np.sqrt(np.mean(data**2))
+                    level = min(1.0, rms * 10 * self.sensitivity)
+                    
+                    # Улучшенное подавление шума
                     if level < self.noise_gate_threshold:
                         level = 0.0
                     

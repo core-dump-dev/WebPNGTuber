@@ -48,9 +48,9 @@ class Renderer:
 
         # Idle режим
         self.idle_enabled = False
-        self.idle_timeout = 60.0  # seconds
+        self.idle_timeout = 60.0
         self.last_activity_time = time.time()
-        self.idle_brightness = 0.5  # Яркость в idle-режиме (0.0 - черный, 1.0 - оригинал)
+        self.idle_brightness = 0.5
 
         # Словари для быстрого доступа
         self.layers_by_name = {}
@@ -59,36 +59,21 @@ class Renderer:
     def set_idle(self, enabled, timeout):
         self.idle_enabled = enabled
         self.idle_timeout = timeout
-        # Сбросим таймер при изменении настроек
         self.last_activity_time = time.time()
-        
-        # Принудительно обновим состояние активности
-        if enabled:
-            # Если включен, сбрасываем таймер
-            self.last_activity_time = time.time()
-        else:
-            # Если выключен, сбрасываем состояние бездействия
-            # Это нужно, чтобы изображение сразу вернулось к нормальному виду
-            pass
 
     def set_noise_gate(self, threshold):
-        """Установка порога подавления шума"""
         self.noise_gate = threshold
 
     def set_effects(self, effects):
-        """Установка эффектов"""
         self.effects = effects
 
     def set_thresholds(self, thresholds):
-        """Установка порогов голоса"""
         self.thresholds = thresholds
 
     def set_active_states(self, active_states):
-        """Установка активных состояний"""
         self.active_states = active_states
 
     def start(self):
-        """Запуск рендерера"""
         if self._running:
             return
         self._running = True
@@ -96,13 +81,11 @@ class Renderer:
         self._thread.start()
 
     def stop(self):
-        """Остановка рендерера"""
         self._running = False
         if self._thread:
             self._thread.join(timeout=1.0)
 
     def load_model(self, model_json, model_dir):
-        """Загрузка модели"""
         self.model = model_json
         self.model_dir = model_dir
         self._image_cache = {}
@@ -111,7 +94,6 @@ class Renderer:
         self._gif_last_update = {}
         self._gif_current_frame = {}
         
-        # Создаем словари для быстрого доступа
         self.layers_by_name = {l.get('name'): l for l in self.model.get('layers', [])}
         self.groups_by_name = {g.get('name'): g for g in self.model.get('groups', [])}
         
@@ -127,8 +109,9 @@ class Renderer:
             try:
                 scale = float(layer.get("scale", 1.0))
                 rotation = int(layer.get("rotation", 0))
+                flip_h = bool(layer.get("flip_horizontal", False))
+                flip_v = bool(layer.get("flip_vertical", False))
 
-                # Обработка GIF
                 if layer.get("is_gif", False):
                     self._gif_frames[layer.get("name")] = []
                     self._gif_frame_times[layer.get("name")] = []
@@ -139,12 +122,24 @@ class Renderer:
                     for frame in range(img.n_frames):
                         img.seek(frame)
                         frame_img = img.copy().convert("RGBA")
+                        
+                        # Применяем трансформации в правильном порядке
+                        # 1. Масштаб
                         if scale != 1.0:
-                            new_width = int(frame_img.width * scale)
-                            new_height = int(frame_img.height * scale)
+                            new_width = max(1, int(frame_img.width * scale))
+                            new_height = max(1, int(frame_img.height * scale))
                             frame_img = frame_img.resize((new_width, new_height), Image.LANCZOS)
+                            
+                        # 2. Поворот
                         if rotation != 0:
-                            frame_img = frame_img.rotate(rotation, expand=True)
+                            frame_img = frame_img.rotate(rotation, expand=True, resample=Image.BICUBIC)
+                            
+                        # 3. Зеркалирование (применяется после всех остальных трансформаций)
+                        if flip_h:
+                            frame_img = frame_img.transpose(Image.FLIP_LEFT_RIGHT)
+                        if flip_v:
+                            frame_img = frame_img.transpose(Image.FLIP_TOP_BOTTOM)
+                            
                         self._gif_frames[layer.get("name")].append(frame_img)
                         try:
                             duration = img.info.get('duration', 100) / 1000.0
@@ -153,57 +148,74 @@ class Renderer:
                             self._gif_frame_times[layer.get("name")].append(0.1)
                 else:
                     image = Image.open(fp).convert("RGBA")
+                    
+                    # Применяем трансформации в правильном порядке
+                    # 1. Масштаб
                     if scale != 1.0:
-                        new_width = int(image.width * scale)
-                        new_height = int(image.height * scale)
+                        new_width = max(1, int(image.width * scale))
+                        new_height = max(1, int(image.height * scale))
                         image = image.resize((new_width, new_height), Image.LANCZOS)
+                        
+                    # 2. Поворот
                     if rotation != 0:
-                        image = image.rotate(rotation, expand=True)
+                        image = image.rotate(rotation, expand=True, resample=Image.BICUBIC)
+                        
+                    # 3. Зеркалирование (применяется после всех остальных трансформаций)
+                    if flip_h:
+                        image = image.transpose(Image.FLIP_LEFT_RIGHT)
+                    if flip_v:
+                        image = image.transpose(Image.FLIP_TOP_BOTTOM)
+                        
                     self._image_cache[layer.get("name")] = image
             except Exception as e:
                 print(f"Ошибка загрузки изображения: {e}")
         
-        # Инициализация эффектов
         for g in self.model.get("groups", []):
             name = g.get("name")
             if name not in self.group_blink_timers:
                 self.group_blink_timers[name] = time.time() + random.uniform(2.0,6.0)
                 self.group_blink_until[name] = 0.0
             
-            # Инициализация случайного эффекта
             if g.get("random_effect", False):
                 self.group_random_timers[name] = time.time()
                 self.group_random_current[name] = None
 
     def set_audio_level(self, level):
-        """Установка уровня аудио"""
         if level < self.noise_gate:
             level = 0.0
         self.audio_level = max(0.0, float(level))
-        # Если есть звук выше порога шумодава, обновляем время активности
-        if level > self.noise_gate:
+        
+        # Обновляем время активности только если звук выше минимального активного порога
+        if self.idle_enabled and level > self._get_min_active_threshold():
             self.last_activity_time = time.time()
 
+    def _get_min_active_threshold(self):
+        """Получает минимальный порог из активных состояний"""
+        min_threshold = 1.0  # Максимальное значение по умолчанию
+        
+        for state, active in self.active_states.items():
+            if active and state in self.thresholds:
+                threshold = self.thresholds[state]
+                if threshold < min_threshold:
+                    min_threshold = threshold
+        
+        return min_threshold if min_threshold < 1.0 else 0.0
+
     def get_frame_bytes(self):
-        """Получение кадра в виде байтов"""
         with self._lock:
             return self._frame_bytes
 
     def _resolve_to_layer(self, name, group_name, visited=None):
-        """Рекурсивно разрешает имя группы до имени слоя"""
         if visited is None:
             visited = set()
         
-        # Если имя уже посещено - возвращаем None (защита от циклов)
         if name in visited:
             return None
         visited.add(name)
         
-        # Если это слой - возвращаем его
         if name in self.layers_by_name:
             return name
             
-        # Если это группа - обрабатываем рекурсивно
         if name in self.groups_by_name:
             group = self.groups_by_name[name]
             chosen = self._choose_group_child(group)
@@ -213,7 +225,6 @@ class Renderer:
         return None
 
     def _choose_group_child(self, group):
-        """Выбор дочернего элемента группы с поддержкой вложенных групп"""
         group_name = group.get("name")
         logic = group.get("logic", {})
         
@@ -269,13 +280,13 @@ class Renderer:
         
         # Обработка голосовых состояний
         current_state = "silent"
-        if self.audio_level > self.thresholds['shout']:
+        if self.audio_level > self.thresholds['shout'] and self.active_states.get('shout', True):
             current_state = "shout"
-        elif self.audio_level > self.thresholds['normal']:
+        elif self.audio_level > self.thresholds['normal'] and self.active_states.get('normal', True):
             current_state = "normal"
-        elif self.audio_level > self.thresholds['whisper']:
+        elif self.audio_level > self.thresholds['whisper'] and self.active_states.get('whisper', True):
             current_state = "whisper"
-        elif self.audio_level > self.thresholds['silent']:
+        elif self.audio_level > self.thresholds['silent'] and self.active_states.get('silent', True):
             current_state = "silent"
         
         if current_state in logic and self.active_states.get(current_state, True):
@@ -291,7 +302,6 @@ class Renderer:
         return logic.get("silent")
 
     def _get_layer_image(self, layer_name):
-        """Получение изображения слоя"""
         if layer_name in self._gif_frames:
             now = time.time()
             frames = self._gif_frames[layer_name]
@@ -312,7 +322,6 @@ class Renderer:
         return None
 
     def _loop(self):
-        """Основной цикл рендеринга"""
         frame_time = 1.0 / self.fps
         while self._running:
             start = time.time()
@@ -322,7 +331,6 @@ class Renderer:
                 for group in self.model.get("groups", []):
                     chosen = self._choose_group_child(group)
                     if chosen:
-                        # Разрешаем вложенные группы до конкретного слоя
                         resolved = self._resolve_to_layer(chosen, group['name'])
                         if resolved:
                             group_choices[group['name']] = resolved
@@ -370,11 +378,10 @@ class Renderer:
                     
                     image = orig_image
             
-            # ПРИМЕНЕНИЕ IDLE-РЕЖИМА К МОДЕЛИ
+            # Применение idle-режима
             if self.idle_enabled:
                 current_time = time.time()
                 if current_time - self.last_activity_time > self.idle_timeout:
-                    # Уменьшаем яркость изображения модели
                     enhancer = ImageEnhance.Brightness(img)
                     img = enhancer.enhance(self.idle_brightness)
 
