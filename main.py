@@ -154,20 +154,22 @@ class App:
         self.vol_label = ttk.Label(mic_frame, text="Уровень: 0.00")
         self.vol_label.pack(anchor="w")
 
-        # Чувствительность с отображением в процентах
+        # Чувствительность с шагом 5%
         sens_frame = ttk.Frame(mic_frame)
         sens_frame.pack(fill="x", pady=2)
         
         ttk.Label(sens_frame, text="Чувствительность").pack(anchor="w")
-        self.sensitivity = tk.DoubleVar(value=self.settings.get('sensitivity', 1.0))
+        self.sensitivity = tk.DoubleVar(value=self._round_to_step(self.settings.get('sensitivity', 1.0), 0.05))
         self.sens_percent_label = ttk.Label(sens_frame, text=f"{self.sensitivity.get()*100:.0f}%")
         self.sens_percent_label.pack(anchor="e")
         
+        # Шкала чувствительности с шагом 5% (0.05)
         sens_scale = ttk.Scale(mic_frame, from_=0.1, to=5.0, variable=self.sensitivity, orient="horizontal")
         sens_scale.pack(fill="x")
+        sens_scale.configure(command=self._on_sensitivity_scale_move)
         sens_scale.bind("<ButtonRelease-1>", lambda e: self.on_sensitivity_change())
 
-        # Подавление шума с настройкой мощности
+        # Подавление шума с настройкой мощности и шагом 0.005
         noise_gate_frame = ttk.Frame(mic_frame)
         noise_gate_frame.pack(fill="x", pady=2)
         
@@ -175,10 +177,17 @@ class App:
         ttk.Checkbutton(noise_gate_frame, text="Подавление шума", variable=self.noise_gate_enabled,
                        command=self.toggle_noise_gate).pack(side="left")
         
-        self.noise_gate_threshold = tk.DoubleVar(value=self.settings.get('noise_gate_threshold', 0.01))
-        noise_gate_scale = ttk.Scale(noise_gate_frame, from_=0.001, to=0.05, variable=self.noise_gate_threshold, 
-                                   orient="horizontal", length=100)
-        noise_gate_scale.pack(side="left", padx=5)
+        # Текущее значение подавления шума
+        self.noise_gate_value_label = ttk.Label(noise_gate_frame, text="0.010")
+        self.noise_gate_value_label.pack(side="right", padx=5)
+        
+        self.noise_gate_threshold = tk.DoubleVar(value=self._round_to_step(self.settings.get('noise_gate_threshold', 0.01), 0.005))
+        
+        # Шкала подавления шума с шагом 0.005
+        noise_gate_scale = ttk.Scale(mic_frame, from_=0.001, to=0.05, variable=self.noise_gate_threshold, 
+                                   orient="horizontal")
+        noise_gate_scale.pack(fill="x", pady=2)
+        noise_gate_scale.configure(command=self._on_noise_gate_scale_move)
         noise_gate_scale.bind("<ButtonRelease-1>", lambda e: self.update_noise_gate_threshold())
 
         # Индикатор уровня
@@ -318,6 +327,24 @@ class App:
         # Обновление слотов
         self.refresh_slot_buttons()
 
+    def _round_to_step(self, value, step):
+        """Округление значения до ближайшего шага"""
+        return round(value / step) * step
+
+    def _on_sensitivity_scale_move(self, value):
+        """Обработка движения шкалы чувствительности"""
+        # Округляем до шага 5%
+        rounded_value = self._round_to_step(float(value), 0.05)
+        self.sensitivity.set(rounded_value)
+        self.sens_percent_label.config(text=f"{rounded_value*100:.0f}%")
+
+    def _on_noise_gate_scale_move(self, value):
+        """Обработка движения шкалы подавления шума"""
+        # Округляем до шага 0.005
+        rounded_value = self._round_to_step(float(value), 0.005)
+        self.noise_gate_threshold.set(rounded_value)
+        self.noise_gate_value_label.config(text=f"{rounded_value:.3f}")
+
     def get_audio_devices(self):
         """Получение списка аудиоустройств"""
         try:
@@ -351,8 +378,6 @@ class App:
     def on_sensitivity_change(self):
         """Изменение чувствительности"""
         self.audio.set_sensitivity(self.sensitivity.get())
-        # Обновляем отображение процентов
-        self.sens_percent_label.config(text=f"{self.sensitivity.get()*100:.0f}%")
         logger.info(f"Sensitivity changed to: {self.sensitivity.get()}")
 
     def toggle_noise_gate(self):
