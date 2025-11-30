@@ -578,15 +578,22 @@ class ModelEditor(tk.Toplevel):
         elif self.audio_level > self.thresholds['silent']:
             current_state = "silent"
             
+        # Fallback: если состояния нет в логике, пробуем другие варианты
         if current_state in logic and logic[current_state]:
-            return logic.get(current_state)
+            return logic[current_state]
+        elif "open" in logic and logic["open"]:
+            return logic["open"]
+        elif "normal" in logic and logic["normal"]:
+            return logic["normal"]
+        elif "silent" in logic and logic["silent"]:
+            return logic["silent"]
             
-        # Если нет подходящего голосового состояния, используем состояние "open"
-        if "open" in logic and logic["open"]:
-            return logic.get("open")
-            
-        # Если нет состояния "open", используем состояние "silent"
-        return logic.get("silent")
+        # Если ничего не подошло, возвращаем первый доступный слой из группы
+        for layer in self.model.get("layers", []):
+            if layer.get("group") == group_name and layer.get("visible", True):
+                return layer.get("name")
+                
+        return None
     
     def update_group_logic_menus(self, group_name):
         """Обновляет выпадающие меню для логики группы"""
@@ -740,36 +747,15 @@ class ModelEditor(tk.Toplevel):
             # Создаем временное изображение для композиции
             temp_image = Image.new("RGBA", (int(scaled_width), int(scaled_height)), (0, 0, 0, 0))
             
+            # Определяем список элементов для отображения
+            items_to_draw = []
+            
             if mode == "none":
                 # Режим редактирования - все видимые слои
-                for ci in self.items:
-                    if not ci.visible:
-                        continue
-                    img = ci.get_current_image()
-                    if not img:
-                        continue
-                        
-                    # Масштабируем изображение для текущего зума
-                    if self.zoom_level != 1.0:
-                        scaled_img_width = int(img.width * self.zoom_level)
-                        scaled_img_height = int(img.height * self.zoom_level)
-                        if scaled_img_width > 0 and scaled_img_height > 0:
-                            scaled_img = img.resize((scaled_img_width, scaled_img_height), Image.LANCZOS)
-                        else:
-                            scaled_img = img
-                    else:
-                        scaled_img = img
-                        
-                    # Рассчитываем позицию на временном изображении
-                    px = int((scaled_width // 2) - scaled_img.width // 2 + (ci.x * self.zoom_level))
-                    py = int((scaled_height // 2) - scaled_img.height // 2 + (ci.y * self.zoom_level))
-                    
-                    try:
-                        temp_image.alpha_composite(scaled_img, (px, py))
-                    except Exception as e:
-                        logger.error(f"Ошибка композиции: {e}")
+                items_to_draw = [ci for ci in self.items if ci.visible]
             else:
-                # Режим тестирования - полная логика как в рендерере
+                # Режим тестирования - используем логику групп
+                # Определяем текущее состояние на основе уровня
                 current_state = "silent"
                 if level > self.thresholds['shout']:
                     current_state = "shout"
@@ -781,33 +767,39 @@ class ModelEditor(tk.Toplevel):
                     current_state = "silent"
                 
                 # Получаем видимые элементы для текущего состояния
-                visible_items = self._get_visible_items_for_state(current_state)
-                
-                # Отрисовываем видимые элементы в правильном порядке
-                for ci in visible_items:
-                    img = ci.get_current_image()
-                    if not img:
-                        continue
-                        
-                    # Масштабируем изображение для текущего зума
-                    if self.zoom_level != 1.0:
-                        scaled_img_width = int(img.width * self.zoom_level)
-                        scaled_img_height = int(img.height * self.zoom_level)
-                        if scaled_img_width > 0 and scaled_img_height > 0:
-                            scaled_img = img.resize((scaled_img_width, scaled_img_height), Image.LANCZOS)
-                        else:
-                            scaled_img = img
+                items_to_draw = self._get_visible_items_for_state(current_state)
+            
+            # Сортируем элементы для правильного наложения
+            items_to_draw.sort(key=lambda x: self.items.index(x))
+            
+            # Отрисовываем все элементы
+            for ci in items_to_draw:
+                if not ci.visible:
+                    continue
+                    
+                img = ci.get_current_image()
+                if not img:
+                    continue
+                    
+                # Масштабируем изображение для текущего зума
+                if self.zoom_level != 1.0:
+                    scaled_img_width = int(img.width * self.zoom_level)
+                    scaled_img_height = int(img.height * self.zoom_level)
+                    if scaled_img_width > 0 and scaled_img_height > 0:
+                        scaled_img = img.resize((scaled_img_width, scaled_img_height), Image.LANCZOS)
                     else:
                         scaled_img = img
-                        
-                    # Рассчитываем позицию на временном изображении
-                    px = int((scaled_width // 2) - scaled_img.width // 2 + (ci.x * self.zoom_level))
-                    py = int((scaled_height // 2) - scaled_img.height // 2 + (ci.y * self.zoom_level))
+                else:
+                    scaled_img = img
                     
-                    try:
-                        temp_image.alpha_composite(scaled_img, (px, py))
-                    except Exception as e:
-                        logger.error(f"Ошибка композиции: {e}")
+                # Рассчитываем позицию на временном изображении
+                px = int((scaled_width // 2) - scaled_img.width // 2 + (ci.x * self.zoom_level))
+                py = int((scaled_height // 2) - scaled_img.height // 2 + (ci.y * self.zoom_level))
+                
+                try:
+                    temp_image.alpha_composite(scaled_img, (px, py))
+                except Exception as e:
+                    logger.error(f"Ошибка композиции для {ci.layer.get('name')}: {e}")
             
             # Конвертируем изображение в PhotoImage и отображаем
             try:
@@ -816,28 +808,29 @@ class ModelEditor(tk.Toplevel):
             except Exception as e:
                 logger.error(f"Ошибка отображения: {e}")
                 
-            # Выделение выбранных элементов
-            for ci in self.items:
-                if ci.layer.get("_selected"):
-                    img = ci.get_current_image()
-                    if not img:
-                        continue
+            # Выделение выбранных элементов (только в режиме редактирования)
+            if mode == "none":
+                for ci in self.items:
+                    if ci.layer.get("_selected"):
+                        img = ci.get_current_image()
+                        if not img:
+                            continue
+                            
+                        # Масштабируем для выделения
+                        if self.zoom_level != 1.0:
+                            scaled_img_width = int(img.width * self.zoom_level)
+                            scaled_img_height = int(img.height * self.zoom_level)
+                        else:
+                            scaled_img_width = img.width
+                            scaled_img_height = img.height
+                            
+                        px = canvas_x1 + int((scaled_width // 2) - scaled_img_width // 2 + (ci.x * self.zoom_level))
+                        py = canvas_y1 + int((scaled_height // 2) - scaled_img_height // 2 + (ci.y * self.zoom_level))
                         
-                    # Масштабируем для выделения
-                    if self.zoom_level != 1.0:
-                        scaled_img_width = int(img.width * self.zoom_level)
-                        scaled_img_height = int(img.height * self.zoom_level)
-                    else:
-                        scaled_img_width = img.width
-                        scaled_img_height = img.height
-                        
-                    px = canvas_x1 + int((scaled_width // 2) - scaled_img_width // 2 + (ci.x * self.zoom_level))
-                    py = canvas_y1 + int((scaled_height // 2) - scaled_img_height // 2 + (ci.y * self.zoom_level))
-                    
-                    self.canvas.create_rectangle(
-                        px, py, px + scaled_img_width, py + scaled_img_height,
-                        outline="cyan", width=2
-                    )
+                        self.canvas.create_rectangle(
+                            px, py, px + scaled_img_width, py + scaled_img_height,
+                            outline="cyan", width=2
+                        )
         except Exception as e:
             logger.error(f"Error in redraw_canvas: {e}")
             import traceback

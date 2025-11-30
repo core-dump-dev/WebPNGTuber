@@ -265,11 +265,13 @@ class Renderer:
             # Получаем текущее состояние для группы
             chosen = self._choose_group_child(group)
             
+            # Если состояние не определено, показываем все видимые слои группы
             if not chosen:
-                # Если ничего не выбрано, добавляем все видимые слои группы
                 for layer in self.model.get("layers", []):
                     if layer.get("group") == group_name and layer.get("visible", True):
-                        visible_layers.append(layer.get("name"))
+                        layer_name = layer.get("name")
+                        if layer_name:
+                            visible_layers.append(layer_name)
                 return
                 
             # Проверяем, является ли chosen группой или слоем
@@ -278,7 +280,8 @@ class Renderer:
                 process_group(chosen)
             else:
                 # Если это слой - добавляем его в видимые
-                visible_layers.append(chosen)
+                if chosen and chosen in self.layers_by_name:
+                    visible_layers.append(chosen)
         
         # Обрабатываем корневые группы (без родителя)
         root_groups = [name for name, g in self.groups_by_name.items() if not g.get("parent")]
@@ -288,9 +291,17 @@ class Renderer:
         # Добавляем элементы без групп
         for layer in self.model.get("layers", []):
             if not layer.get("group") and layer.get("visible", True):
-                visible_layers.append(layer.get("name"))
+                layer_name = layer.get("name")
+                if layer_name:
+                    visible_layers.append(layer_name)
+                    
+        # Убираем дубликаты и сохраняем порядок
+        unique_layers = []
+        for layer in visible_layers:
+            if layer not in unique_layers:
+                unique_layers.append(layer)
                 
-        return visible_layers
+        return unique_layers
     
     def _resolve_to_layer(self, name, group_name, visited=None):
         if visited is None:
@@ -308,6 +319,7 @@ class Renderer:
         return None
     
     def _choose_group_child(self, group):
+        """Выбирает дочерний элемент группы в зависимости от текущего состояния"""
         group_name = group.get("name")
         logic = group.get("logic", {})
         now = time.time()
@@ -316,6 +328,7 @@ class Renderer:
         if self.effects.get('blink', True):
             blink_freq = float(group.get("blink_freq", 0.0))
             
+            # Инициализация таймеров для группы, если их нет
             if group_name not in self.group_blink_timers:
                 self.group_blink_timers[group_name] = now + random.uniform(2.0, 6.0)
                 self.group_blink_until[group_name] = 0.0
@@ -326,24 +339,26 @@ class Renderer:
                     self.group_blink_timers[group_name] = now + blink_freq
                     
                 if now < self.group_blink_until.get(group_name, 0):
-                    if "blink" in logic:
-                        return logic["blink"]
+                    blink_target = logic.get("blink")
+                    if blink_target:
+                        return blink_target
                     else:
-                        for child in group.get("children", []):
-                            if any(kw in child.lower() for kw in ["close", "closed", "shut", "blink", "морг", "закр"]):
-                                return child
-        
-        # Если сейчас время моргания, мы уже вернули соответствующий слой
+                        # Автоматический поиск слоя для моргания
+                        for child_name in group.get("children", []):
+                            child = self.layers_by_name.get(child_name) or self.groups_by_name.get(child_name)
+                            if child and any(kw in child_name.lower() for kw in ["close", "closed", "shut", "blink", "морг", "закр"]):
+                                return child_name
         
         # Обработка случайного эффекта
         if group.get("random_effect", False) and self.effects.get('random_effect', False):
+            min_time = group.get("random_min", 5.0)
+            max_time = group.get("random_max", 10.0)
+            
+            # Инициализация таймеров для случайного эффекта
             if group_name not in self.group_random_timers:
                 self.group_random_timers[group_name] = now
                 self.group_random_current[group_name] = None
                 
-            min_time = group.get("random_min", 5.0)
-            max_time = group.get("random_max", 10.0)
-            
             if now > self.group_random_timers.get(group_name, 0):
                 children = group.get("children", [])
                 if children:
@@ -352,7 +367,7 @@ class Renderer:
                     # Фильтруем только слои (не группы) для случайного выбора
                     available = []
                     for child_name in children:
-                        # Проверяем, является ли child_name слоем или группой
+                        # Проверяем, является ли ребенок слоем или группой
                         if child_name in self.layers_by_name:
                             # Это слой
                             if child_name != blink_layer and child_name != open_layer:
@@ -366,14 +381,14 @@ class Renderer:
                     if available:
                         chosen = random.choice(available)
                         self.group_random_current[group_name] = chosen
-                
-                interval = random.uniform(min_time, max_time)
-                self.group_random_timers[group_name] = now + interval
-                
-            if self.group_random_current.get(group_name):
-                return self.group_random_current.get(group_name)
+            
+            interval = random.uniform(min_time, max_time)
+            self.group_random_timers[group_name] = now + interval
+            
+        if self.group_random_current.get(group_name):
+            return self.group_random_current.get(group_name)
         
-        # Обработка голосовых состояний
+        # Определение текущего состояния на основе уровня звука
         current_state = "silent"
         
         # Проверяем состояния в порядке убывания громкости
@@ -386,17 +401,22 @@ class Renderer:
         elif self.audio_level > self.thresholds['silent'] and self.active_states.get('silent', True):
             current_state = "silent"
         
-        # Выбор соответствующего слоя для текущего состояния
+        # Fallback-логика для выбора состояния
         if current_state in logic and self.active_states.get(current_state, True):
-            return logic.get(current_state)
-        
-        # Если нет подходящего голосового состояния, используем состояние "open"
-        open_layer = logic.get("open")
-        if open_layer:
-            return open_layer
+            return logic[current_state]
+        elif "open" in logic and logic["open"]:
+            return logic["open"]
+        elif "normal" in logic and logic["normal"]:
+            return logic["normal"]
+        elif "silent" in logic and logic["silent"]:
+            return logic["silent"]
             
-        # Если нет состояния "open", используем состояние "silent"
-        return logic.get("silent")
+        # Если ничего не подошло, пробуем найти первый доступный слой
+        for child_name in group.get("children", []):
+            if child_name in self.layers_by_name:
+                return child_name
+                
+        return None
     
     def _get_layer_image(self, layer_name):
         if layer_name in self._gif_frames:
