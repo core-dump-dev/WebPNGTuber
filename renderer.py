@@ -381,12 +381,13 @@ class Renderer:
                     if available:
                         chosen = random.choice(available)
                         self.group_random_current[group_name] = chosen
+                        # Устанавливаем новый таймер
+                        interval = random.uniform(min_time, max_time)
+                        self.group_random_timers[group_name] = now + interval
             
-            interval = random.uniform(min_time, max_time)
-            self.group_random_timers[group_name] = now + interval
-            
-        if self.group_random_current.get(group_name):
-            return self.group_random_current.get(group_name)
+            # Возвращаем текущий случайный выбор, если он есть
+            if self.group_random_current.get(group_name):
+                return self.group_random_current.get(group_name)
         
         # Определение текущего состояния на основе уровня звука
         current_state = "silent"

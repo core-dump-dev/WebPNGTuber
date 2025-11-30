@@ -1,4 +1,4 @@
-import threading
+import threading, time
 import tkinter as tk
 from tkinter import ttk, messagebox
 from editor import ModelEditor
@@ -70,7 +70,7 @@ class App:
         self.renderer = Renderer(width=700, height=700, fps=60)
         self.audio = AudioProcessor(callback=self.on_audio_level,
                                    device=self.settings.get('mic_device'))
-        self.audio.noise_gate_threshold = 0.01
+        self.audio.noise_gate_threshold = self.settings.get('noise_gate_threshold', 0.01)
         self.webserver = None
 
         # Настройки по умолчанию
@@ -167,10 +167,19 @@ class App:
         sens_scale.pack(fill="x")
         sens_scale.bind("<ButtonRelease-1>", lambda e: self.on_sensitivity_change())
 
-        # Подавление шума
+        # Подавление шума с настройкой мощности
+        noise_gate_frame = ttk.Frame(mic_frame)
+        noise_gate_frame.pack(fill="x", pady=2)
+        
         self.noise_gate_enabled = tk.BooleanVar(value=self.settings.get('noise_gate_enabled', True))
-        ttk.Checkbutton(mic_frame, text="Подавление шума", variable=self.noise_gate_enabled,
-                       command=self.toggle_noise_gate).pack(anchor="w")
+        ttk.Checkbutton(noise_gate_frame, text="Подавление шума", variable=self.noise_gate_enabled,
+                       command=self.toggle_noise_gate).pack(side="left")
+        
+        self.noise_gate_threshold = tk.DoubleVar(value=self.settings.get('noise_gate_threshold', 0.01))
+        noise_gate_scale = ttk.Scale(noise_gate_frame, from_=0.001, to=0.05, variable=self.noise_gate_threshold, 
+                                   orient="horizontal", length=100)
+        noise_gate_scale.pack(side="left", padx=5)
+        noise_gate_scale.bind("<ButtonRelease-1>", lambda e: self.update_noise_gate_threshold())
 
         # Индикатор уровня
         ttk.Label(mic_frame, text="Индикатор уровня:").pack(anchor="w", pady=(5,0))
@@ -297,7 +306,7 @@ class App:
         # Запуск рендерера
         self.renderer.start()
         self.renderer.set_thresholds(self.thresholds)
-        self.renderer.set_noise_gate(0.01 if self.noise_gate_enabled.get() else 0.0)
+        self.renderer.set_noise_gate(self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
         self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
 
         # Применение начальных состояний
@@ -335,7 +344,7 @@ class App:
         except Exception as e:
             logger.error(f"Error stopping audio: {e}")
         self.audio = AudioProcessor(callback=self.on_audio_level, device=device_name)
-        self.toggle_noise_gate()
+        self.audio.noise_gate_threshold = self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0
         self.audio.start()
         logger.info(f"Audio device changed to: {device_name}")
 
@@ -349,10 +358,18 @@ class App:
     def toggle_noise_gate(self):
         """Переключение подавления шума"""
         enabled = self.noise_gate_enabled.get()
-        threshold = 0.01 if enabled else 0.0
+        threshold = self.noise_gate_threshold.get() if enabled else 0.0
         self.audio.noise_gate_threshold = threshold
         self.renderer.set_noise_gate(threshold)
-        logger.info(f"Noise gate {'enabled' if enabled else 'disabled'}")
+        logger.info(f"Noise gate {'enabled' if enabled else 'disabled'} with threshold: {threshold}")
+
+    def update_noise_gate_threshold(self):
+        """Обновление порога подавления шума"""
+        if self.noise_gate_enabled.get():
+            threshold = self.noise_gate_threshold.get()
+            self.audio.noise_gate_threshold = threshold
+            self.renderer.set_noise_gate(threshold)
+            logger.info(f"Noise gate threshold updated to: {threshold}")
 
     def update_effects(self):
         """Обновление эффектов"""
@@ -397,6 +414,7 @@ class App:
             },
             'sensitivity': self.sensitivity.get(),
             'noise_gate_enabled': self.noise_gate_enabled.get(),
+            'noise_gate_threshold': self.noise_gate_threshold.get(),
             'mic_device': self.device_var.get(),
             'idle_enabled': self.idle_enabled.get(),
             'idle_timeout': self.idle_timeout.get()
@@ -587,7 +605,7 @@ class App:
                 main_window, 
                 on_save=self.on_model_saved,
                 device=self.device_var.get(),
-                noise_gate_enabled=self.noise_gate_enabled.get(),
+                noise_gate_threshold=self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0,
                 sensitivity=self.sensitivity.get(),
                 thresholds=self.thresholds
             )
@@ -608,7 +626,7 @@ class App:
                         callback=self.on_audio_level,
                         device=self.device_var.get()
                     )
-                    self.audio.noise_gate_threshold = 0.01 if self.noise_gate_enabled.get() else 0.0
+                    self.audio.noise_gate_threshold = self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0
                     self.audio.set_sensitivity(self.sensitivity.get())
                     self.audio.start()
                 except Exception as e:

@@ -32,6 +32,21 @@
       "_selected": false
     },
     {
+      "name": "closed-mouth",
+      "file": "closed-mouth.png",
+      "blink": false,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "scale": 1.0,
+      "rotation": 0,
+      "group": "cls-mouth",
+      "is_gif": false,
+      "flip_horizontal": false,
+      "flip_vertical": false,
+      "_selected": true
+    },
+    {
       "name": "open-eye-left",
       "file": "open-eye-left.png",
       "blink": false,
@@ -107,21 +122,6 @@
       "_selected": false
     },
     {
-      "name": "closed-mouth",
-      "file": "closed-mouth.png",
-      "blink": false,
-      "visible": true,
-      "x": 0,
-      "y": 0,
-      "scale": 1.0,
-      "rotation": 0,
-      "group": "cl-mouth",
-      "is_gif": false,
-      "flip_horizontal": false,
-      "flip_vertical": false,
-      "_selected": true
-    },
-    {
       "name": "smiled-mouth",
       "file": "smiled-mouth.png",
       "blink": false,
@@ -130,7 +130,7 @@
       "y": 0,
       "scale": 1.0,
       "rotation": 0,
-      "group": "cl-mouth",
+      "group": "cls-mouth",
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
@@ -157,8 +157,8 @@
     {
       "name": "eye-side",
       "children": [
-        "open-eye-left",
-        "open-eye-right"
+        "open-eye-right",
+        "open-eye-left"
       ],
       "parent": "eye",
       "logic": {},
@@ -170,14 +170,14 @@
     {
       "name": "mouth",
       "children": [
+        "open-mouth-max",
         "open-mouth-bigger",
         "open-mouth-min",
-        "open-mouth-max",
-        "cl-mouth"
+        "cls-mouth"
       ],
       "parent": null,
       "logic": {
-        "silent": "cl-mouth",
+        "silent": "cls-mouth",
         "whisper": "open-mouth-min",
         "normal": "open-mouth-bigger",
         "shout": "open-mouth-max"
@@ -188,10 +188,10 @@
       "random_max": 10.0
     },
     {
-      "name": "cl-mouth",
+      "name": "cls-mouth",
       "children": [
-        "closed-mouth",
-        "smiled-mouth"
+        "smiled-mouth",
+        "closed-mouth"
       ],
       "parent": "mouth",
       "logic": {},

@@ -142,7 +142,7 @@ class CanvasItem:
         return self.transformed_image if self.transformed_image else self.original_image
 
 class ModelEditor(tk.Toplevel):
-    def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_enabled=True, sensitivity=1.0, thresholds=None):
+    def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_threshold=0.01, sensitivity=1.0, thresholds=None):
         super().__init__(master)
         self.title("Редактор моделей")
         self.geometry("1400x800")
@@ -152,7 +152,7 @@ class ModelEditor(tk.Toplevel):
         
         # Сохраняем настройки микрофона
         self.mic_device = device
-        self.mic_noise_gate_enabled = noise_gate_enabled
+        self.mic_noise_gate_threshold = noise_gate_threshold
         self.mic_sensitivity = sensitivity
         self.thresholds = thresholds or {
             'silent': 0.05,
@@ -255,8 +255,6 @@ class ModelEditor(tk.Toplevel):
         test_frame.pack(fill="x", pady=10)
         
         self.test_mode_var = tk.StringVar(value="none")
-        ttk.Radiobutton(test_frame, text="Симуляция", variable=self.test_mode_var, 
-                       value="simulate", command=self.update_test_mode).pack(anchor="w")
         ttk.Radiobutton(test_frame, text="Микрофон", variable=self.test_mode_var, 
                        value="microphone", command=self.update_test_mode).pack(anchor="w")
         ttk.Radiobutton(test_frame, text="Выкл", variable=self.test_mode_var, 
@@ -274,7 +272,7 @@ class ModelEditor(tk.Toplevel):
             callback=self.on_audio_level,
             device=self.mic_device
         )
-        self.audio_processor.noise_gate_threshold = 0.01 if self.mic_noise_gate_enabled else 0.0
+        self.audio_processor.noise_gate_threshold = self.mic_noise_gate_threshold
         self.audio_processor.set_sensitivity(self.mic_sensitivity)
         
         ttk.Label(left, text="Импортированные изображения:").pack(anchor="w", pady=(8, 0))
@@ -1327,7 +1325,7 @@ class ModelEditor(tk.Toplevel):
                     callback=self.on_audio_level,
                     device=self.mic_device
                 )
-                self.audio_processor.noise_gate_threshold = 0.01 if self.mic_noise_gate_enabled else 0.0
+                self.audio_processor.noise_gate_threshold = self.mic_noise_gate_threshold
                 self.audio_processor.set_sensitivity(self.mic_sensitivity)
                 self.audio_processor.start()
             except Exception as e:
@@ -1563,12 +1561,10 @@ class ModelEditor(tk.Toplevel):
         center_x = self.canvas_width // 2
         center_y = self.canvas_height // 2
         
-        # Используем логику групп для создания превью в режиме "open" (нейтральное состояние)
-        visible_items = self._get_visible_items_for_state("open")
+        # Используем все видимые элементы для превью (не только по логике групп)
+        visible_items = [ci for ci in self.items if ci.visible]
         
         for ci in visible_items:
-            if not ci.visible:
-                continue
             img = ci.get_current_image()
             if not img:
                 continue
@@ -2139,27 +2135,7 @@ class ModelEditor(tk.Toplevel):
             
             if mode == "microphone":
                 level = self.audio_level
-            elif mode == "simulate":
-                # Плавная симуляция от 0 до максимума и обратно
-                cycle_duration = 10.0  # Полный цикл (туда и обратно)
-                half_cycle = cycle_duration / 2
-                cycle_pos = now % cycle_duration
-                
-                # Плавное изменение уровня от минимального до максимального и обратно
-                min_level = 0.0  # Минимальный уровень (тишина)
-                max_level = 1.0   # Максимальный уровень (крик)
-                
-                if cycle_pos < half_cycle:
-                    # Нарастание уровня
-                    normalized_pos = cycle_pos / half_cycle
-                else:
-                    # Убывание уровня
-                    normalized_pos = 1 - ((cycle_pos - half_cycle) / half_cycle)
-                    
-                level = min_level + (max_level - min_level) * normalized_pos
-                level = level * self.mic_sensitivity
-                self.level_bar["value"] = level * 100
-            else:
+            elif mode == "none":
                 level = 0.0
                 
             self.redraw_canvas(level, mode)
