@@ -4,6 +4,45 @@ import time
 import logging
 import os
 import sys
+import logging.handlers
+from datetime import datetime
+
+# Определение базовой директории
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Создание папки для логов
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Настройка логирования для webserver
+def setup_webserver_logging():
+    logger = logging.getLogger('webserver')
+    logger.setLevel(logging.DEBUG)
+    
+    # Форматирование
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Файловый обработчик с ротацией
+    log_file = os.path.join(LOGS_DIR, 'webserver.log')
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1048576, backupCount=5  # 1MB
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Консольный обработчик
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Инициализация логгера
+logger = setup_webserver_logging()
 
 # Отключение логирования Flask
 log = logging.getLogger('werkzeug')
@@ -27,6 +66,7 @@ class WebServer:
 
         @self.app.route("/stream")
         def stream():
+            logger.info("Stream connection established")
             return Response(
                 self.mjpeg_generator(),
                 mimetype="multipart/x-mixed-replace; boundary=frame"
@@ -34,6 +74,7 @@ class WebServer:
 
         @self.app.route("/")
         def index():
+            logger.info("Index page requested")
             return """<html>
 <head>
     <title>WebPNGTuber</title>
@@ -70,6 +111,7 @@ class WebServer:
         def run():
             self.is_running = True
             try:
+                logger.info(f"Web server starting on {self.host}:{self.port}")
                 self.app.run(
                     host=self.host, 
                     port=self.port, 
@@ -77,8 +119,11 @@ class WebServer:
                     debug=False, 
                     use_reloader=False
                 )
+            except Exception as e:
+                logger.error(f"Web server error: {e}")
             finally:
                 self.is_running = False
+                logger.info("Web server stopped")
                 
         self._thread = Thread(target=run, daemon=True)
         self._thread.start()
@@ -86,3 +131,4 @@ class WebServer:
     def stop(self):
         """Остановка веб-сервера"""
         self.is_running = False
+        logger.info("Web server stop requested")

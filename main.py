@@ -10,12 +10,46 @@ import json
 from PIL import Image, ImageTk
 import sounddevice as sd
 import sys
+import logging
+import logging.handlers
+from datetime import datetime
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Создание папки для логов
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Настройка логирования для main
+def setup_main_logging():
+    logger = logging.getLogger('main')
+    logger.setLevel(logging.DEBUG)
+    
+    # Форматирование
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Файловый обработчик с ротацией
+    log_file = os.path.join(LOGS_DIR, 'main.log')
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1048576, backupCount=5  # 1MB
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Консольный обработчик
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Инициализация логгера
+logger = setup_main_logging()
 
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -26,6 +60,8 @@ class App:
         self.root = root
         root.title("WebPNGTuber TG: @memory_not_found")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        logger.info("Application started")
 
         # Загрузка настроек
         self.settings = self.load_settings()
@@ -118,8 +154,15 @@ class App:
         self.vol_label = ttk.Label(mic_frame, text="Уровень: 0.00")
         self.vol_label.pack(anchor="w")
 
+        # Чувствительность с отображением в процентах
+        sens_frame = ttk.Frame(mic_frame)
+        sens_frame.pack(fill="x", pady=2)
+        
+        ttk.Label(sens_frame, text="Чувствительность").pack(anchor="w")
         self.sensitivity = tk.DoubleVar(value=self.settings.get('sensitivity', 1.0))
-        ttk.Label(mic_frame, text="Чувствительность").pack(anchor="w")
+        self.sens_percent_label = ttk.Label(sens_frame, text=f"{self.sensitivity.get()*100:.0f}%")
+        self.sens_percent_label.pack(anchor="e")
+        
         sens_scale = ttk.Scale(mic_frame, from_=0.1, to=5.0, variable=self.sensitivity, orient="horizontal")
         sens_scale.pack(fill="x")
         sens_scale.bind("<ButtonRelease-1>", lambda e: self.on_sensitivity_change())
@@ -280,7 +323,8 @@ class App:
                     input_devices.append(name)
             
             return input_devices
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error getting audio devices: {e}")
             return ["По умолчанию"]
 
     def on_device_change(self, event):
@@ -288,15 +332,19 @@ class App:
         device_name = self.device_var.get()
         try:
             self.audio.stop()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error stopping audio: {e}")
         self.audio = AudioProcessor(callback=self.on_audio_level, device=device_name)
         self.toggle_noise_gate()
         self.audio.start()
+        logger.info(f"Audio device changed to: {device_name}")
 
     def on_sensitivity_change(self):
         """Изменение чувствительности"""
         self.audio.set_sensitivity(self.sensitivity.get())
+        # Обновляем отображение процентов
+        self.sens_percent_label.config(text=f"{self.sensitivity.get()*100:.0f}%")
+        logger.info(f"Sensitivity changed to: {self.sensitivity.get()}")
 
     def toggle_noise_gate(self):
         """Переключение подавления шума"""
@@ -304,6 +352,7 @@ class App:
         threshold = 0.01 if enabled else 0.0
         self.audio.noise_gate_threshold = threshold
         self.renderer.set_noise_gate(threshold)
+        logger.info(f"Noise gate {'enabled' if enabled else 'disabled'}")
 
     def update_effects(self):
         """Обновление эффектов"""
@@ -315,12 +364,14 @@ class App:
             'random_effect': self.random_effect.get()
         }
         self.renderer.set_effects(effects)
+        logger.info(f"Effects updated: {effects}")
 
     def update_idle_setting(self):
         """Обновление настройки idle-режима"""
         enabled = self.idle_enabled.get()
         timeout = self.idle_timeout.get()
         self.renderer.set_idle(enabled, timeout)
+        logger.info(f"Idle mode updated: enabled={enabled}, timeout={timeout}")
 
     def load_settings(self):
         """Загрузка настроек"""
@@ -328,8 +379,8 @@ class App:
             try:
                 with open(SETTINGS_FILE, 'r') as f:
                     return json.load(f)
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error loading settings: {e}")
         return {}
     
     def save_settings(self):
@@ -354,8 +405,10 @@ class App:
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(settings, f, indent=2)
             messagebox.showinfo("Настройки сохранены", "Настройки успешно сохранены.")
+            logger.info("Settings saved successfully")
         except Exception as e:
             messagebox.showerror("Ошибка сохранения", f"Не удалось сохранить настройки: {e}")
+            logger.error(f"Error saving settings: {e}")
 
     def refresh_slot_buttons(self):
         """Обновление кнопок слотов"""
@@ -375,8 +428,9 @@ class App:
                         model_data = json.load(f)
                     model_name = model_data.get('name', f"Слот {idx+1}")
                     btn.config(text=f"Слот {idx+1}\n{model_name}")
-                except:
+                except Exception as e:
                     btn.config(text=f"Слот {idx+1}\n(ошибка)")
+                    logger.error(f"Error loading model from slot {idx+1}: {e}")
             else:
                 btn.config(text=f"Слот {idx+1}\n(пустой)")
 
@@ -386,8 +440,9 @@ class App:
                     photo = ImageTk.PhotoImage(img)
                     self.slot_previews[idx] = photo
                     btn.config(image=photo)
-                except:
+                except Exception as e:
                     btn.config(image='')
+                    logger.error(f"Error loading preview for slot {idx+1}: {e}")
             else:
                 btn.config(image='')
 
@@ -398,6 +453,7 @@ class App:
             active_states[state] = var.get()
         self.renderer.set_active_states(active_states)
         self.update_threshold_visuals()  # Обновляем визуализацию порогов
+        logger.info(f"Active states updated: {active_states}")
 
     def update_thresholds(self):
         """Обновление порогов голоса"""
@@ -409,6 +465,7 @@ class App:
         }
         self.renderer.set_thresholds(self.thresholds)
         self.update_threshold_visuals()
+        logger.info(f"Thresholds updated: {self.thresholds}")
 
     def update_threshold_visuals(self):
         """Обновление визуализации порогов - только активные состояния"""
@@ -454,8 +511,8 @@ class App:
         indicator_width = level_clamped * canvas_width
         try:
             self.level_canvas.coords(self.level_indicator, 0, 0, indicator_width, 40)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error updating level indicator: {e}")
 
         try:
             t = self.thresholds
@@ -471,8 +528,8 @@ class App:
             else:
                 color = "#f44336"
             self.level_canvas.itemconfig(self.level_indicator, fill=color)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error setting level indicator color: {e}")
 
     def on_canvas_resize(self, event=None):
         """Обработка изменения размера канваса"""
@@ -500,6 +557,9 @@ class App:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.renderer.load_model(data, slot_dir)
+            # Обновляем веб-сервер, если он запущен
+            if self.webserver and self.webserver.is_running:
+                self.webserver.renderer = self.renderer
 
         model_name = self.renderer.model.get('name','модель')
         self.model_slots[idx].config(text=f"Слот {idx+1}\n{model_name}")
@@ -511,9 +571,10 @@ class App:
                 photo = ImageTk.PhotoImage(img)
                 self.slot_previews[idx] = photo
                 self.model_slots[idx].config(image=photo)
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error loading preview for slot {idx+1}: {e}")
 
+        logger.info(f"Model loaded from slot {idx+1}: {model_name}")
         messagebox.showinfo("Загружено", f"Модель загружена из слота {idx+1}")
 
     def open_editor(self):
@@ -534,8 +595,8 @@ class App:
             def on_editor_close():
                 try:
                     editor.audio_processor.stop()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Error stopping editor audio: {e}")
                 
                 main_window.attributes('-disabled', False)
                 main_window.focus_set()
@@ -551,7 +612,7 @@ class App:
                     self.audio.set_sensitivity(self.sensitivity.get())
                     self.audio.start()
                 except Exception as e:
-                    print("Ошибка перезапуска аудио:", e)
+                    logger.error(f"Error restarting audio: {e}")
                 
                 editor.destroy()
             
@@ -563,6 +624,7 @@ class App:
             with open("error.log", "w", encoding="utf-8") as f:
                 f.write(tb)
             messagebox.showerror("Ошибка редактора", f"Не удалось открыть редактор: {e}. Смотри error.log")
+            logger.error(f"Error opening editor: {e}\n{tb}")
             self.root.attributes('-disabled', False)
 
     def on_model_saved(self, model_data, model_dir):
@@ -570,27 +632,31 @@ class App:
         self.renderer.load_model(model_data, model_dir)
         if self.webserver:
             self.webserver.renderer = self.renderer
+        logger.info("Model saved and loaded into renderer")
 
     def toggle_server(self):
         """Переключение веб-сервера"""
         if self.webserver and getattr(self.webserver, "is_running", False):
             self.webserver.stop()
             self.server_btn.config(text="Запустить веб-сервер")
+            logger.info("Web server stopped")
         else:
             self.webserver = WebServer(self.renderer)
             self.webserver.start()
             self.server_btn.config(text="Остановить веб-сервер")
+            logger.info("Web server started")
 
     def on_audio_level(self, level):
         """Обработка уровня аудио"""
         try:
             self.audio_level_scaled = level * self.sensitivity.get()
-        except Exception:
+        except Exception as e:
             self.audio_level_scaled = level
+            logger.error(f"Error scaling audio level: {e}")
         try:
             self.vol_label.config(text=f"Уровень: {self.audio_level_scaled:.2f}")
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error updating volume label: {e}")
         self.update_level_indicator(self.audio_level_scaled)
         self.renderer.set_audio_level(self.audio_level_scaled)
 
@@ -598,18 +664,19 @@ class App:
         """Обработка закрытия приложения"""
         try:
             self.audio.stop()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error stopping audio: {e}")
         try:
             self.renderer.stop()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error stopping renderer: {e}")
         if self.webserver:
             try:
                 self.webserver.stop()
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error stopping web server: {e}")
         self.save_settings()
+        logger.info("Application closed")
         self.root.destroy()
 
 if __name__ == "__main__":

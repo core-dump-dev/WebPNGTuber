@@ -1,6 +1,47 @@
 import threading, time
 from PIL import Image, ImageEnhance, ImageSequence
 import os, io, math, random
+import logging
+import logging.handlers
+from datetime import datetime
+
+# Определение базовой директории
+import sys
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Создание папки для логов
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Настройка логирования для renderer
+def setup_renderer_logging():
+    logger = logging.getLogger('renderer')
+    logger.setLevel(logging.DEBUG)
+    
+    # Форматирование
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Файловый обработчик с ротацией
+    log_file = os.path.join(LOGS_DIR, 'renderer.log')
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1048576, backupCount=5  # 1MB
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Консольный обработчик
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Инициализация логгера
+logger = setup_renderer_logging()
 
 class Renderer:
     def __init__(self, width=700, height=700, fps=60):
@@ -55,23 +96,30 @@ class Renderer:
         # Словари для быстрого доступа
         self.layers_by_name = {}
         self.groups_by_name = {}
+        
+        logger.info("Renderer initialized")
 
     def set_idle(self, enabled, timeout):
         self.idle_enabled = enabled
         self.idle_timeout = timeout
         self.last_activity_time = time.time()
+        logger.info(f"Idle mode set: enabled={enabled}, timeout={timeout}")
 
     def set_noise_gate(self, threshold):
         self.noise_gate = threshold
+        logger.info(f"Noise gate threshold set: {threshold}")
 
     def set_effects(self, effects):
         self.effects = effects
+        logger.info(f"Effects set: {effects}")
 
     def set_thresholds(self, thresholds):
         self.thresholds = thresholds
+        logger.info(f"Thresholds set: {thresholds}")
 
     def set_active_states(self, active_states):
         self.active_states = active_states
+        logger.info(f"Active states set: {active_states}")
 
     def start(self):
         if self._running:
@@ -79,11 +127,13 @@ class Renderer:
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+        logger.info("Renderer started")
 
     def stop(self):
         self._running = False
         if self._thread:
             self._thread.join(timeout=1.0)
+        logger.info("Renderer stopped")
 
     def load_model(self, model_json, model_dir):
         self.model = model_json
@@ -168,7 +218,7 @@ class Renderer:
                         
                     self._image_cache[layer.get("name")] = image
             except Exception as e:
-                print(f"Ошибка загрузки изображения: {e}")
+                logger.error(f"Ошибка загрузки изображения: {e}")
         
         for g in self.model.get("groups", []):
             name = g.get("name")
@@ -179,6 +229,8 @@ class Renderer:
             if g.get("random_effect", False):
                 self.group_random_timers[name] = time.time()
                 self.group_random_current[name] = None
+        
+        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')}")
 
     def set_audio_level(self, level):
         if level < self.noise_gate:
@@ -374,7 +426,7 @@ class Renderer:
                     try:
                         img.alpha_composite(image, (px, py))
                     except Exception as e:
-                        print(f"Ошибка композиции слоя {name}: {e}")
+                        logger.error(f"Ошибка композиции слоя {name}: {e}")
                     
                     image = orig_image
             

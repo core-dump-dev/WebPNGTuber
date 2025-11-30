@@ -1,4 +1,45 @@
 import zipfile, os, json, shutil
+import logging
+import logging.handlers
+from datetime import datetime
+
+# Определение базовой директории
+import sys
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Создание папки для логов
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Настройка логирования для utils
+def setup_utils_logging():
+    logger = logging.getLogger('utils')
+    logger.setLevel(logging.DEBUG)
+    
+    # Форматирование
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Файловый обработчик с ротацией
+    log_file = os.path.join(LOGS_DIR, 'utils.log')
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1048576, backupCount=5  # 1MB
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Консольный обработчик
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# Инициализация логгера
+logger = setup_utils_logging()
 
 def export_model_zip(model_json, model_dir):
     # Создаем временную папку для экспорта
@@ -39,4 +80,5 @@ def export_model_zip(model_json, model_dir):
     # Удаляем временную папку
     shutil.rmtree(export_temp)
     
+    logger.info(f"Model exported to: {zippath}")
     return zippath
