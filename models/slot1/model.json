@@ -1,5 +1,5 @@
 {
-  "name": "Без названия",
+  "name": "Base",
   "layers": [
     {
       "name": "body",
@@ -200,5 +200,7 @@
       "random_min": 5.0,
       "random_max": 10.0
     }
-  ]
+  ],
+  "width": 700,
+  "height": 700
 }

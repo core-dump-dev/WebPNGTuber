@@ -126,6 +126,11 @@ class Renderer:
     def load_model(self, model_json, model_dir):
         self.model = model_json
         self.model_dir = model_dir
+        
+        # Загружаем размеры холста из модели
+        self.width = model_json.get('width', 700)
+        self.height = model_json.get('height', 700)
+        
         self._image_cache = {}
         self._gif_frames = {}
         self._gif_frame_times = {}
@@ -213,7 +218,7 @@ class Renderer:
                 self.group_blink_timers[name] = time.time() + random.uniform(0.5, 2.0)
                 self.group_blink_until[name] = 0.0
                 
-        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')}")
+        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with size {self.width}x{self.height}")
     
     def set_audio_level(self, level):
         if level < self.noise_gate:

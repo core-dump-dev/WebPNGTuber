@@ -162,7 +162,7 @@ class ModelEditor(tk.Toplevel):
         }
         
         # Данные модели
-        self.model = {"name": "Без названия", "layers": [], "groups": []}
+        self.model = {"name": "Без названия", "layers": [], "groups": [], "width": 700, "height": 700}
         self.model_dir = None
         self.original_slot = None
         self.items = []
@@ -218,6 +218,15 @@ class ModelEditor(tk.Toplevel):
         right.grid(row=0, column=2, sticky="ns", padx=(6, 0), pady=0)
         
         # ---- Левая панель ----
+        # Имя модели
+        name_frame = ttk.LabelFrame(left, text="Имя модели")
+        name_frame.pack(fill="x", pady=2)
+        
+        self.model_name_var = tk.StringVar(value="Без названия")
+        name_entry = ttk.Entry(name_frame, textvariable=self.model_name_var)
+        name_entry.pack(fill="x", padx=5, pady=5)
+        name_entry.bind("<Return>", self.update_model_name)
+        
         ttk.Button(left, text="Новая модель", command=self.new_model).pack(fill="x", pady=2)
         ttk.Button(left, text="Загрузить модель", command=self.load_model).pack(fill="x", pady=2)
         ttk.Button(left, text="Сохранить модель", command=self.save_model).pack(fill="x", pady=2)
@@ -485,6 +494,11 @@ class ModelEditor(tk.Toplevel):
         
         # Запуск превью
         self.after(100, self._preview_loop)
+    
+    def update_model_name(self, event=None):
+        """Обновление имени модели"""
+        self.model["name"] = self.model_name_var.get()
+        logger.info(f"Model name updated to: {self.model['name']}")
     
     def _get_groups_recursive(self, parent_name=None):
         """Получает все группы рекурсивно, начиная с указанной родительской группы"""
@@ -1281,7 +1295,10 @@ class ModelEditor(tk.Toplevel):
             self.canvas_height = new_height
             self.canvas_width_var.set(new_width)
             self.canvas_height_var.set(new_height)
+            self.model["width"] = new_width
+            self.model["height"] = new_height
             self.zoom_reset()
+            logger.info(f"Canvas size updated to: {new_width}x{new_height}")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Неверный размер холста: {e}")
             logger.error(f"Error updating canvas size: {e}")
@@ -1348,11 +1365,16 @@ class ModelEditor(tk.Toplevel):
         if not name:
             return
             
-        self.model = {"name": name, "layers": [], "groups": []}
+        self.model = {"name": name, "layers": [], "groups": [], "width": 700, "height": 700}
         self.model_dir = None
         self.original_slot = None
         self.items.clear()
         self.imported_files.clear()
+        self.model_name_var.set(name)
+        self.canvas_width = 700
+        self.canvas_height = 700
+        self.canvas_width_var.set(700)
+        self.canvas_height_var.set(700)
         self.refresh_import_list()
         self.refresh_tree()
         self.zoom_reset()
@@ -1395,6 +1417,15 @@ class ModelEditor(tk.Toplevel):
             
         # Мигрируем старую модель для поддержки вложенных групп
         self._migrate_model_for_nested_groups()
+        
+        # Загружаем имя модели
+        self.model_name_var.set(self.model.get("name", "Без названия"))
+        
+        # Загружаем размеры холста
+        self.canvas_width = self.model.get("width", 700)
+        self.canvas_height = self.model.get("height", 700)
+        self.canvas_width_var.set(self.canvas_width)
+        self.canvas_height_var.set(self.canvas_height)
         
         temp_dir = os.path.join(MODELS_DIR, f"temp_{int(time.time())}_slot{slot_num}")
         os.makedirs(temp_dir, exist_ok=True)
@@ -1458,6 +1489,11 @@ class ModelEditor(tk.Toplevel):
                 
             self.model_dir = os.path.join(folder, name.replace(" ", "_"))
             os.makedirs(self.model_dir, exist_ok=True)
+            
+        # Сохраняем имя модели и размеры холста
+        self.model["name"] = self.model_name_var.get()
+        self.model["width"] = self.canvas_width
+        self.model["height"] = self.canvas_height
             
         self.model["layers"] = []
         for ci in self.items:
@@ -2108,7 +2144,13 @@ class ModelEditor(tk.Toplevel):
             if now - self.last_autosave > self.autosave_interval:
                 try:
                     if self.model_dir:
-                        temp = {"name": self.model.get("name", ""), "layers": [], "groups": self.model.get("groups", [])}
+                        temp = {
+                            "name": self.model.get("name", ""), 
+                            "width": self.model.get("width", 700),
+                            "height": self.model.get("height", 700),
+                            "layers": [], 
+                            "groups": self.model.get("groups", [])
+                        }
                         for ci in self.items:
                             temp["layers"].append({
                                 "name": ci.layer.get("name"),
