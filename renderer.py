@@ -239,11 +239,15 @@ class Renderer:
                 
             # Получаем текущее состояние для группы
             chosen = self._choose_group_child(group)
+            
+            # Если нет выбранного состояния или оно пустое
             if not chosen:
-                # Если ничего не выбрано, добавляем все видимые слои группы
+                # Показываем все видимые слои группы
                 for layer in self.model.get("layers", []):
                     if layer.get("group") == group_name and layer.get("visible", True):
-                        visible_layers.append(layer.get("name"))
+                        layer_name = layer.get("name")
+                        if layer_name:
+                            visible_layers.append(layer_name)
                 return
                 
             # Проверяем, является ли chosen группой или слоем
@@ -262,8 +266,10 @@ class Renderer:
         # Добавляем элементы без групп
         for layer in self.model.get("layers", []):
             if not layer.get("group") and layer.get("visible", True):
-                visible_layers.append(layer.get("name"))
-                
+                layer_name = layer.get("name")
+                if layer_name:
+                    visible_layers.append(layer_name)
+                    
         return visible_layers
     
     def _resolve_to_layer(self, name, group_name, visited=None):
@@ -282,32 +288,41 @@ class Renderer:
         return None
 
     def _choose_group_child(self, group):
+        """Выбирает дочерний элемент группы в зависимости от текущего состояния"""
         group_name = group.get("name")
         logic = group.get("logic", {})
+        
         # Обработка моргания
         if self.effects.get('blink', True):
             now = time.time()
             blink_freq = float(group.get("blink_freq", 0.0))
+            
+            # Инициализация таймеров для группы, если их нет
             if group_name not in self.group_blink_timers:
                 self.group_blink_timers[group_name] = now + random.uniform(2.0, 6.0)
                 self.group_blink_until[group_name] = 0.0
+                
             if blink_freq > 0.001:
                 if now > self.group_blink_timers.get(group_name, 0):
                     self.group_blink_until[group_name] = now + 0.12
                     self.group_blink_timers[group_name] = now + blink_freq
+                    
                 if now < self.group_blink_until.get(group_name, 0):
-                    if "blink" in logic:
-                        return logic["blink"]
+                    blink_target = logic.get("blink")
+                    if blink_target:
+                        return blink_target
                     else:
-                        for child in group.get("children", []):
-                            if any(kw in child.lower() for kw in ["close", "closed", "shut", "blink"]):
-                                return child
-        # Если сейчас время моргания, мы уже вернули соответствующий слой
-        # Теперь обрабатываем остальные состояния
+                        # Автоматический поиск слоя для моргания
+                        for child_name in group.get("children", []):
+                            child = self.layers_by_name.get(child_name) or self.groups_by_name.get(child_name)
+                            if child and any(kw in child_name.lower() for kw in ["close", "closed", "shut", "blink", "морг", "закр"]):
+                                return child_name
         
         # Обработка случайного эффекта
         if group.get("random_effect", False) and self.effects.get('random_effect', False):
             now = time.time()
+            
+            # Инициализация таймеров для случайного эффекта
             if group_name not in self.group_random_timers:
                 self.group_random_timers[group_name] = now
                 self.group_random_current[group_name] = None
@@ -320,18 +335,21 @@ class Renderer:
                 if children:
                     blink_layer = logic.get("blink", "")
                     open_layer = logic.get("open", "")
-                    available = [c for c in children if c != blink_layer and c != open_layer]
+                    available = [c for c in children if c != blink_layer and c != open_layer and c in self.layers_by_name]
                     if available:
                         chosen = random.choice(available)
                         self.group_random_current[group_name] = chosen
+                        
                 interval = random.uniform(min_time, max_time)
                 self.group_random_timers[group_name] = now + interval
                 
             if self.group_random_current.get(group_name):
                 return self.group_random_current.get(group_name)
         
-        # Обработка голосовых состояний
+        # Определение текущего состояния на основе уровня звука
         current_state = "silent"
+        
+        # Проверяем состояния в порядке убывания громкости
         if self.audio_level > self.thresholds['shout'] and self.active_states.get('shout', True):
             current_state = "shout"
         elif self.audio_level > self.thresholds['normal'] and self.active_states.get('normal', True):
@@ -340,10 +358,11 @@ class Renderer:
             current_state = "whisper"
         elif self.audio_level > self.thresholds['silent'] and self.active_states.get('silent', True):
             current_state = "silent"
-            
+        
+        # Выбор соответствующего слоя для текущего состояния
         if current_state in logic and self.active_states.get(current_state, True):
             return logic.get(current_state)
-            
+        
         # Если нет подходящего голосового состояния, используем состояние "open"
         open_layer = logic.get("open")
         if open_layer:
@@ -353,27 +372,45 @@ class Renderer:
         return logic.get("silent")
     
     def _get_layer_image(self, layer_name):
+        """Возвращает изображение для указанного слоя с учетом анимации"""
+        # Обработка GIF-анимаций
         if layer_name in self._gif_frames:
             now = time.time()
             frames = self._gif_frames[layer_name]
             frame_times = self._gif_frame_times[layer_name]
+            
+            if not frames:
+                return None
+                
+            # Инициализация анимации, если еще не сделана
             if layer_name not in self._gif_last_update:
                 self._gif_last_update[layer_name] = now
                 self._gif_current_frame[layer_name] = 0
+                
             current_frame = self._gif_current_frame[layer_name]
+            
+            # Обновление кадра, если пришло время
             if now - self._gif_last_update[layer_name] > frame_times[current_frame]:
                 self._gif_current_frame[layer_name] = (current_frame + 1) % len(frames)
                 self._gif_last_update[layer_name] = now
+                
             return frames[self._gif_current_frame[layer_name]]
+            
+        # Обработка статичных изображений
         elif layer_name in self._image_cache:
             return self._image_cache[layer_name]
+            
         return None
     
     def _loop(self):
+        """Основной цикл рендеринга"""
         frame_time = 1.0 / self.fps
         while self._running:
             start = time.time()
-            img = Image.new("RGBA", (self.width, self.height), (0,0,0,0))
+            
+            # Создаем новое изображение с прозрачным фоном
+            img = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+            
             if self.model and self.model_dir:
                 # Получаем список видимых слоев с учетом иерархии групп
                 visible_layers = self._get_visible_layers()
@@ -381,6 +418,7 @@ class Renderer:
                 # Отрисовываем видимые слои в правильном порядке
                 for layer in self.model.get("layers", []):
                     name = layer.get("name")
+                    
                     # Проверяем, видим ли слой
                     if name not in visible_layers:
                         continue
@@ -395,39 +433,53 @@ class Renderer:
                         continue
                         
                     orig_image = image.copy()
+                    offset_x, offset_y = 0, 0
+                    
                     # Применяем эффекты
                     bounce_intensity = 0
                     if self.effects.get('bounce', False):
                         bounce_intensity = int(math.sin(time.time() * 5) * min(10, self.audio_level * 20))
+                        
                     if self.effects.get('shake', False):
                         shake_intensity = min(1.0, self.audio_level * 5)
                         offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
                         offset_y = int((random.random() - 0.5) * 10 * shake_intensity) + bounce_intensity
                     else:
                         offset_x, offset_y = 0, bounce_intensity
+                        
                     if self.effects.get('pulse', False):
                         pulse_scale = 1.0 + (math.sin(time.time() * 5) * 0.1 * self.audio_level)
                         new_size = (int(image.width * pulse_scale), int(image.height * pulse_scale))
                         image = image.resize(new_size, Image.LANCZOS)
+                        
                     # Позиционируем изображение
                     px = (self.width - image.width) // 2 + int(layer.get("x", 0)) + offset_x
                     py = (self.height - image.height) // 2 + int(layer.get("y", 0)) + offset_y
+                    
                     try:
                         img.alpha_composite(image, (px, py))
                     except Exception as e:
                         logger.error(f"Ошибка композиции слоя {name}: {e}")
+                        
                     image = orig_image
+                    
             # Применение idle-режима
             if self.idle_enabled:
                 current_time = time.time()
                 if current_time - self.last_activity_time > self.idle_timeout:
                     enhancer = ImageEnhance.Brightness(img)
                     img = enhancer.enhance(self.idle_brightness)
+                    
+            # Конвертируем изображение в байты
             with io.BytesIO() as buf:
                 img.save(buf, format="PNG")
                 data = buf.getvalue()
+                
+            # Сохраняем кадр
             with self._lock:
                 self._frame_bytes = data
+                
+            # Регулируем FPS
             elapsed = time.time() - start
             to_sleep = frame_time - elapsed
             if to_sleep > 0:

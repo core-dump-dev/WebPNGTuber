@@ -619,19 +619,35 @@ class ModelEditor(tk.Toplevel):
         """Возвращает список видимых элементов для текущего состояния с учетом иерархии"""
         visible_items = []
         processed_groups = set()
+        
         # Функция для рекурсивной обработки групп
-        def process_group(group_name):
+        def process_group(group_name, force_state=None):
             if group_name in processed_groups:
                 return
             processed_groups.add(group_name)
-            # Получаем текущее состояние для группы
-            chosen = self._get_current_state_for_group(group_name)
+            
+            # Получаем группу
+            group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
+            if not group:
+                return
+                
+            # Определяем текущее состояние для группы
+            chosen = None
+            if force_state:
+                # Если принудительно задано состояние
+                chosen = group.get("logic", {}).get(force_state)
+            else:
+                # Стандартная логика выбора состояния
+                chosen = self._get_current_state_for_group(group_name)
+                
+            # Если нет выбранного состояния или оно пустое
             if not chosen:
-                # Если ничего не выбрано, показываем все слои группы
+                # Показываем все видимые слои группы
                 for ci in self.items:
                     if ci.layer.get("group") == group_name and ci.visible:
                         visible_items.append(ci)
                 return
+                
             # Проверяем, является ли chosen группой или слоем
             is_group = any(g.get("name") == chosen for g in self.model.get("groups", []))
             if is_group:
@@ -640,19 +656,23 @@ class ModelEditor(tk.Toplevel):
             else:
                 # Если это слой - добавляем его в видимые
                 for ci in self.items:
-                    if ci.layer.get("name") == chosen and ci.layer.get("group") == group_name:
+                    if ci.layer.get("name") == chosen and ci.layer.get("group") == group_name and ci.visible:
                         visible_items.append(ci)
+        
         # Обрабатываем корневые группы (без родителя)
         root_groups = [g.get("name") for g in self.model.get("groups", []) if not g.get("parent")]
         for group_name in root_groups:
             process_group(group_name)
+            
         # Добавляем элементы без групп
         for ci in self.items:
             if not ci.layer.get("group") and ci.visible:
                 visible_items.append(ci)
+                
         return visible_items
 
     def redraw_canvas(self, level=0.0, mode="none"):
+        """Перерисовывает холст с учетом текущего режима"""
         try:
             # Очищаем canvas
             self.canvas.delete("all")
@@ -662,7 +682,7 @@ class ModelEditor(tk.Toplevel):
             canvas_height = self.canvas.winfo_height()
             if canvas_width <= 1 or canvas_height <= 1:
                 return
-            
+                
             # Рассчитываем центр с учетом смещения и зума
             scaled_width = self.canvas_width * self.zoom_level
             scaled_height = self.canvas_height * self.zoom_level
@@ -682,36 +702,9 @@ class ModelEditor(tk.Toplevel):
             # Создаем временное изображение для композиции
             temp_image = Image.new("RGBA", (int(scaled_width), int(scaled_height)), (0, 0, 0, 0))
             
-            if mode == "none":
-                # Режим редактирования - все видимые слои
-                for ci in self.items:
-                    if not ci.visible:
-                        continue
-                    img = ci.get_current_image()
-                    if not img:
-                        continue
-                    
-                    # Масштабируем изображение для текущего зума
-                    if self.zoom_level != 1.0:
-                        scaled_img_width = int(img.width * self.zoom_level)
-                        scaled_img_height = int(img.height * self.zoom_level)
-                        if scaled_img_width > 0 and scaled_img_height > 0:
-                            scaled_img = img.resize((scaled_img_width, scaled_img_height), Image.LANCZOS)
-                        else:
-                            scaled_img = img
-                    else:
-                        scaled_img = img
-                    
-                    # Рассчитываем позицию на временном изображении
-                    px = int((scaled_width // 2) - scaled_img.width // 2 + (ci.x * self.zoom_level))
-                    py = int((scaled_height // 2) - scaled_img.height // 2 + (ci.y * self.zoom_level))
-                    try:
-                        temp_image.alpha_composite(scaled_img, (px, py))
-                    except Exception as e:
-                        logger.error(f"Ошибка композиции: {e}")
-            else:
-                # Режим тестирования - полная логика как в рендерере
-                current_state = "silent"
+            # Определяем состояние в зависимости от режима
+            current_state = "silent"
+            if mode != "none":
                 if level > self.thresholds['shout']:
                     current_state = "shout"
                 elif level > self.thresholds['normal']:
@@ -720,34 +713,43 @@ class ModelEditor(tk.Toplevel):
                     current_state = "whisper"
                 elif level > self.thresholds['silent']:
                     current_state = "silent"
-                
-                # Получаем видимые элементы для текущего состояния
+            
+            # Получаем видимые элементы
+            if mode == "none":
+                # Режим редактирования - все видимые слои
+                visible_items = [ci for ci in self.items if ci.visible]
+            else:
+                # Режим тестирования - с учетом состояния
                 visible_items = self._get_visible_items_for_state(current_state)
-                
-                # Отрисовываем видимые элементы в правильном порядке
-                for ci in visible_items:
-                    img = ci.get_current_image()
-                    if not img:
-                        continue
+            
+            # Сортируем элементы для правильного наложения
+            visible_items.sort(key=lambda x: self.items.index(x))
+            
+            # Отрисовываем видимые элементы
+            for ci in visible_items:
+                img = ci.get_current_image()
+                if not img:
+                    continue
                     
-                    # Масштабируем изображение для текущего зума
-                    if self.zoom_level != 1.0:
-                        scaled_img_width = int(img.width * self.zoom_level)
-                        scaled_img_height = int(img.height * self.zoom_level)
-                        if scaled_img_width > 0 and scaled_img_height > 0:
-                            scaled_img = img.resize((scaled_img_width, scaled_img_height), Image.LANCZOS)
-                        else:
-                            scaled_img = img
+                # Масштабируем изображение для текущего зума
+                if self.zoom_level != 1.0:
+                    scaled_img_width = int(img.width * self.zoom_level)
+                    scaled_img_height = int(img.height * self.zoom_level)
+                    if scaled_img_width > 0 and scaled_img_height > 0:
+                        scaled_img = img.resize((scaled_img_width, scaled_img_height), Image.LANCZOS)
                     else:
                         scaled_img = img
+                else:
+                    scaled_img = img
                     
-                    # Рассчитываем позицию на временном изображении
-                    px = int((scaled_width // 2) - scaled_img.width // 2 + (ci.x * self.zoom_level))
-                    py = int((scaled_height // 2) - scaled_img.height // 2 + (ci.y * self.zoom_level))
-                    try:
-                        temp_image.alpha_composite(scaled_img, (px, py))
-                    except Exception as e:
-                        logger.error(f"Ошибка композиции: {e}")
+                # Рассчитываем позицию на временном изображении
+                px = int((scaled_width // 2) - scaled_img.width // 2 + (ci.x * self.zoom_level))
+                py = int((scaled_height // 2) - scaled_img.height // 2 + (ci.y * self.zoom_level))
+                
+                try:
+                    temp_image.alpha_composite(scaled_img, (px, py))
+                except Exception as e:
+                    logger.error(f"Ошибка композиции: {e}")
             
             # Конвертируем изображение в PhotoImage и отображаем
             try:
@@ -755,14 +757,14 @@ class ModelEditor(tk.Toplevel):
                 self.canvas.create_image(canvas_x1, canvas_y1, anchor="nw", image=self.canvas_image)
             except Exception as e:
                 logger.error(f"Ошибка отображения: {e}")
-            
+                
             # Выделение выбранных элементов
             for ci in self.items:
                 if ci.layer.get("_selected"):
                     img = ci.get_current_image()
                     if not img:
                         continue
-                    
+                        
                     # Масштабируем для выделения
                     if self.zoom_level != 1.0:
                         scaled_img_width = int(img.width * self.zoom_level)
@@ -770,9 +772,10 @@ class ModelEditor(tk.Toplevel):
                     else:
                         scaled_img_width = img.width
                         scaled_img_height = img.height
-                    
+                        
                     px = canvas_x1 + int((scaled_width // 2) - scaled_img_width // 2 + (ci.x * self.zoom_level))
                     py = canvas_y1 + int((scaled_height // 2) - scaled_img_height // 2 + (ci.y * self.zoom_level))
+                    
                     self.canvas.create_rectangle(
                         px, py, px + scaled_img_width, py + scaled_img_height,
                         outline="cyan", width=2
@@ -1483,32 +1486,47 @@ class ModelEditor(tk.Toplevel):
         logger.info(f"Model saved to slot {slot_num}")
 
     def create_preview(self):
+        """Создает превью модели для отображения в слотах"""
         if not self.model_dir:
             return
-        
+            
+        # Создаем базовое изображение
         base = Image.new("RGBA", (self.canvas_width, self.canvas_height), (0, 0, 0, 0))
         center_x = self.canvas_width // 2
         center_y = self.canvas_height // 2
         
-        # Используем логику групп для создания превью в режиме "normal"
-        visible_items = self._get_visible_items_for_state("normal")
+        # Используем состояние "open" для создания превью (нейтральное состояние)
+        visible_items = self._get_visible_items_for_state("open")
         
+        # Сортируем элементы по порядку в списке для правильного наложения
+        visible_items.sort(key=lambda x: self.items.index(x))
+        
+        # Отрисовываем все видимые элементы
         for ci in visible_items:
-            if not ci.visible:
-                continue
             img = ci.get_current_image()
-            if not img:
+            if not img or not ci.visible:
                 continue
+                
+            # Рассчитываем позицию
             px = center_x - img.size[0] // 2 + int(ci.x)
             py = center_y - img.size[1] // 2 + int(ci.y)
+            
             try:
+                # Композируем изображение
                 base.alpha_composite(img, (px, py))
             except Exception as e:
                 logger.error(f"Error creating preview: {e}")
         
-        base.thumbnail((200, 200))
+        # Создаем миниатюру
+        base.thumbnail((200, 200), Image.LANCZOS)
         preview_path = os.path.join(self.model_dir, "preview.png")
-        base.save(preview_path)
+        
+        try:
+            # Сохраняем миниатюру
+            base.save(preview_path)
+            logger.info(f"Preview created successfully: {preview_path}")
+        except Exception as e:
+            logger.error(f"Error saving preview: {e}")
 
     def import_images(self):
         files = filedialog.askopenfilenames(
@@ -1727,11 +1745,12 @@ class ModelEditor(tk.Toplevel):
         logger.info(f"Ungrouped {len(self.current_selection)} items")
 
     def on_canvas_mouse_down(self, event):
+        """Обработка нажатия мыши на холсте"""
         # Предотвращаем обработку, если фокус в поле ввода
         focus_widget = self.focus_get()
         if focus_widget and isinstance(focus_widget, (ttk.Entry, tk.Entry)):
             return
-        
+            
         # Получаем координаты на холсте с учетом зума и смещения
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
@@ -1750,20 +1769,22 @@ class ModelEditor(tk.Toplevel):
         if self.zoom_level > 0:
             mx = mx / self.zoom_level
             my = my / self.zoom_level
-        
+            
         found = None
+        # Поиск элемента под курсором (в обратном порядке для правильного Z-порядка)
         for ci in reversed(self.items):
             if not ci.visible:
                 continue
+                
             img = ci.get_current_image()
             if not img:
                 continue
-            
+                
             # Рассчитываем позицию элемента на холсте
             px = (self.canvas_width // 2) - img.width // 2 + ci.x
             py = (self.canvas_height // 2) - img.height // 2 + ci.y
             
-            # Проверяем попадание
+            # Проверяем попадание в bounding box элемента
             if px <= mx <= px + img.width and py <= my <= py + img.height:
                 # Проверяем прозрачность пикселя
                 try:
@@ -1783,10 +1804,15 @@ class ModelEditor(tk.Toplevel):
                     logger.error(f"Error checking pixel: {e}")
                     found = ci
                     break
-        
+                    
+        # Обработка найденного элемента
         if found:
+            # Проверяем, выделен ли уже этот элемент
+            is_already_selected = found.layer.get("_selected", False)
+            
+            # Если нажат Ctrl - инвертируем выделение
             if event.state & 0x0004:  # Ctrl
-                found.layer["_selected"] = not bool(found.layer.get("_selected"))
+                found.layer["_selected"] = not is_already_selected
                 if found.layer["_selected"]:
                     if found not in self.current_selection:
                         self.current_selection.append(found)
@@ -1794,28 +1820,35 @@ class ModelEditor(tk.Toplevel):
                     if found in self.current_selection:
                         self.current_selection.remove(found)
             else:
-                for c in self.items:
-                    c.layer["_selected"] = False
-                self.current_selection = [found]
+                # Если элемент еще не выделен - сбрасываем выделение со всех элементов
+                if not is_already_selected:
+                    for c in self.items:
+                        c.layer["_selected"] = False
+                    self.current_selection = []
+                    
+                # Выделяем текущий элемент
                 found.layer["_selected"] = True
+                if found not in self.current_selection:
+                    self.current_selection.append(found)
+                    
+            # Устанавливаем выбранную группу
+            self.selected_group = found.layer.get("group")
             
-            grp = found.layer.get("group")
-            if grp:
-                self.selected_group = grp
-            else:
-                self.selected_group = None
-            
+            # Устанавливаем данные для перетаскивания
             self.drag_data["item"] = found
             self.drag_data["x"] = mx
             self.drag_data["y"] = my
-            self.refresh_tree()
         else:
+            # Если кликнули вне элементов - сбрасываем выделение
             for c in self.items:
                 c.layer["_selected"] = False
             self.current_selection = []
             self.selected_group = None
             self.drag_data["item"] = None
-            self.refresh_tree()
+            
+        # Обновляем отображение дерева и холста
+        self.refresh_tree()
+        self.redraw_canvas()
 
     def on_canvas_mouse_move(self, event):
         if not self.drag_data.get("item"):
