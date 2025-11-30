@@ -781,7 +781,7 @@ class ModelEditor(tk.Toplevel):
                 # Получаем видимые элементы для текущего состояния
                 items_to_draw = self._get_visible_items_for_state(current_state)
             
-            # Сортируем элементы для правильного наложения
+            # Сортируем элементы для правильного наложения (по порядку в self.items)
             items_to_draw.sort(key=lambda x: self.items.index(x))
             
             # Отрисовываем все элементы
@@ -917,57 +917,28 @@ class ModelEditor(tk.Toplevel):
         logger.info(f"Created new group: {name} with parent {parent_group}")
     
     def refresh_tree(self):
-        """Обновление древовидного списка с поддержкой вложенных групп"""
+        """Обновление древовидного списка с поддержкой вложенных групп и правильным порядком"""
         try:
             self.tree.delete(*self.tree.get_children())
             
-            # Строим иерархию групп
-            groups = self.model.get("groups", [])
-            root_groups = [g for g in groups if not g.get("parent")]
+            # Создаем словарь для отслеживания групп и их узлов
+            group_nodes = {}
             
-            # Собираем элементы по группам
-            items_by_group = {}
-            ungrouped_items = []
+            # Проходим по всем элементам в порядке их отрисовки (self.items)
             for ci in self.items:
                 group_name = ci.layer.get("group")
-                if group_name:
-                    if group_name not in items_by_group:
-                        items_by_group[group_name] = []
-                    items_by_group[group_name].append(ci)
+                
+                if group_name is None:
+                    # Элемент без группы - добавляем в корень
+                    self.tree.insert("", "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
                 else:
-                    ungrouped_items.append(ci)
-            
-            # Рекурсивная функция для добавления групп и элементов в дерево
-            def add_group_to_tree(parent_id, group):
-                group_id = self.tree.insert(
-                    parent_id, "end", 
-                    text=f"📁 {group['name']}", 
-                    values=("group", group['name'])
-                )
-                
-                # Добавляем элементы группы
-                group_items = items_by_group.get(group['name'], [])
-                for ci in group_items:
-                    self.tree.insert(
-                        group_id, "end", 
-                        text=self._get_item_display_text(ci), 
-                        values=("item", id(ci))
-                    )
-                
-                # Добавляем дочерние группы
-                child_groups = [g for g in groups if g.get("parent") == group['name']]
-                for child_group in child_groups:
-                    add_group_to_tree(group_id, child_group)
-                
-                return group_id
-            
-            # Добавляем элементы без групп
-            for ci in ungrouped_items:
-                self.tree.insert("", "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
-            
-            # Добавляем корневые группы
-            for group in root_groups:
-                add_group_to_tree("", group)
+                    # Элемент с группой
+                    if group_name not in group_nodes:
+                        # Создаем узел для группы, если его еще нет
+                        group_nodes[group_name] = self.tree.insert("", "end", text=f"📁 {group_name}", values=("group", group_name))
+                    
+                    # Добавляем элемент в группу
+                    self.tree.insert(group_nodes[group_name], "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
             
             # Если выбрана группа, обновляем меню
             if self.selected_group:
@@ -1083,102 +1054,89 @@ class ModelEditor(tk.Toplevel):
             logger.error(traceback.format_exc())
     
     def bring_forward(self):
-        """Переместить выбранные элементы вперед"""
+        """Переместить выбранные элементы вперед (выше по Z-индексу)"""
         if not self.current_selection:
             return
             
-        # Обрабатываем каждую группу отдельно
-        groups_to_update = {}
-        for ci in self.current_selection:
-            group_name = ci.layer.get("group")
-            if group_name not in groups_to_update:
-                groups_to_update[group_name] = []
-            groups_to_update[group_name].append(ci)
-        
-        # Для каждой группы перемещаем элементы
-        for group_name, items in groups_to_update.items():
-            if group_name:
-                # Находим все элементы в этой группе
-                group_items = [i for i in self.items if i.layer.get("group") == group_name]
-                group_indices = {i: idx for idx, i in enumerate(group_items)}
+        # Если выбрана группа, перемещаем все элементы группы
+        if self.selected_group:
+            group_items = self._get_all_group_items(self.selected_group)
+            if not group_items:
+                return
                 
-                # Сортируем выбранные элементы по их текущему положению
-                items.sort(key=lambda x: group_indices[x])
+            # Находим индексы всех элементов группы
+            group_indices = [self.items.index(item) for item in group_items]
+            min_index = min(group_indices)
+            max_index = max(group_indices)
+            
+            # Если группа уже в самом верху, ничего не делаем
+            if max_index == len(self.items) - 1:
+                return
                 
-                # Перемещаем элементы вперед
-                for ci in items:
-                    idx = group_items.index(ci)
-                    if idx < len(group_items) - 1:
-                        # Меняем местами с следующим элементом
-                        group_items[idx], group_items[idx+1] = group_items[idx+1], group_items[idx]
+            # Перемещаем всю группу выше
+            # Удаляем элементы группы из списка
+            for item in reversed(group_items):
+                self.items.remove(item)
                 
-                # Обновляем порядок элементов в общей коллекции
-                for i, item in enumerate(group_items):
-                    global_idx = self.items.index(item)
-                    # Находим следующий элемент из той же группы в общей коллекции
-                    next_idx = global_idx + 1
-                    while next_idx < len(self.items) and self.items[next_idx].layer.get("group") != group_name:
-                        next_idx += 1
-                    if next_idx < len(self.items):
-                        self.items[global_idx], self.items[next_idx] = self.items[next_idx], self.items[global_idx]
+            # Вставляем группу после следующего элемента после группы
+            insert_index = max_index + 1
+            if insert_index >= len(self.items):
+                # Если группа была в конце, просто добавляем в конец
+                self.items.extend(group_items)
             else:
-                # Элементы без группы
-                for ci in items:
-                    idx = self.items.index(ci)
-                    if idx < len(self.items) - 1:
-                        self.items[idx], self.items[idx+1] = self.items[idx+1], self.items[idx]
+                # Вставляем группу после следующего элемента
+                self.items[insert_index:insert_index] = group_items
+        else:
+            # Перемещаем отдельные выбранные элементы
+            for ci in self.current_selection:
+                idx = self.items.index(ci)
+                if idx < len(self.items) - 1:
+                    # Меняем местами с следующим элементом
+                    self.items[idx], self.items[idx+1] = self.items[idx+1], self.items[idx]
         
         self.refresh_tree()
         self.redraw_canvas()
+        logger.info("Brought selection forward")
     
     def send_backward(self):
-        """Переместить выбранные элементы назад"""
+        """Переместить выбранные элементы назад (ниже по Z-индексу)"""
         if not self.current_selection:
             return
             
-        # Обрабатываем каждую группу отдельно
-        groups_to_update = {}
-        for ci in self.current_selection:
-            group_name = ci.layer.get("group")
-            if group_name not in groups_to_update:
-                groups_to_update[group_name] = []
-            groups_to_update[group_name].append(ci)
-        
-        # Для каждой группы перемещаем элементы
-        for group_name, items in groups_to_update.items():
-            if group_name:
-                # Находим все элементы в этой группе
-                group_items = [i for i in self.items if i.layer.get("group") == group_name]
-                group_indices = {i: idx for idx, i in enumerate(group_items)}
+        # Если выбрана группа, перемещаем все элементы группы
+        if self.selected_group:
+            group_items = self._get_all_group_items(self.selected_group)
+            if not group_items:
+                return
                 
-                # Сортируем выбранные элементы по их текущему положению в обратном порядке
-                items.sort(key=lambda x: group_indices[x], reverse=True)
+            # Находим индексы всех элементов группы
+            group_indices = [self.items.index(item) for item in group_items]
+            min_index = min(group_indices)
+            max_index = max(group_indices)
+            
+            # Если группа уже в самом низу, ничего не делаем
+            if min_index == 0:
+                return
                 
-                # Перемещаем элементы назад
-                for ci in items:
-                    idx = group_items.index(ci)
-                    if idx > 0:
-                        # Меняем местами с предыдущим элементом
-                        group_items[idx], group_items[idx-1] = group_items[idx-1], group_items[idx]
+            # Перемещаем всю группу ниже
+            # Удаляем элементы группы из списка
+            for item in reversed(group_items):
+                self.items.remove(item)
                 
-                # Обновляем порядок элементов в общей коллекции
-                for i, item in enumerate(group_items):
-                    global_idx = self.items.index(item)
-                    # Находим предыдущий элемент из той же группы в общей коллекции
-                    prev_idx = global_idx - 1
-                    while prev_idx >= 0 and self.items[prev_idx].layer.get("group") != group_name:
-                        prev_idx -= 1
-                    if prev_idx >= 0:
-                        self.items[global_idx], self.items[prev_idx] = self.items[prev_idx], self.items[global_idx]
-            else:
-                # Элементы без группы
-                for ci in items:
-                    idx = self.items.index(ci)
-                    if idx > 0:
-                        self.items[idx], self.items[idx-1] = self.items[idx-1], self.items[idx]
+            # Вставляем группу перед предыдущим элементом перед группой
+            insert_index = min_index - 1
+            self.items[insert_index:insert_index] = group_items
+        else:
+            # Перемещаем отдельные выбранные элементы
+            for ci in self.current_selection:
+                idx = self.items.index(ci)
+                if idx > 0:
+                    # Меняем местами с предыдущим элементом
+                    self.items[idx], self.items[idx-1] = self.items[idx-1], self.items[idx]
         
         self.refresh_tree()
         self.redraw_canvas()
+        logger.info("Sent selection backward")
     
     def apply_group_logic(self):
         if not self.selected_group:

@@ -252,8 +252,9 @@ class Renderer:
         return children
     
     def _get_visible_layers(self):
-        """Возвращает список видимых слоев с учетом иерархии групп"""
-        visible_layers = []
+        """Возвращает список видимых слоев с учетом иерархии групп и порядка в model["layers"]"""
+        # Сначала собираем все слои, которые должны быть видны согласно логике групп
+        visible_layer_names = set()
         processed_groups = set()
         
         # Функция для рекурсивной обработки групп
@@ -276,7 +277,7 @@ class Renderer:
                     if layer.get("group") == group_name and layer.get("visible", True):
                         layer_name = layer.get("name")
                         if layer_name:
-                            visible_layers.append(layer_name)
+                            visible_layer_names.add(layer_name)
                 return
                 
             # Проверяем, является ли chosen группой или слоем
@@ -286,7 +287,7 @@ class Renderer:
             else:
                 # Если это слой - добавляем его в видимые
                 if chosen and chosen in self.layers_by_name:
-                    visible_layers.append(chosen)
+                    visible_layer_names.add(chosen)
         
         # Обрабатываем корневые группы (без родителя)
         root_groups = [name for name, g in self.groups_by_name.items() if not g.get("parent")]
@@ -298,15 +299,14 @@ class Renderer:
             if not layer.get("group") and layer.get("visible", True):
                 layer_name = layer.get("name")
                 if layer_name:
-                    visible_layers.append(layer_name)
-                    
-        # Убираем дубликаты и сохраняем порядок
-        unique_layers = []
-        for layer in visible_layers:
-            if layer not in unique_layers:
-                unique_layers.append(layer)
+                    visible_layer_names.add(layer_name)
+        ordered_visible_layers = []
+        for layer in self.model.get("layers", []):
+            layer_name = layer.get("name")
+            if layer_name in visible_layer_names and layer.get("visible", True):
+                ordered_visible_layers.append(layer_name)
                 
-        return unique_layers
+        return ordered_visible_layers
     
     def _resolve_to_layer(self, name, group_name, visited=None):
         if visited is None:
@@ -458,7 +458,7 @@ class Renderer:
                 # Получаем список видимых слоев с учетом иерархии групп
                 visible_layers = self._get_visible_layers()
                 
-                # Отрисовываем видимые слои в правильном порядке
+                # Отрисовываем видимые слои в правильном порядке (согласно порядку в model["layers"])
                 for layer in self.model.get("layers", []):
                     name = layer.get("name")
                     
