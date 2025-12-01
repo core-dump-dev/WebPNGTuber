@@ -725,7 +725,8 @@ class ModelEditor(tk.Toplevel):
         # Получаем дочерние группы
         child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
         for child_group in child_groups:
-            items.extend(self._get_all_group_items(child_group.get("name")))
+            child_items = self._get_all_group_items(child_group.get("name"))
+            items.extend(child_items)
             
         return items
     
@@ -1078,8 +1079,8 @@ class ModelEditor(tk.Toplevel):
         if not self.current_selection:
             return
             
-        # Если выбрана группа, перемещаем всю группу как единый блок
         if self.selected_group:
+            # Перемещение всей группы как единого блока
             group_items = self._get_all_group_items(self.selected_group)
             if not group_items:
                 return
@@ -1094,34 +1095,79 @@ class ModelEditor(tk.Toplevel):
             
             # Если группа уже в самом верху, ничего не делаем
             if end_index == len(self.items) - 1:
+                logger.info("Group is already at the top")
                 return
                 
-            # Находим элемент сразу после группы
-            item_after_group = self.items[end_index + 1]
-            
-            # Перемещаем этот элемент перед группой
-            self.items.remove(item_after_group)
-            self.items.insert(start_index, item_after_group)
-            
+            # Находим первый элемент после группы, который не входит в группу
+            item_after_group = None
+            for i in range(end_index + 1, len(self.items)):
+                if self.items[i] not in group_items:
+                    item_after_group = self.items[i]
+                    break
+                    
+            if item_after_group:
+                # Удаляем элемент после группы и вставляем его перед группой
+                self.items.remove(item_after_group)
+                self.items.insert(start_index, item_after_group)
+                logger.info(f"Moved group {self.selected_group} forward by swapping with {item_after_group.layer.get('name')}")
+                
         else:
-            # Перемещаем отдельные выбранные элементы
+            # Перемещение отдельных элементов
             for ci in sorted(self.current_selection, key=lambda x: self.items.index(x), reverse=True):
                 idx = self.items.index(ci)
-                if idx < len(self.items) - 1:
-                    # Меняем местами с следующим элементом
-                    self.items[idx], self.items[idx+1] = self.items[idx+1], self.items[idx]
+                group_name = ci.layer.get("group")
+                
+                if group_name:
+                    # Элемент внутри группы - может перемещаться только внутри группы
+                    group_items = self._get_all_group_items(group_name)
                     
+                    # Находим следующий элемент в той же группе
+                    next_in_group = None
+                    for i in range(idx + 1, len(self.items)):
+                        if self.items[i] in group_items:
+                            next_in_group = self.items[i]
+                            break
+                            
+                    if next_in_group:
+                        # Меняем местами с следующим элементом в группе
+                        self.items[idx], self.items[self.items.index(next_in_group)] = \
+                            self.items[self.items.index(next_in_group)], self.items[idx]
+                        logger.info(f"Moved {ci.layer.get('name')} forward within group {group_name}")
+                else:
+                    # Элемент без группы - может перемещаться свободно
+                    if idx < len(self.items) - 1:
+                        # Проверяем, не перемещаем ли мы элемент в середину группы
+                        next_item = self.items[idx + 1]
+                        next_item_group = next_item.layer.get("group")
+                        
+                        if next_item_group:
+                            # Следующий элемент в группе - пропускаем всю группу
+                            group_items = self._get_all_group_items(next_item_group)
+                            
+                            # Находим индекс последнего элемента группы
+                            last_group_idx = max(self.items.index(item) for item in group_items)
+                            
+                            # Если элемент уже находится перед группой, пропускаем ее
+                            if last_group_idx > idx:
+                                # Пропускаем всю группу
+                                self.items.remove(ci)
+                                self.items.insert(last_group_idx, ci)
+                                logger.info(f"Moved {ci.layer.get('name')} forward, skipping group {next_item_group}")
+                        else:
+                            # Просто меняем местами со следующим элементом
+                            self.items[idx], self.items[idx + 1] = self.items[idx + 1], self.items[idx]
+                            logger.info(f"Moved {ci.layer.get('name')} forward")
+                        
         self.refresh_tree()
         self.redraw_canvas()
-        logger.info("Brought selection forward")
     
     def send_backward(self):
         """Переместить выбранные элементы назад (ниже по Z-индексу)"""
         if not self.current_selection:
             return
             
-        # Если выбрана группа, перемещаем всю группу как единый блок
         if self.selected_group:
+            # Перемещение всей группы как единого блока
             group_items = self._get_all_group_items(self.selected_group)
             if not group_items:
                 return
@@ -1136,26 +1182,71 @@ class ModelEditor(tk.Toplevel):
             
             # Если группа уже в самом низу, ничего не делаем
             if start_index == 0:
+                logger.info("Group is already at the bottom")
                 return
                 
-            # Находим элемент сразу перед группой
-            item_before_group = self.items[start_index - 1]
-            
-            # Перемещаем этот элемент после группы
-            self.items.remove(item_before_group)
-            self.items.insert(end_index, item_before_group)
-            
+            # Находим первый элемент перед группой, который не входит в группу
+            item_before_group = None
+            for i in range(start_index - 1, -1, -1):
+                if self.items[i] not in group_items:
+                    item_before_group = self.items[i]
+                    break
+                    
+            if item_before_group:
+                # Удаляем элемент перед группой и вставляем его после группы
+                self.items.remove(item_before_group)
+                self.items.insert(end_index, item_before_group)
+                logger.info(f"Moved group {self.selected_group} backward by swapping with {item_before_group.layer.get('name')}")
+                
         else:
-            # Перемещаем отдельные выбранные элементы
+            # Перемещение отдельных элементов
             for ci in sorted(self.current_selection, key=lambda x: self.items.index(x)):
                 idx = self.items.index(ci)
-                if idx > 0:
-                    # Меняем местами с предыдущим элементом
-                    self.items[idx], self.items[idx-1] = self.items[idx-1], self.items[idx]
+                group_name = ci.layer.get("group")
+                
+                if group_name:
+                    # Элемент внутри группы - может перемещаться только внутри группы
+                    group_items = self._get_all_group_items(group_name)
                     
+                    # Находим предыдущий элемент в той же группе
+                    prev_in_group = None
+                    for i in range(idx - 1, -1, -1):
+                        if self.items[i] in group_items:
+                            prev_in_group = self.items[i]
+                            break
+                            
+                    if prev_in_group:
+                        # Меняем местами с предыдущим элементом в группе
+                        self.items[idx], self.items[self.items.index(prev_in_group)] = \
+                            self.items[self.items.index(prev_in_group)], self.items[idx]
+                        logger.info(f"Moved {ci.layer.get('name')} backward within group {group_name}")
+                else:
+                    # Элемент без группы - может перемещаться свободно
+                    if idx > 0:
+                        # Проверяем, не перемещаем ли мы элемент в середину группы
+                        prev_item = self.items[idx - 1]
+                        prev_item_group = prev_item.layer.get("group")
+                        
+                        if prev_item_group:
+                            # Предыдущий элемент в группе - пропускаем всю группу
+                            group_items = self._get_all_group_items(prev_item_group)
+                            
+                            # Находим индекс первого элемента группы
+                            first_group_idx = min(self.items.index(item) for item in group_items)
+                            
+                            # Если элемент уже находится после группы, пропускаем ее
+                            if first_group_idx < idx:
+                                # Пропускаем всю группу
+                                self.items.remove(ci)
+                                self.items.insert(first_group_idx, ci)
+                                logger.info(f"Moved {ci.layer.get('name')} backward, skipping group {prev_item_group}")
+                        else:
+                            # Просто меняем местами с предыдущим элементом
+                            self.items[idx], self.items[idx - 1] = self.items[idx - 1], self.items[idx]
+                            logger.info(f"Moved {ci.layer.get('name')} backward")
+                        
         self.refresh_tree()
         self.redraw_canvas()
-        logger.info("Sent selection backward")
     
     def apply_group_logic(self):
         if not self.selected_group:
