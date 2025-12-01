@@ -197,6 +197,13 @@ class ModelEditor(tk.Toplevel):
         self.group_random_timers = {}
         self.group_random_current = {}
         
+        # Состояние дерева для сохранения
+        self.tree_state = {
+            "expanded_groups": set(),
+            "selected_items": set(),
+            "preserve_selection": False
+        }
+        
         # ---- UI layout ----
         main_frame = ttk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
@@ -364,31 +371,31 @@ class ModelEditor(tk.Toplevel):
         ttk.Label(grid_frame, text="Имя:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
         self.name_entry = ttk.Entry(grid_frame)
         self.name_entry.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
-        self.name_entry.bind("<FocusIn>", self.on_entry_focus)
+        self.name_entry.bind("<FocusIn>", lambda e: "break")
         
         ttk.Label(grid_frame, text="X:").grid(row=1, column=0, sticky="w", padx=2, pady=2)
         self.x_entry = ttk.Entry(grid_frame)
         self.x_entry.grid(row=1, column=1, sticky="ew", padx=2, pady=2)
         self.x_entry.bind("<Return>", self.apply_props_from_entry)
-        self.x_entry.bind("<FocusIn>", self.on_entry_focus)
+        self.x_entry.bind("<FocusIn>", lambda e: "break")
         
         ttk.Label(grid_frame, text="Y:").grid(row=2, column=0, sticky="w", padx=2, pady=2)
         self.y_entry = ttk.Entry(grid_frame)
         self.y_entry.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
         self.y_entry.bind("<Return>", self.apply_props_from_entry)
-        self.y_entry.bind("<FocusIn>", self.on_entry_focus)
+        self.y_entry.bind("<FocusIn>", lambda e: "break")
         
         ttk.Label(grid_frame, text="Масштаб:").grid(row=3, column=0, sticky="w", padx=2, pady=2)
         self.scale_entry = ttk.Entry(grid_frame)
         self.scale_entry.grid(row=3, column=1, sticky="ew", padx=2, pady=2)
         self.scale_entry.bind("<Return>", self.apply_props_from_entry)
-        self.scale_entry.bind("<FocusIn>", self.on_entry_focus)
+        self.scale_entry.bind("<FocusIn>", lambda e: "break")
         
         ttk.Label(grid_frame, text="Поворот:").grid(row=4, column=0, sticky="w", padx=2, pady=2)
         self.rotation_entry = ttk.Entry(grid_frame)
         self.rotation_entry.grid(row=4, column=1, sticky="ew", padx=2, pady=2)
         self.rotation_entry.bind("<Return>", self.apply_props_from_entry)
-        self.rotation_entry.bind("<FocusIn>", self.on_entry_focus)
+        self.rotation_entry.bind("<FocusIn>", lambda e: "break")
         
         # Зеркалирование
         mirror_frame = ttk.Frame(props)
@@ -396,13 +403,17 @@ class ModelEditor(tk.Toplevel):
         ttk.Label(mirror_frame, text="Зеркалирование:").pack(side="left")
         self.flip_h_var = tk.BooleanVar(value=False)
         self.flip_v_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(mirror_frame, text="Гор.", variable=self.flip_h_var, 
-                       command=self.on_mirror_change).pack(side="left", padx=5)
-        ttk.Checkbutton(mirror_frame, text="Верт.", variable=self.flip_v_var,
-                       command=self.on_mirror_change).pack(side="left", padx=5)
+        self.flip_h_cb = ttk.Checkbutton(mirror_frame, text="Гор.", variable=self.flip_h_var, 
+                       command=self.on_mirror_change)
+        self.flip_h_cb.pack(side="left", padx=5)
+        self.flip_v_cb = ttk.Checkbutton(mirror_frame, text="Верт.", variable=self.flip_v_var,
+                       command=self.on_mirror_change)
+        self.flip_v_cb.pack(side="left", padx=5)
         
         self.visible_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(props, text="Видимый", variable=self.visible_var).pack(anchor="w", padx=5, pady=(0, 5))
+        self.visible_cb = ttk.Checkbutton(props, text="Видимый", variable=self.visible_var)
+        self.visible_cb.pack(anchor="w", padx=5, pady=(0, 5))
+        
         ttk.Button(props, text="Применить к выбранному", command=self.apply_props).pack(fill="x", padx=5, pady=5)
         
         # ---- Вкладка "Логика групп" ----
@@ -725,8 +736,7 @@ class ModelEditor(tk.Toplevel):
         # Получаем дочерние группы
         child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
         for child_group in child_groups:
-            child_items = self._get_all_group_items(child_group.get("name"))
-            items.extend(child_items)
+            items.extend(self._get_all_group_items(child_group.get("name")))
             
         return items
     
@@ -857,7 +867,7 @@ class ModelEditor(tk.Toplevel):
                             scaled_img_height = img.height
                             
                         px = canvas_x1 + int((scaled_width // 2) - scaled_img_width // 2 + (ci.x * self.zoom_level))
-                        py = canvas_y1 + int((scaled_height // 2) - scaled_img_height // 2 + (ci.y * self.zoom_level))
+                        py = canvas_x1 + int((scaled_height // 2) - scaled_img_height // 2 + (ci.y * self.zoom_level))
                         
                         self.canvas.create_rectangle(
                             px, py, px + scaled_img_width, py + scaled_img_height,
@@ -930,6 +940,10 @@ class ModelEditor(tk.Toplevel):
                     g["children"].append(name)
                     break
         
+        # Сохраняем состояние дерева перед обновлением
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = True
+        
         # Снимаем выделение с элементов
         for ci in self.items:
             ci.layer["_selected"] = False
@@ -939,15 +953,61 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
         logger.info(f"Created new group: {name} with parent {parent_group}")
     
+    def _save_tree_state(self):
+        """Сохраняет состояние дерева (раскрытые группы и выделение)"""
+        self.tree_state["expanded_groups"].clear()
+        self.tree_state["selected_items"].clear()
+        
+        # Сохраняем раскрытые группы
+        for item in self.tree.get_children():
+            if self.tree.item(item, "open"):
+                values = self.tree.item(item, "values")
+                if values and values[0] == "group":
+                    self.tree_state["expanded_groups"].add(values[1])
+        
+        # Сохраняем выделенные элементы
+        for item in self.tree.selection():
+            values = self.tree.item(item, "values")
+            if values:
+                self.tree_state["selected_items"].add(values)
+    
+    def _restore_tree_state(self):
+        """Восстанавливает состояние дерева (раскрытые группы и выделение)"""
+        # Восстанавливаем раскрытые группы
+        for item in self.tree.get_children():
+            values = self.tree.item(item, "values")
+            if values and values[0] == "group" and values[1] in self.tree_state["expanded_groups"]:
+                self.tree.item(item, open=True)
+        
+        # Восстанавливаем выделение
+        if self.tree_state["preserve_selection"]:
+            for item in self.tree.get_children():
+                values = self.tree.item(item, "values")
+                if values and values in self.tree_state["selected_items"]:
+                    self.tree.selection_add(item)
+                # Проверяем дочерние элементы (элементы внутри групп)
+                if values and values[0] == "group":
+                    for child in self.tree.get_children(item):
+                        child_values = self.tree.item(child, "values")
+                        if child_values and child_values in self.tree_state["selected_items"]:
+                            self.tree.selection_add(child)
+            
+            # После восстановления выделения сбрасываем флаг
+            self.tree_state["preserve_selection"] = False
+    
     def refresh_tree(self):
-        """Обновление древовидного списка с правильным порядком: верхний элемент в списке = самый верхний слой"""
+        """Обновление древовидного списка с сохранением состояния"""
         try:
+            # Сохраняем текущее состояние дерева
+            self._save_tree_state()
+            
+            # Очищаем дерево
             self.tree.delete(*self.tree.get_children())
+            
             # Создаем словарь для отслеживания групп и их узлов
             group_nodes = {}
             
             # Проходим по всем элементам в ОБРАТНОМ порядке (последний в self.items будет первым в списке)
-            # Это обеспечивает соответствие: верхний элемент в списке = самый верхний слой на холсте
             for ci in reversed(self.items):
                 group_name = ci.layer.get("group")
                 if group_name is None:
@@ -960,6 +1020,9 @@ class ModelEditor(tk.Toplevel):
                         group_nodes[group_name] = self.tree.insert("", "end", text=f"📁 {group_name}", values=("group", group_name))
                     # Добавляем элемент в группу
                     self.tree.insert(group_nodes[group_name], "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
+            
+            # Восстанавливаем состояние дерева
+            self._restore_tree_state()
             
             # Если выбрана группа, обновляем меню
             if self.selected_group:
@@ -1001,6 +1064,11 @@ class ModelEditor(tk.Toplevel):
     def on_tree_select(self, event=None):
         """Обработка выбора в дереве элементов"""
         try:
+            # Если фокус в поле ввода, не сбрасываем выделение
+            focus_widget = self.focus_get()
+            if isinstance(focus_widget, (ttk.Entry, tk.Entry, ttk.Combobox)):
+                return
+            
             selection = self.tree.selection()
             self.current_selection = []
             self.selected_group = None
@@ -1079,8 +1147,8 @@ class ModelEditor(tk.Toplevel):
         if not self.current_selection:
             return
             
+        # Если выбрана группа, перемещаем всю группу как единый блок
         if self.selected_group:
-            # Перемещение всей группы как единого блока
             group_items = self._get_all_group_items(self.selected_group)
             if not group_items:
                 return
@@ -1095,24 +1163,17 @@ class ModelEditor(tk.Toplevel):
             
             # Если группа уже в самом верху, ничего не делаем
             if end_index == len(self.items) - 1:
-                logger.info("Group is already at the top")
                 return
                 
-            # Находим первый элемент после группы, который не входит в группу
-            item_after_group = None
-            for i in range(end_index + 1, len(self.items)):
-                if self.items[i] not in group_items:
-                    item_after_group = self.items[i]
-                    break
-                    
-            if item_after_group:
-                # Удаляем элемент после группы и вставляем его перед группой
-                self.items.remove(item_after_group)
-                self.items.insert(start_index, item_after_group)
-                logger.info(f"Moved group {self.selected_group} forward by swapping with {item_after_group.layer.get('name')}")
-                
+            # Находим элемент сразу после группы
+            item_after_group = self.items[end_index + 1]
+            
+            # Перемещаем этот элемент перед группой
+            self.items.remove(item_after_group)
+            self.items.insert(start_index, item_after_group)
+            
         else:
-            # Перемещение отдельных элементов
+            # Перемещаем отдельные выбранные элементы
             for ci in sorted(self.current_selection, key=lambda x: self.items.index(x), reverse=True):
                 idx = self.items.index(ci)
                 group_name = ci.layer.get("group")
@@ -1132,7 +1193,6 @@ class ModelEditor(tk.Toplevel):
                         # Меняем местами с следующим элементом в группе
                         self.items[idx], self.items[self.items.index(next_in_group)] = \
                             self.items[self.items.index(next_in_group)], self.items[idx]
-                        logger.info(f"Moved {ci.layer.get('name')} forward within group {group_name}")
                 else:
                     # Элемент без группы - может перемещаться свободно
                     if idx < len(self.items) - 1:
@@ -1152,22 +1212,25 @@ class ModelEditor(tk.Toplevel):
                                 # Пропускаем всю группу
                                 self.items.remove(ci)
                                 self.items.insert(last_group_idx, ci)
-                                logger.info(f"Moved {ci.layer.get('name')} forward, skipping group {next_item_group}")
                         else:
                             # Просто меняем местами со следующим элементом
                             self.items[idx], self.items[idx + 1] = self.items[idx + 1], self.items[idx]
-                            logger.info(f"Moved {ci.layer.get('name')} forward")
-                        
+        
+        # Сохраняем состояние дерева перед обновлением
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = True
+        
         self.refresh_tree()
         self.redraw_canvas()
+        logger.info("Brought selection forward")
     
     def send_backward(self):
         """Переместить выбранные элементы назад (ниже по Z-индексу)"""
         if not self.current_selection:
             return
             
+        # Если выбрана группа, перемещаем всю группу как единый блок
         if self.selected_group:
-            # Перемещение всей группы как единого блока
             group_items = self._get_all_group_items(self.selected_group)
             if not group_items:
                 return
@@ -1182,24 +1245,17 @@ class ModelEditor(tk.Toplevel):
             
             # Если группа уже в самом низу, ничего не делаем
             if start_index == 0:
-                logger.info("Group is already at the bottom")
                 return
                 
-            # Находим первый элемент перед группой, который не входит в группу
-            item_before_group = None
-            for i in range(start_index - 1, -1, -1):
-                if self.items[i] not in group_items:
-                    item_before_group = self.items[i]
-                    break
-                    
-            if item_before_group:
-                # Удаляем элемент перед группой и вставляем его после группы
-                self.items.remove(item_before_group)
-                self.items.insert(end_index, item_before_group)
-                logger.info(f"Moved group {self.selected_group} backward by swapping with {item_before_group.layer.get('name')}")
-                
+            # Находим элемент сразу перед группой
+            item_before_group = self.items[start_index - 1]
+            
+            # Перемещаем этот элемент после группы
+            self.items.remove(item_before_group)
+            self.items.insert(end_index, item_before_group)
+            
         else:
-            # Перемещение отдельных элементов
+            # Перемещаем отдельные выбранные элементы
             for ci in sorted(self.current_selection, key=lambda x: self.items.index(x)):
                 idx = self.items.index(ci)
                 group_name = ci.layer.get("group")
@@ -1219,7 +1275,6 @@ class ModelEditor(tk.Toplevel):
                         # Меняем местами с предыдущим элементом в группе
                         self.items[idx], self.items[self.items.index(prev_in_group)] = \
                             self.items[self.items.index(prev_in_group)], self.items[idx]
-                        logger.info(f"Moved {ci.layer.get('name')} backward within group {group_name}")
                 else:
                     # Элемент без группы - может перемещаться свободно
                     if idx > 0:
@@ -1239,14 +1294,17 @@ class ModelEditor(tk.Toplevel):
                                 # Пропускаем всю группу
                                 self.items.remove(ci)
                                 self.items.insert(first_group_idx, ci)
-                                logger.info(f"Moved {ci.layer.get('name')} backward, skipping group {prev_item_group}")
                         else:
                             # Просто меняем местами с предыдущим элементом
                             self.items[idx], self.items[idx - 1] = self.items[idx - 1], self.items[idx]
-                            logger.info(f"Moved {ci.layer.get('name')} backward")
-                        
+        
+        # Сохраняем состояние дерева перед обновлением
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = True
+        
         self.refresh_tree()
         self.redraw_canvas()
+        logger.info("Sent selection backward")
     
     def apply_group_logic(self):
         if not self.selected_group:
@@ -1288,6 +1346,10 @@ class ModelEditor(tk.Toplevel):
         grp["random_min"] = self.random_min_var.get()
         grp["random_max"] = self.random_max_var.get()
         
+        # Сохраняем состояние дерева
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = True
+        
         messagebox.showinfo("Логика группы", f"Логика для группы {gname} сохранена")
         logger.info(f"Group logic applied to {gname}: {logic}")
     
@@ -1302,10 +1364,6 @@ class ModelEditor(tk.Toplevel):
             ci.update_transformed_image()
             
         self.redraw_canvas()
-    
-    def on_entry_focus(self, event):
-        """Обработка фокуса на поле ввода - не сбрасываем выделение"""
-        return "break"
     
     def zoom_in(self):
         """Увеличение масштаба"""
@@ -1444,6 +1502,12 @@ class ModelEditor(tk.Toplevel):
         self.canvas_width_var.set(700)
         self.canvas_height_var.set(700)
         self.refresh_import_list()
+        
+        # Сбрасываем состояние дерева
+        self.tree_state["expanded_groups"].clear()
+        self.tree_state["selected_items"].clear()
+        self.tree_state["preserve_selection"] = False
+        
         self.refresh_tree()
         self.zoom_reset()
         self.redraw_canvas()
@@ -1535,6 +1599,12 @@ class ModelEditor(tk.Toplevel):
                     logger.error(f"Error loading imported file: {e}")
                     
         self.refresh_import_list()
+        
+        # Сбрасываем состояние дерева
+        self.tree_state["expanded_groups"].clear()
+        self.tree_state["selected_items"].clear()
+        self.tree_state["preserve_selection"] = False
+        
         self.refresh_tree()
         self.zoom_reset()
         self.redraw_canvas()
@@ -1739,6 +1809,11 @@ class ModelEditor(tk.Toplevel):
                 logger.error(f"Error importing image {p}: {e}")
                 
         self.refresh_import_list()
+        
+        # Сохраняем состояние дерева
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = True
+        
         self.refresh_tree()
         self.redraw_canvas()
         self.last_autosave = time.time()
@@ -1846,6 +1921,10 @@ class ModelEditor(tk.Toplevel):
         if need_redraw:
             self.redraw_canvas()
             
+        # Сохраняем состояние дерева перед обновлением
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = True
+        
         self.refresh_tree()
         self.last_autosave = time.time()
     
@@ -1882,6 +1961,11 @@ class ModelEditor(tk.Toplevel):
                     ci.layer["group"] = parent_group if parent_group else None
                     
             self.selected_group = parent_group
+            
+            # Сохраняем состояние дерева
+            self._save_tree_state()
+            self.tree_state["preserve_selection"] = True
+            
             self.refresh_tree()
             self.redraw_canvas()
             logger.info(f"Ungrouped group: {gname}")
@@ -1901,6 +1985,10 @@ class ModelEditor(tk.Toplevel):
                             self.model["groups"].remove(g)
                 ci.layer["group"] = None
                 
+        # Сохраняем состояние дерева
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = True
+        
         self.refresh_tree()
         self.redraw_canvas()
         logger.info(f"Ungrouped {len(self.current_selection)} items")
@@ -1908,7 +1996,7 @@ class ModelEditor(tk.Toplevel):
     def on_canvas_mouse_down(self, event):
         # Предотвращаем обработку, если фокус в поле ввода
         focus_widget = self.focus_get()
-        if focus_widget and isinstance(focus_widget, (ttk.Entry, tk.Entry)):
+        if focus_widget and isinstance(focus_widget, (ttk.Entry, tk.Entry, ttk.Combobox)):
             return
             
         # Получаем координаты на холсте с учетом зума и смещения
@@ -1997,6 +2085,11 @@ class ModelEditor(tk.Toplevel):
                 self.drag_data["group_items"] = self.current_selection.copy()
                 
             self.drag_data["item"] = found
+            
+            # Сохраняем состояние дерева перед обновлением
+            self._save_tree_state()
+            self.tree_state["preserve_selection"] = True
+            
             self.refresh_tree()
         else:
             # Если кликнули вне элементов - сбрасываем выделение
@@ -2046,7 +2139,6 @@ class ModelEditor(tk.Toplevel):
             self.y_entry.delete(0, "end")
             self.y_entry.insert(0, str(self.current_selection[0].y))
             
-        self.refresh_tree()
         self.redraw_canvas()
     
     def on_canvas_mouse_up(self, event):
@@ -2082,6 +2174,11 @@ class ModelEditor(tk.Toplevel):
                 image_path = os.path.join(self.model_dir, fname)
                 ci = CanvasItem(layer, image_path)
                 self.items.append(ci)
+                
+                # Сохраняем состояние дерева
+                self._save_tree_state()
+                self.tree_state["preserve_selection"] = True
+                
                 self.refresh_tree()
                 self.redraw_canvas()
                 return
@@ -2094,6 +2191,10 @@ class ModelEditor(tk.Toplevel):
                 if l.get("file") == filename:
                     l["_selected"] = False
                     
+            # Сохраняем состояние дерева
+            self._save_tree_state()
+            self.tree_state["preserve_selection"] = True
+            
             self.refresh_tree()
             self.redraw_canvas()
     
@@ -2107,6 +2208,11 @@ class ModelEditor(tk.Toplevel):
                     os.remove(file_path)
             self.model["layers"] = [l for l in self.model["layers"] if l.get("file") != filename]
             self.refresh_import_list()
+            
+            # Сохраняем состояние дерева
+            self._save_tree_state()
+            self.tree_state["preserve_selection"] = True
+            
             self.refresh_tree()
             self.redraw_canvas()
             logger.info(f"File deleted: {filename}")
