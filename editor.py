@@ -1557,7 +1557,13 @@ class ModelEditor(tk.Toplevel):
             return
             
         self.model = {"name": name, "layers": [], "groups": [], "width": 700, "height": 700}
-        self.model_dir = None
+        # Создаем временную папку
+        self.model_dir = os.path.join(MODELS_DIR, f"model_temp_{int(time.time())}")
+        os.makedirs(self.model_dir, exist_ok=True)
+        
+        # Добавляем очистку старых временных папок
+        self.cleanup_old_temp_folders()
+        
         self.original_slot = None
         self.items.clear()
         self.imported_files.clear()
@@ -2394,35 +2400,31 @@ class ModelEditor(tk.Toplevel):
             logger.error(f"Error exporting model: {e}\n{tb}")
     
     def cleanup_old_temp_folders(self, max_count=3):
-        """Удаляет старые временные папки, оставляя не более max_count для каждого слота"""
+        """Удаляет старые временные папки, оставляя не более max_count для каждого типа"""
         try:
             # Собираем все временные папки
-            temp_folders = glob.glob(os.path.join(MODELS_DIR, "temp_*"))
+            temp_folders = glob.glob(os.path.join(MODELS_DIR, "temp_*_slot*"))
             model_temp_folders = glob.glob(os.path.join(MODELS_DIR, "model_temp_*"))
             all_folders = temp_folders + model_temp_folders
             
             # Группируем папки по типам
             folder_groups = {}
             
-            for folder in all_folders:
+            # Группируем слоты
+            for folder in temp_folders:
                 folder_name = os.path.basename(folder)
-                # Определяем тип папки
-                if "_slot" in folder_name:
-                    # Извлекаем номер слота из имени папки
-                    slot_match = re.search(r"_slot(\d+)", folder_name)
-                    if slot_match:
-                        slot_num = slot_match.group(1)
-                        group_key = f"slot_{slot_num}"
-                    else:
-                        continue
-                elif "model_temp_" in folder_name:
-                    group_key = "model_temp"
-                else:
-                    continue
-                    
-                if group_key not in folder_groups:
-                    folder_groups[group_key] = []
-                folder_groups[group_key].append(folder)
+                # Извлекаем номер слота из имени папки
+                slot_match = re.search(r"_slot(\d+)", folder_name)
+                if slot_match:
+                    slot_num = slot_match.group(1)
+                    group_key = f"slot_{slot_num}"
+                    if group_key not in folder_groups:
+                        folder_groups[group_key] = []
+                    folder_groups[group_key].append(folder)
+            
+            # Группируем общие временные папки
+            if model_temp_folders:
+                folder_groups["model_temp"] = model_temp_folders
             
             # Обрабатываем каждую группу отдельно
             removed_count = 0
