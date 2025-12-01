@@ -905,6 +905,9 @@ class ModelEditor(tk.Toplevel):
                 
         if len(selected_groups) == 1:
             parent_group = list(selected_groups)[0]
+        elif self.selected_group:
+            # Если выбрана группа в интерфейсе, используем ее как родительскую
+            parent_group = self.selected_group
             
         # Создаем новую группу
         new_group = {
@@ -996,7 +999,7 @@ class ModelEditor(tk.Toplevel):
             self.tree_state["preserve_selection"] = False
     
     def refresh_tree(self):
-        """Обновление древовидного списка с сохранением состояния"""
+        """Обновление древовидного списка с сохранением состояния и правильной вложенностью групп"""
         try:
             # Сохраняем текущее состояние дерева
             self._save_tree_state()
@@ -1004,22 +1007,77 @@ class ModelEditor(tk.Toplevel):
             # Очищаем дерево
             self.tree.delete(*self.tree.get_children())
             
-            # Создаем словарь для отслеживания групп и их узлов
-            group_nodes = {}
+            # Создаем словари для быстрого доступа
+            groups_by_name = {g.get("name"): g for g in self.model.get("groups", [])}
             
-            # Проходим по всем элементам в ОБРАТНОМ порядке (последний в self.items будет первым в списке)
+            # Словари для отслеживания
+            group_nodes = {}  # Имя группы -> node_id в дереве
+            items_added = set()  # ID элементов, которые уже добавлены
+            
+            # Функция для получения пути группы (от корня до текущей группы)
+            def get_group_path(group_name):
+                path = []
+                current = group_name
+                while current:
+                    path.insert(0, current)
+                    group = groups_by_name.get(current)
+                    current = group.get("parent") if group else None
+                return path
+            
+            # Создаем узлы для всех групп (если они еще не созданы)
+            def ensure_group_node(group_name):
+                if group_name in group_nodes:
+                    return group_nodes[group_name]
+                    
+                group = groups_by_name.get(group_name)
+                if not group:
+                    return None
+                    
+                # Получаем путь группы
+                path = get_group_path(group_name)
+                
+                # Создаем узлы для всех групп в пути
+                parent_node = ""
+                for group_in_path in path:
+                    if group_in_path in group_nodes:
+                        parent_node = group_nodes[group_in_path]
+                        continue
+                        
+                    # Создаем узел для этой группы
+                    group_node = self.tree.insert(parent_node, "end", text=f"📁 {group_in_path}",
+                                                values=("group", group_in_path))
+                    group_nodes[group_in_path] = group_node
+                    parent_node = group_node
+                    
+                return group_nodes[group_name]
+            
+            # Проходим по элементам в ОБРАТНОМ порядке (чтобы верхний элемент на холсте был первым в списке)
             for ci in reversed(self.items):
+                item_id = id(ci)
+                if item_id in items_added:
+                    continue
+                    
                 group_name = ci.layer.get("group")
-                if group_name is None:
-                    # Элемент без группы - добавляем в корень
-                    self.tree.insert("", "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
+                
+                if group_name:
+                    # Убеждаемся, что узел группы существует
+                    group_node = ensure_group_node(group_name)
+                    if group_node:
+                        # Добавляем элемент в группу
+                        self.tree.insert(group_node, "end", 
+                                        text=self._get_item_display_text(ci),
+                                        values=("item", item_id))
+                        items_added.add(item_id)
+                    else:
+                        # Группа не найдена, добавляем в корень
+                        self.tree.insert("", "end", text=self._get_item_display_text(ci),
+                                        values=("item", item_id))
+                        items_added.add(item_id)
                 else:
-                    # Элемент с группой
-                    if group_name not in group_nodes:
-                        # Создаем узел для группы, если его еще нет
-                        group_nodes[group_name] = self.tree.insert("", "end", text=f"📁 {group_name}", values=("group", group_name))
-                    # Добавляем элемент в группу
-                    self.tree.insert(group_nodes[group_name], "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
+                    # Элемент без группы - добавляем в корень
+                    self.tree.insert("", "end", text=self._get_item_display_text(ci),
+                                    values=("item", item_id))
+                    items_added.add(item_id)
             
             # Восстанавливаем состояние дерева
             self._restore_tree_state()
@@ -1951,15 +2009,21 @@ class ModelEditor(tk.Toplevel):
                     # Удаляем ссылку на группу из родительской группы
                     if gname in parent.get("children", []):
                         parent["children"].remove(gname)
+            else:
+                # Если нет родительской группы, удаляем группу у элементов
+                for ci in self.items:
+                    if ci.layer.get("group") == gname:
+                        ci.layer["group"] = None
             
             # Удаляем группу
             self.model["groups"] = [g for g in self.model.get("groups", []) if g.get("name") != gname]
             
-            # Очищаем группу у элементов
-            for ci in self.items:
-                if ci.layer.get("group") == gname:
-                    ci.layer["group"] = parent_group if parent_group else None
-                    
+            # Удаляем все дочерние группы этой группы
+            child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == gname]
+            for child_group in child_groups:
+                # Рекурсивно удаляем дочерние группы
+                self._delete_group_and_children(child_group.get("name"))
+                
             self.selected_group = parent_group
             
             # Сохраняем состояние дерева
@@ -1982,6 +2046,7 @@ class ModelEditor(tk.Toplevel):
                     if g.get("name") == grp and ci.layer.get("name") in g.get("children", []):
                         g["children"].remove(ci.layer.get("name"))
                         if not g["children"]:
+                            # Если группа пуста, удаляем ее
                             self.model["groups"].remove(g)
                 ci.layer["group"] = None
                 
@@ -1992,6 +2057,21 @@ class ModelEditor(tk.Toplevel):
         self.refresh_tree()
         self.redraw_canvas()
         logger.info(f"Ungrouped {len(self.current_selection)} items")
+
+    def _delete_group_and_children(self, group_name):
+        """Рекурсивно удаляет группу и все ее дочерние группы"""
+        # Удаляем группу у элементов
+        for ci in self.items:
+            if ci.layer.get("group") == group_name:
+                ci.layer["group"] = None
+        
+        # Удаляем дочерние группы
+        child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
+        for child_group in child_groups:
+            self._delete_group_and_children(child_group.get("name"))
+        
+        # Удаляем саму группу
+        self.model["groups"] = [g for g in self.model.get("groups", []) if g.get("name") != group_name]
     
     def on_canvas_mouse_down(self, event):
         # Предотвращаем обработку, если фокус в поле ввода
