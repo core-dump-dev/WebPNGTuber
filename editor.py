@@ -729,6 +729,25 @@ class ModelEditor(tk.Toplevel):
             
         return items
     
+    def _make_group_continuous(self, group_name):
+        """Перемещает все элементы группы в один непрерывный блок"""
+        group_items = self._get_all_group_items(group_name)
+        if not group_items or len(group_items) < 2:
+            return
+            
+        # Находим самый верхний элемент группы (максимальный индекс)
+        max_index = max(self.items.index(item) for item in group_items)
+        
+        # Удаляем все элементы группы из списка
+        for item in group_items:
+            self.items.remove(item)
+            
+        # Вставляем все элементы группы обратно как непрерывный блок
+        # Используем позицию самого верхнего элемента группы
+        insert_index = max_index - len(group_items) + 1
+        for i, item in enumerate(group_items):
+            self.items.insert(insert_index + i, item)
+    
     def redraw_canvas(self, level=0.0, mode="none"):
         try:
             # Очищаем canvas
@@ -895,6 +914,9 @@ class ModelEditor(tk.Toplevel):
         for ci in self.current_selection:
             ci.layer["group"] = name
             
+        # Перемещаем все элементы группы в один непрерывный блок
+        self._make_group_continuous(name)
+        
         # Обновляем родительскую группу (если есть)
         if parent_group:
             for g in self.model.get("groups", []):
@@ -917,17 +939,16 @@ class ModelEditor(tk.Toplevel):
         logger.info(f"Created new group: {name} with parent {parent_group}")
     
     def refresh_tree(self):
-        """Обновление древовидного списка с поддержкой вложенных групп и правильным порядком"""
+        """Обновление древовидного списка с правильным порядком: верхний элемент в списке = самый верхний слой"""
         try:
             self.tree.delete(*self.tree.get_children())
-            
             # Создаем словарь для отслеживания групп и их узлов
             group_nodes = {}
             
-            # Проходим по всем элементам в порядке их отрисовки (self.items)
-            for ci in self.items:
+            # Проходим по всем элементам в ОБРАТНОМ порядке (последний в self.items будет первым в списке)
+            # Это обеспечивает соответствие: верхний элемент в списке = самый верхний слой на холсте
+            for ci in reversed(self.items):
                 group_name = ci.layer.get("group")
-                
                 if group_name is None:
                     # Элемент без группы - добавляем в корень
                     self.tree.insert("", "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
@@ -936,7 +957,6 @@ class ModelEditor(tk.Toplevel):
                     if group_name not in group_nodes:
                         # Создаем узел для группы, если его еще нет
                         group_nodes[group_name] = self.tree.insert("", "end", text=f"📁 {group_name}", values=("group", group_name))
-                    
                     # Добавляем элемент в группу
                     self.tree.insert(group_nodes[group_name], "end", text=self._get_item_display_text(ci), values=("item", id(ci)))
             
@@ -1058,42 +1078,39 @@ class ModelEditor(tk.Toplevel):
         if not self.current_selection:
             return
             
-        # Если выбрана группа, перемещаем все элементы группы
+        # Если выбрана группа, перемещаем всю группу как единый блок
         if self.selected_group:
             group_items = self._get_all_group_items(self.selected_group)
             if not group_items:
                 return
                 
-            # Находим индексы всех элементов группы
-            group_indices = [self.items.index(item) for item in group_items]
-            min_index = min(group_indices)
-            max_index = max(group_indices)
+            # Сначала делаем группу непрерывной
+            self._make_group_continuous(self.selected_group)
+            
+            # Находим позиции группы в списке
+            indices = [self.items.index(item) for item in group_items]
+            start_index = min(indices)
+            end_index = max(indices)
             
             # Если группа уже в самом верху, ничего не делаем
-            if max_index == len(self.items) - 1:
+            if end_index == len(self.items) - 1:
                 return
                 
-            # Перемещаем всю группу выше
-            # Удаляем элементы группы из списка
-            for item in reversed(group_items):
-                self.items.remove(item)
-                
-            # Вставляем группу после следующего элемента после группы
-            insert_index = max_index + 1
-            if insert_index >= len(self.items):
-                # Если группа была в конце, просто добавляем в конец
-                self.items.extend(group_items)
-            else:
-                # Вставляем группу после следующего элемента
-                self.items[insert_index:insert_index] = group_items
+            # Находим элемент сразу после группы
+            item_after_group = self.items[end_index + 1]
+            
+            # Перемещаем этот элемент перед группой
+            self.items.remove(item_after_group)
+            self.items.insert(start_index, item_after_group)
+            
         else:
             # Перемещаем отдельные выбранные элементы
-            for ci in self.current_selection:
+            for ci in sorted(self.current_selection, key=lambda x: self.items.index(x), reverse=True):
                 idx = self.items.index(ci)
                 if idx < len(self.items) - 1:
                     # Меняем местами с следующим элементом
                     self.items[idx], self.items[idx+1] = self.items[idx+1], self.items[idx]
-        
+                    
         self.refresh_tree()
         self.redraw_canvas()
         logger.info("Brought selection forward")
@@ -1103,37 +1120,39 @@ class ModelEditor(tk.Toplevel):
         if not self.current_selection:
             return
             
-        # Если выбрана группа, перемещаем все элементы группы
+        # Если выбрана группа, перемещаем всю группу как единый блок
         if self.selected_group:
             group_items = self._get_all_group_items(self.selected_group)
             if not group_items:
                 return
                 
-            # Находим индексы всех элементов группы
-            group_indices = [self.items.index(item) for item in group_items]
-            min_index = min(group_indices)
-            max_index = max(group_indices)
+            # Сначала делаем группу непрерывной
+            self._make_group_continuous(self.selected_group)
+            
+            # Находим позиции группы в списке
+            indices = [self.items.index(item) for item in group_items]
+            start_index = min(indices)
+            end_index = max(indices)
             
             # Если группа уже в самом низу, ничего не делаем
-            if min_index == 0:
+            if start_index == 0:
                 return
                 
-            # Перемещаем всю группу ниже
-            # Удаляем элементы группы из списка
-            for item in reversed(group_items):
-                self.items.remove(item)
-                
-            # Вставляем группу перед предыдущим элементом перед группой
-            insert_index = min_index - 1
-            self.items[insert_index:insert_index] = group_items
+            # Находим элемент сразу перед группой
+            item_before_group = self.items[start_index - 1]
+            
+            # Перемещаем этот элемент после группы
+            self.items.remove(item_before_group)
+            self.items.insert(end_index, item_before_group)
+            
         else:
             # Перемещаем отдельные выбранные элементы
-            for ci in self.current_selection:
+            for ci in sorted(self.current_selection, key=lambda x: self.items.index(x)):
                 idx = self.items.index(ci)
                 if idx > 0:
                     # Меняем местами с предыдущим элементом
                     self.items[idx], self.items[idx-1] = self.items[idx-1], self.items[idx]
-        
+                    
         self.refresh_tree()
         self.redraw_canvas()
         logger.info("Sent selection backward")
