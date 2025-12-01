@@ -14,6 +14,7 @@ from audio import AudioProcessor
 import logging
 import logging.handlers
 from datetime import datetime
+import re
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -497,7 +498,10 @@ class ModelEditor(tk.Toplevel):
         
         # Кнопка применения
         ttk.Button(groups_frame, text="Применить логику", command=self.apply_group_logic).pack(fill="x", pady=10)
-        
+                
+        # Очищаем старые временные папки при запуске
+        self.cleanup_old_temp_folders()
+
         try:
             self.iconbitmap(os.path.join(BASE_DIR, 'favicon.ico'))
         except Exception as e:
@@ -1494,7 +1498,10 @@ class ModelEditor(tk.Toplevel):
             self.stop_blink_preview()
         except Exception as e:
             logger.error(f"Error stopping audio: {e}")
-        self.cleanup_temp_folders()
+        
+        # Очищаем старые временные папки, но не удаляем все
+        self.cleanup_old_temp_folders()
+        
         self.grab_release()
         logger.info("Model editor closed")
         self.destroy()
@@ -1601,33 +1608,25 @@ class ModelEditor(tk.Toplevel):
         if not os.path.exists(json_path):
             messagebox.showerror("Ошибка", "model.json не найден в выбранном слоте")
             return
-            
         with open(json_path, "r", encoding="utf-8") as f:
             self.model = json.load(f)
-            
         # Мигрируем старую модель для поддержки вложенных групп
         self._migrate_model_for_nested_groups()
-        
         # Загружаем имя модели
         self.model_name_var.set(self.model.get("name", "Без названия"))
-        
         # Загружаем размеры холста
         self.canvas_width = self.model.get("width", 700)
         self.canvas_height = self.model.get("height", 700)
         self.canvas_width_var.set(self.canvas_width)
         self.canvas_height_var.set(self.canvas_height)
-        
         temp_dir = os.path.join(MODELS_DIR, f"temp_{int(time.time())}_slot{slot_num}")
         os.makedirs(temp_dir, exist_ok=True)
-        
         for f in os.listdir(path):
             src = os.path.join(path, f)
             if os.path.isfile(src):
                 shutil.copy2(src, os.path.join(temp_dir, f))
-                
         self.model_dir = temp_dir
         self.original_slot = slot_num
-        
         self.items.clear()
         for layer in self.model.get("layers", []):
             filename = layer.get("file")
@@ -1636,13 +1635,11 @@ class ModelEditor(tk.Toplevel):
             fp = os.path.join(self.model_dir, filename)
             if not os.path.exists(fp):
                 continue
-                
             try:
                 ci = CanvasItem(layer, fp)
                 self.items.append(ci)
             except Exception as e:
                 logger.error(f"Error loading image: {e}")
-                
         self.imported_files.clear()
         for f in os.listdir(self.model_dir):
             if f.lower().endswith((".png", ".gif")):
@@ -1655,17 +1652,18 @@ class ModelEditor(tk.Toplevel):
                     self.imported_files.append((f, preview_img, is_gif))
                 except Exception as e:
                     logger.error(f"Error loading imported file: {e}")
-                    
         self.refresh_import_list()
-        
         # Сбрасываем состояние дерева
         self.tree_state["expanded_groups"].clear()
         self.tree_state["selected_items"].clear()
         self.tree_state["preserve_selection"] = False
-        
         self.refresh_tree()
         self.zoom_reset()
         self.redraw_canvas()
+        
+        # Очищаем старые временные папки после загрузки
+        self.cleanup_old_temp_folders()
+        
         logger.info(f"Model loaded from slot {slot_num}")
     
     def _migrate_model_for_nested_groups(self):
@@ -1784,6 +1782,9 @@ class ModelEditor(tk.Toplevel):
             self.model_dir = None
             
         logger.info(f"Model saved to slot {slot_num}")
+
+        # После создания очищаем старые временные папки
+        self.cleanup_old_temp_folders()
     
     def create_preview(self):
         if not self.model_dir:
@@ -2392,6 +2393,61 @@ class ModelEditor(tk.Toplevel):
             messagebox.showerror("Ошибка экспорта", f"Ошибка при экспорте: {e}. Смотри export_zip_error.log")
             logger.error(f"Error exporting model: {e}\n{tb}")
     
+    def cleanup_old_temp_folders(self, max_count=3):
+        """Удаляет старые временные папки, оставляя не более max_count для каждого слота"""
+        try:
+            # Собираем все временные папки
+            temp_folders = glob.glob(os.path.join(MODELS_DIR, "temp_*"))
+            model_temp_folders = glob.glob(os.path.join(MODELS_DIR, "model_temp_*"))
+            all_folders = temp_folders + model_temp_folders
+            
+            # Группируем папки по типам
+            folder_groups = {}
+            
+            for folder in all_folders:
+                folder_name = os.path.basename(folder)
+                # Определяем тип папки
+                if "_slot" in folder_name:
+                    # Извлекаем номер слота из имени папки
+                    slot_match = re.search(r"_slot(\d+)", folder_name)
+                    if slot_match:
+                        slot_num = slot_match.group(1)
+                        group_key = f"slot_{slot_num}"
+                    else:
+                        continue
+                elif "model_temp_" in folder_name:
+                    group_key = "model_temp"
+                else:
+                    continue
+                    
+                if group_key not in folder_groups:
+                    folder_groups[group_key] = []
+                folder_groups[group_key].append(folder)
+            
+            # Обрабатываем каждую группу отдельно
+            removed_count = 0
+            for group_key, folders in folder_groups.items():
+                # Сортируем по времени создания (новые первыми)
+                folders.sort(key=lambda x: os.path.getctime(x), reverse=True)
+                
+                # Удаляем старые папки, оставляя только max_count последних
+                for folder in folders[max_count:]:
+                    try:
+                        if os.path.isdir(folder):
+                            shutil.rmtree(folder)
+                            logger.info(f"Removed old temp folder ({group_key}): {folder}")
+                            removed_count += 1
+                    except Exception as e:
+                        logger.error(f"Error removing temp folder {folder}: {e}")
+            
+            if removed_count > 0:
+                logger.info(f"Cleaned up {removed_count} old temporary folders")
+                        
+        except Exception as e:
+            logger.error(f"Error in cleanup_old_temp_folders: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
     def _preview_loop(self):
         try:
             now = time.time()
