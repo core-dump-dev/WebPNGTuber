@@ -100,6 +100,7 @@ class App:
         slots_frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         self.model_slots = []
         self.slot_previews = [None] * 6
+        self.current_slot = self.settings.get('current_slot')  # Загружаем текущий слот из настроек
 
         try:
             root.iconbitmap(os.path.join(BASE_DIR, 'favicon.ico'))
@@ -327,6 +328,10 @@ class App:
         # Обновление слотов
         self.refresh_slot_buttons()
 
+        # Если в настройках есть текущий слот, загружаем его
+        if self.current_slot:
+            self.load_slot(self.current_slot - 1, silent=True)  # -1 потому что индексация с 0
+
     def _round_to_step(self, value, step):
         """Округление значения до ближайшего шага"""
         return round(value / step) * step
@@ -442,7 +447,8 @@ class App:
             'noise_gate_threshold': self.noise_gate_threshold.get(),
             'mic_device': self.device_var.get(),
             'idle_enabled': self.idle_enabled.get(),
-            'idle_timeout': self.idle_timeout.get()
+            'idle_timeout': self.idle_timeout.get(),
+            'current_slot': self.current_slot  # Сохраняем текущий слот
         }
         try:
             with open(SETTINGS_FILE, 'w') as f:
@@ -465,17 +471,23 @@ class App:
             btn = self.model_slots[idx]
             preview_path = os.path.join(slot_dir, "preview.png")
 
+            # Определяем, является ли этот слот текущим
+            is_current = (idx + 1 == self.current_slot)
+            
+            # Префикс со звездочкой для текущего слота
+            prefix = "★ " if is_current else ""
+
             if os.path.exists(json_path):
                 try:
                     with open(json_path, "r", encoding="utf-8") as f:
                         model_data = json.load(f)
                     model_name = model_data.get('name', f"Слот {idx+1}")
-                    btn.config(text=f"Слот {idx+1}\n{model_name}")
+                    btn.config(text=f"{prefix}Слот {idx+1}\n{model_name}")
                 except Exception as e:
-                    btn.config(text=f"Слот {idx+1}\n(ошибка)")
+                    btn.config(text=f"{prefix}Слот {idx+1}\n(ошибка)")
                     logger.error(f"Error loading model from slot {idx+1}: {e}")
             else:
-                btn.config(text=f"Слот {idx+1}\n(пустой)")
+                btn.config(text=f"{prefix}Слот {idx+1}\n(пустой)")
 
             if os.path.exists(preview_path):
                 try:
@@ -579,16 +591,17 @@ class App:
         self.update_threshold_visuals()
         self.update_level_indicator(self.audio_level_scaled if hasattr(self, 'audio_level_scaled') else 0)
 
-    def load_slot(self, idx):
+    def load_slot(self, idx, silent=False):
         """Загрузка модели из слота"""
         slot_dir = os.path.join(MODELS_DIR, f"slot{idx+1}")
         json_path = os.path.join(slot_dir, "model.json")
 
         if not os.path.exists(json_path):
-            answer = messagebox.askyesno("Нет модели",
-                f"В слоте {idx+1} нет модели. Создать новую?")
-            if not answer:
-                return
+            if not silent:
+                answer = messagebox.askyesno("Нет модели",
+                    f"В слоте {idx+1} нет модели. Создать новую?")
+                if not answer:
+                    return
 
             self.renderer.model = {"name": f"Слот {idx+1}", "layers": [], "groups": []}
             self.renderer.model_dir = slot_dir
@@ -604,9 +617,13 @@ class App:
             if self.webserver and self.webserver.is_running:
                 self.webserver.renderer = self.renderer
 
-        model_name = self.renderer.model.get('name','модель')
-        self.model_slots[idx].config(text=f"Слот {idx+1}\n{model_name}")
+        # Устанавливаем текущий слот
+        self.current_slot = idx + 1
+        
+        # Обновляем текст кнопок слотов
+        self.refresh_slot_buttons()
 
+        model_name = self.renderer.model.get('name','модель')
         preview_path = os.path.join(slot_dir, "preview.png")
         if os.path.exists(preview_path):
             try:
@@ -617,8 +634,9 @@ class App:
             except Exception as e:
                 logger.error(f"Error loading preview for slot {idx+1}: {e}")
 
-        logger.info(f"Model loaded from slot {idx+1}: {model_name}")
-        messagebox.showinfo("Загружено", f"Модель загружена из слота {idx+1}")
+        if not silent:
+            logger.info(f"Model loaded from slot {idx+1}: {model_name}")
+            messagebox.showinfo("Загружено", f"Модель загружена из слота {idx+1}")
 
     def open_editor(self):
         """Открытие редактора моделей"""
@@ -632,7 +650,8 @@ class App:
                 device=self.device_var.get(),
                 noise_gate_threshold=self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0,
                 sensitivity=self.sensitivity.get(),
-                thresholds=self.thresholds
+                thresholds=self.thresholds,
+                current_slot=self.current_slot  # Передаем текущий слот в редактор
             )
             
             def on_editor_close():
@@ -670,12 +689,17 @@ class App:
             logger.error(f"Error opening editor: {e}\n{tb}")
             self.root.attributes('-disabled', False)
 
-    def on_model_saved(self, model_data, model_dir):
-        """Обработка сохранения модели"""
-        self.renderer.load_model(model_data, model_dir)
-        if self.webserver:
-            self.webserver.renderer = self.renderer
-        logger.info("Model saved and loaded into renderer")
+    def on_model_saved(self, model_data, model_dir, slot_num=None):
+        """Обработка сохранения модели - НЕ загружаем автоматически в рендерер"""
+        # Только обновляем кнопки слотов, НЕ загружаем модель
+        self.refresh_slot_buttons()
+        logger.info(f"Model saved to directory: {model_dir}")
+        
+        # Если сохранено в текущий слот, то обновляем только отображение
+        if slot_num == self.current_slot:
+            logger.info(f"Model saved to current slot {slot_num}, updating display only")
+            # Обновляем кнопку текущего слота
+            self.refresh_slot_buttons()
 
     def toggle_server(self):
         """Переключение веб-сервера"""

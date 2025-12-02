@@ -145,13 +145,14 @@ class CanvasItem:
         return self.transformed_image if self.transformed_image else self.original_image
 
 class ModelEditor(tk.Toplevel):
-    def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_threshold=0.01, sensitivity=1.0, thresholds=None):
+    def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_threshold=0.01, sensitivity=1.0, thresholds=None, current_slot=None):
         super().__init__(master)
         self.title("Редактор моделей")
         self.geometry("1400x800")
         self.on_save = on_save
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-        logger.info("Model editor opened")
+        self.current_slot = current_slot  # Сохраняем текущий слот из главного окна
+        logger.info(f"Model editor opened, current slot: {current_slot}")
         
         # Сохраняем настройки микрофона
         self.mic_device = device
@@ -2023,6 +2024,7 @@ class ModelEditor(tk.Toplevel):
                 group["parent"] = None
     
     def save_model(self):
+        """Сохранение модели - НЕ вызываем on_save сразу, только после выбора слота"""
         if not self.model_dir:
             name = self.model.get("name", "model")
             folder = filedialog.askdirectory(title="Выберите папку для модели")
@@ -2057,10 +2059,9 @@ class ModelEditor(tk.Toplevel):
             json.dump(self.model, f, indent=2, ensure_ascii=False)
             
         self.create_preview()
-        self.show_save_slot_dialog()
         
-        if self.on_save:
-            self.on_save(self.model, self.model_dir)
+        # Показываем диалог выбора слота
+        self.show_save_slot_dialog()
             
         self.last_autosave = time.time()
         logger.info("Model saved")
@@ -2118,6 +2119,10 @@ class ModelEditor(tk.Toplevel):
                 shutil.copy2(src, os.path.join(slot_dir, f))
                 
         messagebox.showinfo("Сохранено", f"Модель сохранена в слот {slot_num}")
+        
+        # Вызываем on_save с номером слота, только если сохранили в слот
+        if self.on_save:
+            self.on_save(self.model, slot_dir, slot_num)
         
         if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
             self.master.app.refresh_slot_buttons()
