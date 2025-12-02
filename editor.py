@@ -800,9 +800,6 @@ class ModelEditor(tk.Toplevel):
             messagebox.showerror("Ошибка импорта", f"Ошибка при импорте модели: {e}")
             logger.error(f"Error importing model from ZIP: {e}\n{tb}")
 
-    # ... (все остальные методы остаются без изменений)
-    # ВАЖНО: Убедитесь, что остальные методы копируются без изменений из предыдущей версии
-
     def on_window_resize(self, event):
         """Обработка изменения размера окна - перерисовываем холст"""
         self.redraw_canvas()
