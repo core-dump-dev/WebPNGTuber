@@ -15,6 +15,8 @@ from audio import AudioProcessor
 import logging
 import logging.handlers
 from datetime import datetime
+import zipfile
+import tempfile
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -238,11 +240,24 @@ class ModelEditor(tk.Toplevel):
         name_entry.pack(fill="x", padx=5, pady=5)
         name_entry.bind("<Return>", self.update_model_name)
         
-        ttk.Button(left, text="Новая модель", command=self.new_model).pack(fill="x", pady=2)
-        ttk.Button(left, text="Загрузить модель", command=self.load_model).pack(fill="x", pady=2)
-        ttk.Button(left, text="Сохранить модель", command=self.save_model).pack(fill="x", pady=2)
-        ttk.Button(left, text="Импорт PNG/GIF", command=self.import_images).pack(fill="x", pady=2)
-        ttk.Button(left, text="Экспорт ZIP", command=self.export_zip).pack(fill="x", pady=2)
+        # Панель с кнопками управления моделью
+        button_row1 = ttk.Frame(left)
+        button_row1.pack(fill="x", pady=2)
+        ttk.Button(button_row1, text="Новая", command=self.new_model, width=10).pack(side="left", padx=1, fill="x", expand=True)
+        ttk.Button(button_row1, text="Загрузить", command=self.load_model, width=10).pack(side="left", padx=1, fill="x", expand=True)
+        ttk.Button(button_row1, text="Сохранить", command=self.save_model, width=10).pack(side="left", padx=1, fill="x", expand=True)
+        
+        button_row2 = ttk.Frame(left)
+        button_row2.pack(fill="x", pady=2)
+        ttk.Button(button_row2, text="Импорт PNG/GIF", command=self.import_images, width=15).pack(side="left", padx=1, fill="x", expand=True)
+        
+        button_row3 = ttk.Frame(left)
+        button_row3.pack(fill="x", pady=2)
+        ttk.Button(button_row3, text="Экспорт ZIP", command=self.export_zip, width=10).pack(side="left", padx=1, fill="x", expand=True)
+        ttk.Button(button_row3, text="Импорт ZIP", command=self.import_zip, width=10).pack(side="left", padx=1, fill="x", expand=True)
+        
+        # Кнопка удаления модели
+        ttk.Button(left, text="Удалить модель", command=self.delete_model).pack(fill="x", pady=2)
         
         # Настройки холста
         canvas_frame = ttk.LabelFrame(left, text="Настройки холста")
@@ -509,6 +524,284 @@ class ModelEditor(tk.Toplevel):
         
         # Запуск превью
         self.after(100, self._preview_loop)
+
+    def delete_model(self):
+        """Удаление текущей модели"""
+        if not self.model_dir:
+            messagebox.showwarning("Нет модели", "Нет загруженной модели для удаления")
+            return
+        
+        # Если модель загружена из слота, показываем номер слота
+        slot_info = ""
+        if self.original_slot:
+            slot_info = f" из слота {self.original_slot}"
+        
+        # Подтверждение удаления
+        confirm = messagebox.askyesno(
+            "Удаление модели", 
+            f"Вы уверены, что хотите удалить модель{slot_info}?\n\n"
+            "Это действие нельзя отменить!"
+        )
+        
+        if not confirm:
+            return
+        
+        try:
+            # Если модель загружена из слота, удаляем папку слота
+            if self.original_slot:
+                slot_dir = os.path.join(MODELS_DIR, f"slot{self.original_slot}")
+                if os.path.exists(slot_dir):
+                    shutil.rmtree(slot_dir)
+                    logger.info(f"Deleted model from slot {self.original_slot}")
+            
+            # Сбрасываем состояние редактора
+            self.model = {"name": "Без названия", "layers": [], "groups": [], "width": 700, "height": 700}
+            self.model_dir = None
+            self.original_slot = None
+            self.items.clear()
+            self.imported_files.clear()
+            self.model_name_var.set("Без названия")
+            self.canvas_width = 700
+            self.canvas_height = 700
+            self.canvas_width_var.set(700)
+            self.canvas_height_var.set(700)
+            
+            # Сбрасываем состояние дерева
+            self.tree_state["expanded_groups"].clear()
+            self.tree_state["selected_items"].clear()
+            self.tree_state["preserve_selection"] = False
+            
+            self.refresh_tree()
+            self.refresh_import_list()
+            self.zoom_reset()
+            self.redraw_canvas()
+            
+            # Обновляем кнопки слотов в главном окне
+            if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
+                self.master.app.refresh_slot_buttons()
+            
+            messagebox.showinfo("Модель удалена", f"Модель удалена{slot_info}")
+            
+        except Exception as e:
+            logger.error(f"Error deleting model: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось удалить модель: {e}")
+
+    def export_zip(self):
+        """Экспорт модели в ZIP архив с выбором места сохранения"""
+        try:
+            from utils import export_model_zip
+        except Exception as e:
+            messagebox.showerror("Ошибка экспорта", f"Не удалось импортировать утилиту экспорта: {e}")
+            logger.error(f"Error importing export utility: {e}")
+            return
+            
+        if not self.model:
+            messagebox.showwarning("Нет модели", "Сначала создайте или загрузите модель")
+            return
+        
+        # Спрашиваем куда сохранять
+        default_name = f"{self.model.get('name', 'model').replace(' ', '_')}.zip"
+        zip_path = filedialog.asksaveasfilename(
+            title="Сохранить модель как ZIP",
+            defaultextension=".zip",
+            filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*.*")],
+            initialfile=default_name
+        )
+        
+        if not zip_path:
+            return  # Пользователь отменил
+            
+        try:
+            # Создаем временную папку для экспорта
+            with tempfile.TemporaryDirectory(prefix="model_export_") as temp_dir:
+                # Сохраняем модель JSON
+                model_data = {
+                    "name": self.model_name_var.get(),
+                    "width": self.canvas_width,
+                    "height": self.canvas_height,
+                    "layers": [],
+                    "groups": self.model.get("groups", [])
+                }
+                
+                # Копируем все изображения во временную папку
+                for ci in self.items:
+                    layer = ci.layer
+                    layer_data = {
+                        "name": layer.get("name", ""),
+                        "file": os.path.basename(layer.get("file", "")),
+                        "x": int(ci.x),
+                        "y": int(ci.y),
+                        "visible": bool(ci.visible),
+                        "is_gif": ci.is_gif,
+                        "scale": float(ci.scale),
+                        "rotation": int(ci.rotation),
+                        "group": layer.get("group", None),
+                        "flip_horizontal": bool(ci.flip_horizontal),
+                        "flip_vertical": bool(ci.flip_vertical)
+                    }
+                    model_data["layers"].append(layer_data)
+                    
+                    # Копируем файл изображения если есть
+                    if hasattr(ci, 'image_path') and os.path.exists(ci.image_path):
+                        filename = os.path.basename(ci.image_path)
+                        dst = os.path.join(temp_dir, filename)
+                        shutil.copy2(ci.image_path, dst)
+                
+                # Сохраняем JSON
+                json_path = os.path.join(temp_dir, "model.json")
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(model_data, f, indent=2, ensure_ascii=False)
+                
+                # Создаем превью
+                preview_path = os.path.join(temp_dir, "preview.png")
+                self._create_preview_for_export(temp_dir, preview_path)
+                
+                # Экспортируем
+                export_model_zip(model_data, temp_dir, zip_path)
+            
+            messagebox.showinfo("Экспортировано", f"Модель экспортирована:\n{zip_path}")
+            logger.info(f"Model exported to: {zip_path}")
+            
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            with open("export_zip_error.log", "w", encoding="utf-8") as f:
+                f.write(tb)
+                
+            messagebox.showerror("Ошибка экспорта", f"Ошибка при экспорте: {e}. Смотри export_zip_error.log")
+            logger.error(f"Error exporting model: {e}\n{tb}")
+
+    def _create_preview_for_export(self, temp_dir, preview_path):
+        """Создает превью модели для экспорта"""
+        try:
+            base = Image.new("RGBA", (self.canvas_width, self.canvas_height), (0, 0, 0, 0))
+            center_x = self.canvas_width // 2
+            center_y = self.canvas_height // 2
+            
+            # Используем все видимые элементы для превью
+            visible_items = [ci for ci in self.items if ci.visible]
+            
+            for ci in visible_items:
+                img = ci.get_current_image()
+                if not img:
+                    continue
+                    
+                px = center_x - img.size[0] // 2 + int(ci.x)
+                py = center_y - img.size[1] // 2 + int(ci.y)
+                
+                try:
+                    base.alpha_composite(img, (px, py))
+                except Exception as e:
+                    logger.error(f"Error creating preview: {e}")
+                    
+            base.thumbnail((200, 200))
+            base.save(preview_path)
+        except Exception as e:
+            logger.error(f"Error creating preview for export: {e}")
+
+    def import_zip(self):
+        """Импорт модели из ZIP архива"""
+        try:
+            from utils import import_model_zip
+        except Exception as e:
+            messagebox.showerror("Ошибка импорта", f"Не удалось импортировать утилиту импорта: {e}")
+            logger.error(f"Error importing import utility: {e}")
+            return
+        
+        # Выбираем ZIP файл
+        zip_path = filedialog.askopenfilename(
+            title="Выберите ZIP архив с моделью",
+            filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*.*")]
+        )
+        
+        if not zip_path:
+            return  # Пользователь отменил
+        
+        try:
+            # Импортируем модель
+            model_data, import_dir = import_model_zip(zip_path)
+            
+            # Загружаем модель в редактор
+            self.model = model_data
+            self.model_dir = import_dir
+            self.original_slot = None
+            
+            # Загружаем имя модели
+            self.model_name_var.set(self.model.get("name", "Без названия"))
+            
+            # Загружаем размеры холста
+            self.canvas_width = self.model.get("width", 700)
+            self.canvas_height = self.model.get("height", 700)
+            self.canvas_width_var.set(self.canvas_width)
+            self.canvas_height_var.set(self.canvas_height)
+            
+            # Загружаем элементы
+            self.items.clear()
+            for layer in self.model.get("layers", []):
+                filename = layer.get("file")
+                if not filename:
+                    continue
+                    
+                # Ищем файл в директории импорта
+                file_path = os.path.join(import_dir, filename)
+                if not os.path.exists(file_path):
+                    # Пробуем найти в подпапках
+                    found = False
+                    for root, dirs, files in os.walk(import_dir):
+                        if filename in files:
+                            file_path = os.path.join(root, filename)
+                            found = True
+                            break
+                    
+                    if not found:
+                        logger.warning(f"File not found: {filename}")
+                        continue
+                
+                try:
+                    ci = CanvasItem(layer, file_path)
+                    self.items.append(ci)
+                except Exception as e:
+                    logger.error(f"Error loading image: {e}")
+            
+            # Загружаем импортированные файлы для списка
+            self.imported_files.clear()
+            for layer in self.model.get("layers", []):
+                filename = layer.get("file")
+                if filename:
+                    file_path = os.path.join(import_dir, filename)
+                    if os.path.exists(file_path):
+                        try:
+                            with Image.open(file_path) as img:
+                                is_gif = img.format == "GIF" and img.is_animated
+                                img.seek(0)
+                                preview_img = img.copy().convert("RGBA")
+                            self.imported_files.append((filename, preview_img, is_gif))
+                        except Exception as e:
+                            logger.error(f"Error loading imported file: {e}")
+            
+            # Обновляем интерфейс
+            self.refresh_import_list()
+            
+            # Сбрасываем состояние дерева
+            self.tree_state["expanded_groups"].clear()
+            self.tree_state["selected_items"].clear()
+            self.tree_state["preserve_selection"] = False
+            
+            self.refresh_tree()
+            self.zoom_reset()
+            self.redraw_canvas()
+            
+            messagebox.showinfo("Импорт завершен", f"Модель успешно импортирована из:\n{os.path.basename(zip_path)}")
+            logger.info(f"Model imported from ZIP: {zip_path}")
+            
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            messagebox.showerror("Ошибка импорта", f"Ошибка при импорте модели: {e}")
+            logger.error(f"Error importing model from ZIP: {e}\n{tb}")
+
+    # ... (все остальные методы остаются без изменений)
+    # ВАЖНО: Убедитесь, что остальные методы копируются без изменений из предыдущей версии
 
     def on_window_resize(self, event):
         """Обработка изменения размера окна - перерисовываем холст"""
@@ -2425,31 +2718,6 @@ class ModelEditor(tk.Toplevel):
         blink_freq = float(group.get("blink_freq", 0.0))
         if blink_freq > 0.1:
             self.after(int(blink_freq * 1000), self._blink_preview_loop)
-    
-    def export_zip(self):
-        try:
-            from utils import export_model_zip
-        except Exception as e:
-            messagebox.showerror("Ошибка экспорта", f"Не удалось импортировать утилиту экспорта: {e}")
-            logger.error(f"Error importing export utility: {e}")
-            return
-            
-        if not self.model_dir:
-            messagebox.showwarning("Нет модели", "Сначала сохраните или импортируйте изображения")
-            return
-            
-        try:
-            zip_path = export_model_zip(self.model, self.model_dir)
-            messagebox.showinfo("Экспортировано", f"Модель экспортирована: {zip_path}")
-            logger.info(f"Model exported to: {zip_path}")
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            with open("export_zip_error.log", "w", encoding="utf-8") as f:
-                f.write(tb)
-                
-            messagebox.showerror("Ошибка экспорта", f"Ошибка при экспорте: {e}. Смотри export_zip_error.log")
-            logger.error(f"Error exporting model: {e}\n{tb}")
     
     def _preview_loop(self):
         try:
