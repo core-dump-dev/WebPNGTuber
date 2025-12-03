@@ -704,102 +704,106 @@ class ModelEditor(tk.Toplevel):
         """Импорт модели из ZIP архива"""
         try:
             from utils import import_model_zip
+            
+            # Выбираем ZIP файл
+            zip_path = filedialog.askopenfilename(
+                title="Выберите ZIP архив с моделью",
+                filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*.*")]
+            )
+            
+            if not zip_path:
+                return  # Пользователь отменил
+            
+            try:
+                # Импортируем модель
+                model_data, import_dir = import_model_zip(zip_path)
+                
+                # Загружаем модель в редактор
+                self.model = model_data
+                self.model_dir = import_dir
+                self.original_slot = None
+                
+                # Загружаем имя модели
+                self.model_name_var.set(self.model.get("name", "Без названия"))
+                
+                # Загружаем размеры холста
+                self.canvas_width = self.model.get("width", 700)
+                self.canvas_height = self.model.get("height", 700)
+                self.canvas_width_var.set(self.canvas_width)
+                self.canvas_height_var.set(self.canvas_height)
+                
+                # Загружаем элементы
+                self.items.clear()
+                for layer in self.model.get("layers", []):
+                    filename = layer.get("file")
+                    if not filename:
+                        continue
+                        
+                    # Ищем файл в директории импорта
+                    file_path = os.path.join(import_dir, filename)
+                    if not os.path.exists(file_path):
+                        # Пробуем найти в подпапках
+                        found = False
+                        for root, dirs, files in os.walk(import_dir):
+                            if filename in files:
+                                file_path = os.path.join(root, filename)
+                                found = True
+                                break
+                        
+                        if not found:
+                            logger.warning(f"File not found: {filename}")
+                            continue
+                    
+                    try:
+                        ci = CanvasItem(layer, file_path)
+                        self.items.append(ci)
+                    except Exception as e:
+                        logger.error(f"Error loading image: {e}")
+                
+                # Загружаем импортированные файлы для списка
+                self.imported_files.clear()
+                for layer in self.model.get("layers", []):
+                    filename = layer.get("file")
+                    if filename:
+                        file_path = os.path.join(import_dir, filename)
+                        if os.path.exists(file_path):
+                            try:
+                                with Image.open(file_path) as img:
+                                    is_gif = img.format == "GIF" and img.is_animated
+                                    img.seek(0)
+                                    preview_img = img.copy().convert("RGBA")
+                                self.imported_files.append((filename, preview_img, is_gif))
+                            except Exception as e:
+                                logger.error(f"Error loading imported file: {e}")
+                
+                # Обновляем интерфейс
+                self.refresh_import_list()
+                
+                # Сбрасываем состояние дерева
+                self.tree_state["expanded_groups"].clear()
+                self.tree_state["selected_items"].clear()
+                self.tree_state["preserve_selection"] = False
+                
+                self.refresh_tree()
+                self.zoom_reset()
+                self.redraw_canvas()
+                
+                # ОЧИСТКА СТАРЫХ ВРЕМЕННЫХ ПАПОК ПОСЛЕ ИМПОРТА
+                self.cleanup_old_temp_folders()
+                
+                messagebox.showinfo("Импорт завершен", f"Модель успешно импортирована из:\n{os.path.basename(zip_path)}")
+                logger.info(f"Model imported from ZIP: {zip_path}")
+                
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                messagebox.showerror("Ошибка импорта", f"Ошибка при импорте модели: {e}")
+                logger.error(f"Error importing model from ZIP: {e}\n{tb}")
+                
         except Exception as e:
             messagebox.showerror("Ошибка импорта", f"Не удалось импортировать утилиту импорта: {e}")
             logger.error(f"Error importing import utility: {e}")
             return
-        
-        # Выбираем ZIP файл
-        zip_path = filedialog.askopenfilename(
-            title="Выберите ZIP архив с моделью",
-            filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*.*")]
-        )
-        
-        if not zip_path:
-            return  # Пользователь отменил
-        
-        try:
-            # Импортируем модель
-            model_data, import_dir = import_model_zip(zip_path)
-            
-            # Загружаем модель в редактор
-            self.model = model_data
-            self.model_dir = import_dir
-            self.original_slot = None
-            
-            # Загружаем имя модели
-            self.model_name_var.set(self.model.get("name", "Без названия"))
-            
-            # Загружаем размеры холста
-            self.canvas_width = self.model.get("width", 700)
-            self.canvas_height = self.model.get("height", 700)
-            self.canvas_width_var.set(self.canvas_width)
-            self.canvas_height_var.set(self.canvas_height)
-            
-            # Загружаем элементы
-            self.items.clear()
-            for layer in self.model.get("layers", []):
-                filename = layer.get("file")
-                if not filename:
-                    continue
-                    
-                # Ищем файл в директории импорта
-                file_path = os.path.join(import_dir, filename)
-                if not os.path.exists(file_path):
-                    # Пробуем найти в подпапках
-                    found = False
-                    for root, dirs, files in os.walk(import_dir):
-                        if filename in files:
-                            file_path = os.path.join(root, filename)
-                            found = True
-                            break
-                    
-                    if not found:
-                        logger.warning(f"File not found: {filename}")
-                        continue
-                
-                try:
-                    ci = CanvasItem(layer, file_path)
-                    self.items.append(ci)
-                except Exception as e:
-                    logger.error(f"Error loading image: {e}")
-            
-            # Загружаем импортированные файлы для списка
-            self.imported_files.clear()
-            for layer in self.model.get("layers", []):
-                filename = layer.get("file")
-                if filename:
-                    file_path = os.path.join(import_dir, filename)
-                    if os.path.exists(file_path):
-                        try:
-                            with Image.open(file_path) as img:
-                                is_gif = img.format == "GIF" and img.is_animated
-                                img.seek(0)
-                                preview_img = img.copy().convert("RGBA")
-                            self.imported_files.append((filename, preview_img, is_gif))
-                        except Exception as e:
-                            logger.error(f"Error loading imported file: {e}")
-            
-            # Обновляем интерфейс
-            self.refresh_import_list()
-            
-            # Сбрасываем состояние дерева
-            self.tree_state["expanded_groups"].clear()
-            self.tree_state["selected_items"].clear()
-            self.tree_state["preserve_selection"] = False
-            
-            self.refresh_tree()
-            self.zoom_reset()
-            self.redraw_canvas()
-            
-            messagebox.showinfo("Импорт завершен", f"Модель успешно импортирована из:\n{os.path.basename(zip_path)}")
-            logger.info(f"Model imported from ZIP: {zip_path}")
-            
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            messagebox.showerror("Ошибка импорта", f"Ошибка при импорте модели: {e}")
-            logger.error(f"Error importing model from ZIP: {e}\n{tb}")
 
     def on_window_resize(self, event):
         """Обработка изменения размера окна - перерисовываем холст"""
@@ -1064,15 +1068,17 @@ class ModelEditor(tk.Toplevel):
         
         # Получаем все папки в MODELS_DIR
         all_folders = [f for f in os.listdir(MODELS_DIR) 
-                      if os.path.isdir(os.path.join(MODELS_DIR, f))]
+                    if os.path.isdir(os.path.join(MODELS_DIR, f))]
         
         # Регулярные выражения для типов папок
         temp_slot_pattern = re.compile(r'^temp_(\d+)_slot(\d+)$')
         model_temp_pattern = re.compile(r'^model_temp_(\d+)$')
+        import_temp_pattern = re.compile(r'^import_temp_(\d+)$')  # НОВЫЙ ШАБЛОН
         
         # Группируем папки по типу
         temp_slot_groups = {}
         model_temp_folders = []
+        import_temp_folders = []  # НОВАЯ ГРУППА
         
         for folder in all_folders:
             # Проверяем, соответствует ли папка шаблону temp_*_slot*
@@ -1090,6 +1096,14 @@ class ModelEditor(tk.Toplevel):
             if match_model:
                 timestamp = match_model.group(1)
                 model_temp_folders.append((int(timestamp), folder))
+                continue
+                
+            # Проверяем, соответствует ли папка шаблону import_temp_*
+            match_import = import_temp_pattern.match(folder)
+            if match_import:
+                timestamp = match_import.group(1)
+                import_temp_folders.append((int(timestamp), folder))
+                continue
         
         # Функция для удаления старых папок, оставляя только 3 самые новые
         def remove_old_folders(folder_list, keep=3):
@@ -1113,6 +1127,9 @@ class ModelEditor(tk.Toplevel):
         
         # Удаляем старые model_temp папки
         remove_old_folders(model_temp_folders, keep=3)
+        
+        # Удаляем старые import_temp папки
+        remove_old_folders(import_temp_folders, keep=3)
     
     def redraw_canvas(self, level=0.0, mode="none"):
         try:
