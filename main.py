@@ -136,6 +136,15 @@ class App:
         self.server_btn = ttk.Button(ctrl_frame, text="Запустить веб-сервер", command=self.toggle_server)
         self.server_btn.pack(fill="x", padx=8, pady=6)
 
+        # Кнопка для открытия ссылки веб-сервера
+        self.link_btn = ttk.Button(
+            ctrl_frame, 
+            text="🌐 http://localhost:6969/",
+            command=self.open_web_link,
+            state="disabled"  # Изначально отключена
+        )
+        self.link_btn.pack(fill="x", padx=8, pady=2)
+
         # Настройки микрофона
         mic_frame = ttk.LabelFrame(ctrl_frame, text="Микрофон")
         mic_frame.pack(fill="x", padx=8, pady=6)
@@ -331,6 +340,17 @@ class App:
         # Если в настройках есть текущий слот, загружаем его
         if self.current_slot:
             self.load_slot(self.current_slot - 1, silent=True)  # -1 потому что индексация с 0
+
+    def open_web_link(self):
+        """Открытие ссылки веб-сервера в браузере"""
+        import webbrowser
+        try:
+            url = "http://localhost:6969/"
+            webbrowser.open(url)
+            logger.info(f"Opened web link: {url}")
+        except Exception as e:
+            logger.error(f"Error opening web link: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось открыть ссылку: {e}")
 
     def _round_to_step(self, value, step):
         """Округление значения до ближайшего шага"""
@@ -706,6 +726,7 @@ class App:
         if self.webserver and getattr(self.webserver, "is_running", False):
             self.webserver.stop()
             self.server_btn.config(text="Запустить веб-сервер")
+            self.link_btn.config(state="disabled")  # Отключаем кнопку ссылки
             logger.info("Web server stopped")
             # Не удаляем webserver, чтобы можно было перезапустить
         else:
@@ -719,6 +740,7 @@ class App:
             try:
                 self.webserver.start()
                 self.server_btn.config(text="Остановить веб-сервер")
+                self.link_btn.config(state="normal")  # Активируем кнопку ссылки
                 logger.info("Web server started")
             except Exception as e:
                 logger.error(f"Error starting web server: {e}")
@@ -753,6 +775,10 @@ class App:
                 self.webserver.stop()
             except Exception as e:
                 logger.error(f"Error stopping web server: {e}")
+        
+        # Отключаем кнопку ссылки при закрытии
+        self.link_btn.config(state="disabled")
+        
         self.save_settings()
         logger.info("Application closed")
         self.root.destroy()
