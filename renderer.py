@@ -229,13 +229,16 @@ class Renderer:
             self.last_activity_time = time.time()
     
     def _get_min_active_threshold(self):
-        """Получает минимальный порог из активных состояний"""
+        """Получает минимальный порог из активных голосовых состояний (исключая тишину)"""
+        voice_states = ['whisper', 'normal', 'shout']
         min_threshold = 1.0  # Максимальное значение по умолчанию
-        for state, active in self.active_states.items():
-            if active and state in self.thresholds:
+        
+        for state in voice_states:
+            if self.active_states.get(state, True) and state in self.thresholds:
                 threshold = self.thresholds[state]
                 if threshold < min_threshold:
                     min_threshold = threshold
+                    
         return min_threshold if min_threshold < 1.0 else 0.0
     
     def get_frame_bytes(self):
