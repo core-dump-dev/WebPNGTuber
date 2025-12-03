@@ -614,8 +614,8 @@ class App:
                 data = json.load(f)
             self.renderer.load_model(data, slot_dir)
             # Обновляем веб-сервер, если он запущен
-            if self.webserver and self.webserver.is_running:
-                self.webserver.renderer = self.renderer
+            if self.webserver:
+                self.webserver.renderer = self.renderer  # Просто обновляем ссылку на рендерер
 
         # Устанавливаем текущий слот
         self.current_slot = idx + 1
@@ -707,11 +707,22 @@ class App:
             self.webserver.stop()
             self.server_btn.config(text="Запустить веб-сервер")
             logger.info("Web server stopped")
+            # Не удаляем webserver, чтобы можно было перезапустить
         else:
-            self.webserver = WebServer(self.renderer)
-            self.webserver.start()
-            self.server_btn.config(text="Остановить веб-сервер")
-            logger.info("Web server started")
+            if not self.webserver:
+                # Создаем новый экземпляр если его нет
+                self.webserver = WebServer(self.renderer)
+            elif not self.webserver.is_running:
+                # Если экземпляр есть, но сервер не запущен, обновляем рендерер
+                self.webserver.renderer = self.renderer
+            
+            try:
+                self.webserver.start()
+                self.server_btn.config(text="Остановить веб-сервер")
+                logger.info("Web server started")
+            except Exception as e:
+                logger.error(f"Error starting web server: {e}")
+                messagebox.showerror("Ошибка", f"Не удалось запустить веб-сервер: {e}")
 
     def on_audio_level(self, level):
         """Обработка уровня аудио"""
