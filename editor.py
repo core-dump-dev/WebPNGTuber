@@ -180,6 +180,11 @@ class ModelEditor(tk.Toplevel):
         self.audio_level = 0.0
         self.blink_preview_running = False
         
+        # Система отмены/повтора
+        self.history = []  # История состояний
+        self.history_index = -1  # Текущая позиция в истории
+        self.max_history_size = 50  # Максимальное количество шагов истории
+        
         # Настройки холста
         self.canvas_width = 700
         self.canvas_height = 700
@@ -327,7 +332,19 @@ class ModelEditor(tk.Toplevel):
         self.import_inner.bind("<Configure>", lambda e: self.import_canvas.configure(scrollregion=self.import_canvas.bbox("all")))
         
         # ---- Центральная панель ----
-        preview_frame = ttk.LabelFrame(center, text="Предпросмотр")
+        # Заголовок предпросмотра с кнопками отмены/повтора
+        preview_header = ttk.Frame(center)
+        preview_header.pack(fill="x", padx=5, pady=(0, 5))
+        
+        ttk.Label(preview_header, text="Предпросмотр", font=("Arial", 10, "bold")).pack(side="left", padx=(0, 10))
+        
+        # Кнопки отмены/повтора
+        undo_btn = ttk.Button(preview_header, text="←", width=2, command=self.undo)
+        undo_btn.pack(side="left", padx=2)
+        redo_btn = ttk.Button(preview_header, text="→", width=2, command=self.redo)
+        redo_btn.pack(side="left", padx=2)
+        
+        preview_frame = ttk.Frame(center)
         preview_frame.pack(fill="both", expand=True)
         
         # Создаем основной canvas для отображения
@@ -344,6 +361,10 @@ class ModelEditor(tk.Toplevel):
         self.canvas.bind("<ButtonPress-2>", self.on_canvas_pan_start)  # Средняя кнопка для панорамирования
         self.canvas.bind("<B2-Motion>", self.on_canvas_pan_move)
         self.bind("<Configure>", self.on_window_resize)  # Добавляем обработчик изменения размера окна
+        
+        # Привязка горячих клавиш для отмены/повтора
+        self.bind_all("<Control-z>", self.undo)
+        self.bind_all("<Control-y>", self.redo)
         
         # ---- Правая панель ----
         notebook = ttk.Notebook(right)
@@ -523,8 +544,118 @@ class ModelEditor(tk.Toplevel):
         except Exception as e:
             logger.error(f"Error loading icon: {e}")
         
+        # Сохраняем начальное состояние в историю
+        self.save_to_history()
+        
         # Запуск превью
         self.after(100, self._preview_loop)
+
+    def save_to_history(self, description=""):
+        """Сохраняет текущее состояние в историю"""
+        # Если мы не в конце истории (были отмены), удаляем будущие состояния
+        if self.history_index < len(self.history) - 1:
+            self.history = self.history[:self.history_index + 1]
+        
+        # Сохраняем текущее состояние модели
+        state = {
+            'model': json.dumps(self.model, ensure_ascii=False),
+            'items': [],
+            'description': description
+        }
+        
+        # Сохраняем информацию о каждом элементе
+        for ci in self.items:
+            item_state = {
+                'layer': ci.layer.copy(),
+                'x': ci.x,
+                'y': ci.y,
+                'scale': ci.scale,
+                'rotation': ci.rotation,
+                'flip_horizontal': ci.flip_horizontal,
+                'flip_vertical': ci.flip_vertical,
+                'visible': ci.visible,
+                'is_gif': ci.is_gif,
+                'image_path': ci.image_path
+            }
+            state['items'].append(item_state)
+        
+        self.history.append(state)
+        self.history_index = len(self.history) - 1
+        
+        # Ограничиваем размер истории
+        if len(self.history) > self.max_history_size:
+            self.history.pop(0)
+            self.history_index -= 1
+        
+        logger.info(f"History saved: {description}, index: {self.history_index}, size: {len(self.history)}")
+    
+    def undo(self, event=None):
+        """Отмена последнего действия"""
+        if self.history_index > 0:
+            self.history_index -= 1
+            self.load_from_history()
+            logger.info(f"Undo to index: {self.history_index}")
+    
+    def redo(self, event=None):
+        """Повтор отмененного действия"""
+        if self.history_index < len(self.history) - 1:
+            self.history_index += 1
+            self.load_from_history()
+            logger.info(f"Redo to index: {self.history_index}")
+    
+    def load_from_history(self):
+        """Загружает состояние из истории"""
+        if self.history_index < 0 or self.history_index >= len(self.history):
+            return
+        
+        state = self.history[self.history_index]
+        
+        try:
+            # Загружаем модель
+            self.model = json.loads(state['model'])
+            
+            # Восстанавливаем элементы
+            self.items = []
+            for item_state in state['items']:
+                ci = CanvasItem(item_state['layer'], item_state['image_path'])
+                ci.x = item_state['x']
+                ci.y = item_state['y']
+                ci.scale = item_state['scale']
+                ci.rotation = item_state['rotation']
+                ci.flip_horizontal = item_state['flip_horizontal']
+                ci.flip_vertical = item_state['flip_vertical']
+                ci.visible = item_state['visible']
+                ci.is_gif = item_state['is_gif']
+                ci.update_transformed_image()
+                self.items.append(ci)
+            
+            # Обновляем интерфейс
+            self.model_name_var.set(self.model.get("name", "Без названия"))
+            self.canvas_width = self.model.get("width", 700)
+            self.canvas_height = self.model.get("height", 700)
+            self.canvas_width_var.set(self.canvas_width)
+            self.canvas_height_var.set(self.canvas_height)
+            
+            # Обновляем список импортированных файлов
+            self.imported_files.clear()
+            for f in os.listdir(self.model_dir) if self.model_dir else []:
+                if f.lower().endswith((".png", ".gif")):
+                    try:
+                        fp = os.path.join(self.model_dir, f)
+                        with Image.open(fp) as img:
+                            is_gif = img.format == "GIF" and img.is_animated
+                            img.seek(0)
+                            preview_img = img.copy().convert("RGBA")
+                        self.imported_files.append((f, preview_img, is_gif))
+                    except Exception as e:
+                        logger.error(f"Error loading imported file: {e}")
+            
+            self.refresh_import_list()
+            self.refresh_tree()
+            self.redraw_canvas()
+            
+        except Exception as e:
+            logger.error(f"Error loading from history: {e}")
 
     def delete_model(self):
         """Удаление текущей модели"""
@@ -1327,6 +1458,7 @@ class ModelEditor(tk.Toplevel):
         self.refresh_tree()
         self.redraw_canvas()
         logger.info(f"Created new group: {name} with parent {parent_group}")
+        self.save_to_history("Создание группы")
     
     def _save_tree_state(self):
         """Сохраняет состояние дерева (раскрытые группы и выделение)"""
@@ -1653,6 +1785,7 @@ class ModelEditor(tk.Toplevel):
         self.refresh_tree()
         self.redraw_canvas()
         logger.info("Brought selection forward")
+        self.save_to_history("Перемещение вперед")  # Сохраняем в историю
     
     def send_backward(self):
         """Переместить выбранные элементы назад (ниже по Z-индексу)"""
@@ -1735,6 +1868,7 @@ class ModelEditor(tk.Toplevel):
         self.refresh_tree()
         self.redraw_canvas()
         logger.info("Sent selection backward")
+        self.save_to_history("Перемещение назад")  # Сохраняем в историю
     
     def apply_group_logic(self):
         if not self.selected_group:
@@ -1866,6 +2000,15 @@ class ModelEditor(tk.Toplevel):
             self.stop_blink_preview()
         except Exception as e:
             logger.error(f"Error stopping audio: {e}")
+        
+        # Удаляем временную папку, если она существует
+        if self.model_dir and "temp_" in self.model_dir and os.path.exists(self.model_dir):
+            try:
+                shutil.rmtree(self.model_dir)
+                logger.info(f"Temporary directory removed: {self.model_dir}")
+            except Exception as e:
+                logger.error(f"Error removing temporary directory: {e}")
+        
         self.grab_release()
         logger.info("Model editor closed")
         self.destroy()
@@ -2041,24 +2184,26 @@ class ModelEditor(tk.Toplevel):
                 group["parent"] = None
     
     def save_model(self):
-        """Сохранение модели - НЕ вызываем on_save сразу, только после выбора слота"""
+        """Сохранение модели - ВСЕГДА показываем диалог выбора слота"""
+        # Создаем временную папку для сохранения, если её нет
         if not self.model_dir:
-            name = self.model.get("name", "model")
-            folder = filedialog.askdirectory(title="Выберите папку для модели")
-            if not folder:
-                return
-                
-            self.model_dir = os.path.join(folder, name.replace(" ", "_"))
-            os.makedirs(self.model_dir, exist_ok=True)
+            # Создаем временную папку для сохранения
+            tmp = os.path.join(MODELS_DIR, f"model_temp_{int(time.time())}")
+            os.makedirs(tmp, exist_ok=True)
+            self.model_dir = tmp
             
+            # Очищаем старые временные папки после создания новой
+            self.cleanup_old_temp_folders()
+        
         # Сохраняем имя модели и размеры холста
         self.model["name"] = self.model_name_var.get()
         self.model["width"] = self.canvas_width
         self.model["height"] = self.canvas_height
             
+        # Обновляем данные слоев из элементов
         self.model["layers"] = []
         for ci in self.items:
-            layer = ci.layer
+            layer = ci.layer.copy() if ci.layer else {}
             layer["x"] = int(ci.x)
             layer["y"] = int(ci.y)
             layer["visible"] = bool(ci.visible)
@@ -2067,21 +2212,35 @@ class ModelEditor(tk.Toplevel):
             layer["rotation"] = int(ci.rotation)
             layer["flip_horizontal"] = bool(ci.flip_horizontal)
             layer["flip_vertical"] = bool(ci.flip_vertical)
+            
+            # Сохраняем имя файла
             if "file" in layer:
                 layer["file"] = os.path.basename(layer["file"])
+            
+            # Сохраняем имя слоя
+            if not layer.get("name") and ci.layer and ci.layer.get("name"):
+                layer["name"] = ci.layer.get("name")
+            
             self.model["layers"].append(layer)
-            
+        
+        # Сохраняем JSON модели
         model_json_path = os.path.join(self.model_dir, "model.json")
-        with open(model_json_path, "w", encoding="utf-8") as f:
-            json.dump(self.model, f, indent=2, ensure_ascii=False)
+        try:
+            with open(model_json_path, "w", encoding="utf-8") as f:
+                json.dump(self.model, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Error saving model JSON: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось сохранить модель: {e}")
+            return
             
+        # Создаем превью
         self.create_preview()
         
-        # Показываем диалог выбора слота
+        # Всегда показываем диалог выбора слота для сохранения
         self.show_save_slot_dialog()
             
         self.last_autosave = time.time()
-        logger.info("Model saved")
+        logger.info("Model saved, showing slot selection dialog")
     
     def show_save_slot_dialog(self):
         slot_dialog = tk.Toplevel(self)
@@ -2118,40 +2277,48 @@ class ModelEditor(tk.Toplevel):
         ).pack(fill="x", padx=20, pady=10)
     
     def _save_slot(self, slot_num, dialog):
+        """Сохраняет модель в выбранный слот"""
         dialog.destroy()
+        
+        # Создаем директорию слота, если её нет
         slot_dir = os.path.join(MODELS_DIR, f"slot{slot_num}")
         os.makedirs(slot_dir, exist_ok=True)
         
-        for f in os.listdir(slot_dir):
-            file_path = os.path.join(slot_dir, f)
-            try:
-                if os.path.isfile(file_path):
-                    os.unlink(file_path)
-            except Exception as e:
-                logger.error(f"Error deleting file {file_path}: {e}")
-                
-        for f in os.listdir(self.model_dir):
-            src = os.path.join(self.model_dir, f)
-            if os.path.isfile(src):
-                shutil.copy2(src, os.path.join(slot_dir, f))
-                
-        messagebox.showinfo("Сохранено", f"Модель сохранена в слот {slot_num}")
-        
-        # Вызываем on_save с номером слота, только если сохранили в слот
-        if self.on_save:
-            self.on_save(self.model, slot_dir, slot_num)
-        
-        if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
-            self.master.app.refresh_slot_buttons()
+        try:
+            # Очищаем слот от старых файлов
+            for f in os.listdir(slot_dir):
+                file_path = os.path.join(slot_dir, f)
+                try:
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                except Exception as e:
+                    logger.error(f"Error deleting file {file_path}: {e}")
             
-        if "temp_" in self.model_dir:
-            try:
-                shutil.rmtree(self.model_dir)
-            except Exception as e:
-                logger.error(f"Error removing temp directory: {e}")
-            self.model_dir = None
+            # Копируем все файлы из временной директории в слот
+            for f in os.listdir(self.model_dir):
+                src = os.path.join(self.model_dir, f)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(slot_dir, f))
             
-        logger.info(f"Model saved to slot {slot_num}")
+            # Обновляем текущий слот
+            self.original_slot = slot_num
+            
+            # Показываем сообщение об успешном сохранении
+            messagebox.showinfo("Сохранено", f"Модель сохранена в слот {slot_num}")
+            
+            # Вызываем callback для обновления главного окна
+            if self.on_save:
+                self.on_save(self.model, slot_dir, slot_num)
+            
+            # Обновляем кнопки слотов в главном окне
+            if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
+                self.master.app.refresh_slot_buttons()
+                
+            logger.info(f"Model saved to slot {slot_num}")
+            
+        except Exception as e:
+            logger.error(f"Error saving to slot {slot_num}: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось сохранить модель в слот {slot_num}: {e}")
     
     def create_preview(self):
         if not self.model_dir:
@@ -2247,6 +2414,7 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
         self.last_autosave = time.time()
         logger.info(f"Imported {len(files)} images")
+        self.save_to_history("Импорт изображений")  # Сохраняем в историю
     
     def refresh_import_list(self):
         for w in self.import_inner.winfo_children():
@@ -2356,6 +2524,7 @@ class ModelEditor(tk.Toplevel):
         
         self.refresh_tree()
         self.last_autosave = time.time()
+        self.save_to_history("Изменение свойств элемента")
     
     def ungroup_selected(self):
         if self.selected_group:
@@ -2404,6 +2573,7 @@ class ModelEditor(tk.Toplevel):
             self.refresh_tree()
             self.redraw_canvas()
             logger.info(f"Ungrouped group: {gname}")
+            self.save_to_history("Разгруппирование")
             return
             
         if not self.current_selection:
@@ -2428,6 +2598,7 @@ class ModelEditor(tk.Toplevel):
         self.refresh_tree()
         self.redraw_canvas()
         logger.info(f"Ungrouped {len(self.current_selection)} items")
+        self.save_to_history("Разгруппирование элементов")
 
     def _delete_group_and_children(self, group_name):
         """Рекурсивно удаляет группу и все ее дочерние группы"""
@@ -2595,6 +2766,7 @@ class ModelEditor(tk.Toplevel):
     def on_canvas_mouse_up(self, event):
         self.drag_data["item"] = None
         self.last_autosave = time.time()
+        self.save_to_history("Перемещение элемента")
     
     def add_to_canvas(self, filename):
         for fname, img, is_gif in self.imported_files:
@@ -2667,6 +2839,7 @@ class ModelEditor(tk.Toplevel):
             self.refresh_tree()
             self.redraw_canvas()
             logger.info(f"File deleted: {filename}")
+            self.save_to_history("Удаление файла")  # Сохраняем в историю
     
     def show_blink_preview(self):
         if not self.selected_group:
