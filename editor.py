@@ -596,7 +596,38 @@ class ModelEditor(tk.Toplevel):
             self.history_index -= 1
         
         logger.info(f"History saved: {description}, index: {self.history_index}, size: {len(self.history)}")
-    
+
+    def get_slot_preview_image(self, slot_num):
+        """Получение изображения превью для слота"""
+        try:
+            preview_path = os.path.join(MODELS_DIR, f"slot{slot_num}", "preview.png")
+            if os.path.exists(preview_path):
+                img = Image.open(preview_path)
+                img.thumbnail((100, 100), Image.LANCZOS)
+                return ImageTk.PhotoImage(img)
+        except Exception as e:
+            logger.error(f"Error loading preview for slot {slot_num}: {e}")
+        
+        # Если превью нет, создаем пустое изображение
+        img = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+        return ImageTk.PhotoImage(img)
+
+    def get_current_preview_image(self):
+        """Получение превью текущей модели"""
+        try:
+            if self.model_dir:
+                preview_path = os.path.join(self.model_dir, "preview.png")
+                if os.path.exists(preview_path):
+                    img = Image.open(preview_path)
+                    img.thumbnail((150, 150), Image.LANCZOS)
+                    return ImageTk.PhotoImage(img)
+        except Exception as e:
+            logger.error(f"Error loading current preview: {e}")
+        
+        # Если превью нет, создаем пустое изображение
+        img = Image.new("RGBA", (150, 150), (0, 0, 0, 0))
+        return ImageTk.PhotoImage(img)
+
     def undo(self, event=None):
         """Отмена последнего действия"""
         if self.history_index > 0:
@@ -2110,29 +2141,147 @@ class ModelEditor(tk.Toplevel):
         logger.info(f"New model created: {name}")
     
     def load_model(self):
+        """Загрузка модели с превью"""
         slot_dialog = tk.Toplevel(self)
         slot_dialog.title("Загрузка из слота")
-        slot_dialog.geometry("300x200")
+        slot_dialog.geometry("400x500")
         slot_dialog.transient(self)
         slot_dialog.grab_set()
+        slot_dialog.resizable(False, False)
         
-        ttk.Label(slot_dialog, text="Выберите слот для загрузки:").pack(pady=10)
+        # Хранилище для изображений (чтобы не удалялись сборщиком мусора)
+        slot_dialog.images = []
+        
+        ttk.Label(slot_dialog, text="Выберите слот для загрузки:", 
+                font=("Arial", 10, "bold")).pack(pady=10)
+        
+        # Главный фрейм с прокруткой
+        main_frame = ttk.Frame(slot_dialog)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Создаем Canvas для прокрутки
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        
+        # Внутренний фрейм для содержимого
+        inner_frame = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=inner_frame, anchor="nw", width=380)
+        
+        # Функция обновления прокрутки
+        def configure_scrollregion(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        inner_frame.bind("<Configure>", configure_scrollregion)
+        
+        # Превью текущей модели (если есть)
+        current_preview_frame = ttk.LabelFrame(inner_frame, text="Текущая модель")
+        current_preview_frame.pack(fill="x", pady=(0, 10), padx=5)
+        
+        current_preview_label = ttk.Label(current_preview_frame)
+        current_preview_label.pack(padx=5, pady=5)
+        
+        # Загружаем превью текущей модели
+        try:
+            if self.model_dir:
+                preview_path = os.path.join(self.model_dir, "preview.png")
+                if os.path.exists(preview_path):
+                    img = Image.open(preview_path)
+                    img.thumbnail((150, 150), Image.LANCZOS)
+                    current_preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(current_preview_img)  # Сохраняем ссылку
+                    current_preview_label.configure(image=current_preview_img)
+                else:
+                    # Пустое изображение
+                    img = Image.new("RGBA", (150, 150), (0, 0, 0, 0))
+                    current_preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(current_preview_img)  # Сохраняем ссылку
+                    current_preview_label.configure(image=current_preview_img)
+        except Exception as e:
+            logger.error(f"Error loading current preview: {e}")
+        
+        # Слоты с превью
+        slots_frame = ttk.Frame(inner_frame)
+        slots_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
         for i in range(1, 7):
+            slot_frame = ttk.LabelFrame(slots_frame, text=f"Слот {i}")
+            slot_frame.pack(fill="x", pady=5, padx=5)
+            
+            # Создаем фрейм для содержимого слота
+            content_frame = ttk.Frame(slot_frame)
+            content_frame.pack(fill="x", padx=5, pady=5)
+            
+            # Загружаем превью
+            try:
+                preview_path = os.path.join(MODELS_DIR, f"slot{i}", "preview.png")
+                if os.path.exists(preview_path):
+                    img = Image.open(preview_path)
+                    img.thumbnail((80, 80), Image.LANCZOS)
+                    preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(preview_img)  # Сохраняем ссылку
+                    
+                    # Превью изображение
+                    preview_label = ttk.Label(content_frame, image=preview_img)
+                    preview_label.pack(side="left", padx=5, pady=5)
+                else:
+                    # Пустое изображение
+                    img = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+                    preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(preview_img)  # Сохраняем ссылку
+                    
+                    preview_label = ttk.Label(content_frame, image=preview_img)
+                    preview_label.pack(side="left", padx=5, pady=5)
+            except Exception as e:
+                logger.error(f"Error loading preview for slot {i}: {e}")
+            
+            # Информация о слоте
+            info_frame = ttk.Frame(content_frame)
+            info_frame.pack(side="left", fill="both", expand=True, padx=5)
+            
             slot_dir = os.path.join(MODELS_DIR, f"slot{i}")
             json_path = os.path.join(slot_dir, "model.json")
+            
             if os.path.exists(json_path):
-                btn_text = f"Слот {i} (есть модель)"
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        model_data = json.load(f)
+                    model_name = model_data.get('name', f'Слот {i}')
+                    status_text = model_name
+                except:
+                    status_text = "Ошибка загрузки"
             else:
-                btn_text = f"Слот {i} (пустой)"
-                
-            ttk.Button(
-                slot_dialog, 
-                text=btn_text,
-                command=lambda i=i: self._load_slot(i, slot_dialog)
-            ).pack(fill="x", padx=20, pady=2)
+                status_text = "Пустой слот"
+            
+            status = ttk.Label(info_frame, text=status_text, font=("Arial", 9))
+            status.pack(anchor="w", pady=(5, 0))
+            
+            # Кнопка загрузки
+            btn = ttk.Button(
+                info_frame, 
+                text="Загрузить",
+                command=lambda slot=i, dlg=slot_dialog: self._load_slot(slot, dlg)
+            )
+            btn.pack(anchor="w", pady=5)
+        
+        # Кнопка отмены
+        ttk.Button(slot_dialog, text="Отмена", command=slot_dialog.destroy).pack(pady=10)
+        
+        # Принудительно обновляем диалог
+        slot_dialog.update()
+
+    def update_current_preview(self):
+        """Обновление превью текущей модели"""
+        preview_img = self.get_current_preview_image()
+        if hasattr(self, 'current_preview_label'):
+            self.current_preview_label.configure(image=preview_img)
+            self.current_preview_label.image = preview_img  # Сохраняем ссылку
     
     def _load_slot(self, slot_num, dialog):
+        """Загрузка модели из слота с обновлением превью"""
         dialog.destroy()
         path = os.path.join(MODELS_DIR, f"slot{slot_num}")
         json_path = os.path.join(path, "model.json")
@@ -2207,6 +2356,10 @@ class ModelEditor(tk.Toplevel):
         self.refresh_tree()
         self.zoom_reset()
         self.redraw_canvas()
+        
+        # Обновляем превью в диалоге, если он еще открыт
+        self.update_current_preview()
+        
         logger.info(f"Model loaded from slot {slot_num}")
     
     def _migrate_model_for_nested_groups(self):
@@ -2267,51 +2420,157 @@ class ModelEditor(tk.Toplevel):
             messagebox.showerror("Ошибка", f"Не удалось сохранить модель: {e}")
             return
             
-        # Создаем превью
+        # СОЗДАЕМ ПРЕВЬЮ ПЕРЕД СОХРАНЕНИЕМ
         self.create_preview()
         
-        # Всегда показываем диалог выбора слота для сохранения
+        # Всегда показываем диалог выбора слота для сохранения с превью
         self.show_save_slot_dialog()
             
         self.last_autosave = time.time()
-        logger.info("Model saved, showing slot selection dialog")
+        logger.info("Model saved, showing slot selection dialog with previews")
     
     def show_save_slot_dialog(self):
+        """Диалог сохранения с превью"""
         slot_dialog = tk.Toplevel(self)
         slot_dialog.title("Сохранение в слот")
-        slot_dialog.geometry("300x250")
+        slot_dialog.geometry("400x500")
         slot_dialog.transient(self)
         slot_dialog.grab_set()
+        slot_dialog.resizable(False, False)
         
-        ttk.Label(slot_dialog, text="Выберите слот для сохранения:").pack(pady=10)
+        # Хранилище для изображений
+        slot_dialog.images = []
         
-        slots_frame = ttk.Frame(slot_dialog)
-        slots_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        ttk.Label(slot_dialog, text="Выберите слот для сохранения:", 
+                font=("Arial", 10, "bold")).pack(pady=10)
+        
+        # Главный фрейм с прокруткой
+        main_frame = ttk.Frame(slot_dialog)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Создаем Canvas для прокрутки
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        
+        # Внутренний фрейм для содержимого
+        inner_frame = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=inner_frame, anchor="nw", width=380)
+        
+        # Функция обновления прокрутки
+        def configure_scrollregion(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        inner_frame.bind("<Configure>", configure_scrollregion)
+        
+        # Превью текущей модели
+        current_preview_frame = ttk.LabelFrame(inner_frame, text="Текущая модель для сохранения")
+        current_preview_frame.pack(fill="x", pady=(0, 10), padx=5)
+        
+        current_preview_label = ttk.Label(current_preview_frame)
+        current_preview_label.pack(padx=5, pady=5)
+        
+        # Загружаем превью текущей модели
+        try:
+            if self.model_dir:
+                preview_path = os.path.join(self.model_dir, "preview.png")
+                if os.path.exists(preview_path):
+                    img = Image.open(preview_path)
+                    img.thumbnail((120, 120), Image.LANCZOS)
+                    current_preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(current_preview_img)  # Сохраняем ссылку
+                    current_preview_label.configure(image=current_preview_img)
+                else:
+                    # Пустое изображение
+                    img = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+                    current_preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(current_preview_img)  # Сохраняем ссылку
+                    current_preview_label.configure(image=current_preview_img)
+        except Exception as e:
+            logger.error(f"Error loading current preview: {e}")
+        
+        ttk.Label(current_preview_frame, 
+                text=f"Имя: {self.model_name_var.get()}", 
+                font=("Arial", 9)).pack()
+        
+        # Слоты с превью
+        slots_frame = ttk.Frame(inner_frame)
+        slots_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
         for i in range(1, 7):
+            slot_frame = ttk.LabelFrame(slots_frame, text=f"Слот {i}")
+            slot_frame.pack(fill="x", pady=5, padx=5)
+            
+            # Создаем фрейм для содержимого слота
+            content_frame = ttk.Frame(slot_frame)
+            content_frame.pack(fill="x", padx=5, pady=5)
+            
+            # Загружаем превью слота
+            try:
+                preview_path = os.path.join(MODELS_DIR, f"slot{i}", "preview.png")
+                if os.path.exists(preview_path):
+                    img = Image.open(preview_path)
+                    img.thumbnail((80, 80), Image.LANCZOS)
+                    preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(preview_img)  # Сохраняем ссылку
+                    
+                    # Превью изображение
+                    preview_label = ttk.Label(content_frame, image=preview_img)
+                    preview_label.pack(side="left", padx=5, pady=5)
+                else:
+                    # Пустое изображение
+                    img = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+                    preview_img = ImageTk.PhotoImage(img)
+                    slot_dialog.images.append(preview_img)  # Сохраняем ссылку
+                    
+                    preview_label = ttk.Label(content_frame, image=preview_img)
+                    preview_label.pack(side="left", padx=5, pady=5)
+            except Exception as e:
+                logger.error(f"Error loading preview for slot {i}: {e}")
+            
+            # Информация о слоте
+            info_frame = ttk.Frame(content_frame)
+            info_frame.pack(side="left", fill="both", expand=True, padx=5)
+            
             slot_dir = os.path.join(MODELS_DIR, f"slot{i}")
             json_path = os.path.join(slot_dir, "model.json")
-            if os.path.exists(json_path):
-                btn_text = f"Слот {i} (перезаписать)"
-            else:
-                btn_text = f"Слот {i} (новый)"
-                
-            btn = ttk.Button(
-                slots_frame, 
-                text=btn_text,
-                width=20,
-                command=lambda i=i: self._save_slot(i, slot_dialog)
-            )
-            btn.pack(fill="x", padx=10, pady=3)
             
-        ttk.Button(
-            slot_dialog, 
-            text="Отмена", 
-            command=slot_dialog.destroy
-        ).pack(fill="x", padx=20, pady=10)
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        model_data = json.load(f)
+                    model_name = model_data.get('name', f'Слот {i}')
+                    status_text = f"Занят: {model_name}"
+                    btn_text = "Перезаписать"
+                except:
+                    status_text = "Ошибка загрузки"
+                    btn_text = "Перезаписать"
+            else:
+                status_text = "Пустой слот"
+                btn_text = "Сохранить"
+            
+            status = ttk.Label(info_frame, text=status_text, font=("Arial", 8))
+            status.pack(anchor="w", pady=(5, 0))
+            
+            # Кнопка сохранения
+            btn = ttk.Button(
+                info_frame, 
+                text=btn_text,
+                command=lambda slot=i, dlg=slot_dialog: self._save_slot(slot, dlg)
+            )
+            btn.pack(anchor="w", pady=5)
+        
+        # Кнопка отмены
+        ttk.Button(slot_dialog, text="Отмена", command=slot_dialog.destroy).pack(pady=10)
+        
+        # Принудительно обновляем диалог
+        slot_dialog.update()
     
     def _save_slot(self, slot_num, dialog):
-        """Сохраняет модель в выбранный слот"""
+        """Сохраняет модель в выбранный слот с обновлением превью"""
         dialog.destroy()
         
         # Создаем директорию слота, если её нет
