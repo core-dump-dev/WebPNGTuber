@@ -79,6 +79,9 @@ class App:
         
         logger.info("Application started")
 
+        # Флаг инициализации для предотвращения сохранения при начальной загрузке
+        self.initializing = True
+        
         # Загрузка настроек
         self.settings = self.load_settings()
 
@@ -106,6 +109,14 @@ class App:
             'random_effect': False
         })
         self.renderer.set_effects(self.effects)
+
+        # Состояние раскрытия секций (по умолчанию все открыты)
+        self.sections_state = self.settings.get('sections_state', {
+            'thresh': True,
+            'states': True,
+            'effects': True,
+            'idle': True
+        })
 
         # UI layout - три колонки в ряд
         main_frame = ttk.Frame(root, padding=3)
@@ -263,9 +274,6 @@ class App:
         # Обработка изменения размера
         self.level_canvas.bind("<Configure>", self.on_canvas_resize)
 
-        # Кнопка сохранения настроек
-        ttk.Button(settings_frame, text="💾 Сохранить настройки", command=self.save_settings).pack(fill="x", padx=3, pady=3)
-
         # ---- КОЛОНКА 3: Расширенные настройки ----
         expandable_frame = ttk.LabelFrame(main_frame, text="Расширенные настройки")
         expandable_frame.grid(row=0, column=2, sticky="nsew", padx=(3, 0), pady=0)
@@ -293,13 +301,19 @@ class App:
         thresh_frame.pack(fill="x", pady=(0, 3))
         thresh_header = ttk.Frame(thresh_frame)
         thresh_header.pack(fill="x")
-        self.thresh_header_label = ttk.Label(thresh_header, text="▼ Пороги голоса", font=("Arial", 9, "bold"), cursor="hand2")
+        
+        # Устанавливаем начальное состояние на основе настроек
+        self.thresh_expanded = self.sections_state.get('thresh', True)
+        thresh_text = "▼ Пороги голоса" if self.thresh_expanded else "▶ Пороги голоса"
+        self.thresh_header_label = ttk.Label(thresh_header, text=thresh_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.thresh_header_label.pack(side="left", padx=2, pady=2)
         thresh_header.bind("<Button-1>", lambda e: self.toggle_section("thresh"))
         self.thresh_header_label.bind("<Button-1>", lambda e: self.toggle_section("thresh"))
         self.thresh_content = ttk.Frame(thresh_frame)
-        self.thresh_content.pack(fill="x", padx=3, pady=(0, 2))
-        self.thresh_expanded = True
+        
+        # Показываем или скрываем контент в зависимости от состояния
+        if self.thresh_expanded:
+            self.thresh_content.pack(fill="x", padx=3, pady=(0, 2))
 
         # Сетка для порогов
         thresholds_grid = ttk.Frame(self.thresh_content)
@@ -310,24 +324,28 @@ class App:
         silent_entry = ttk.Entry(thresholds_grid, textvariable=self.silent_thresh, width=6)
         silent_entry.grid(row=0, column=1, padx=1, pady=1)
         silent_entry.bind("<Return>", lambda e: self.update_thresholds())
+        silent_entry.bind("<FocusOut>", lambda e: self.update_thresholds())
         
         ttk.Label(thresholds_grid, text="Шёпот:").grid(row=0, column=2, sticky="w", padx=1, pady=1)
         self.whisper_thresh = tk.DoubleVar(value=self.thresholds['whisper'])
         whisper_entry = ttk.Entry(thresholds_grid, textvariable=self.whisper_thresh, width=6)
         whisper_entry.grid(row=0, column=3, padx=1, pady=1)
         whisper_entry.bind("<Return>", lambda e: self.update_thresholds())
+        whisper_entry.bind("<FocusOut>", lambda e: self.update_thresholds())
         
         ttk.Label(thresholds_grid, text="Норма:").grid(row=1, column=0, sticky="w", padx=1, pady=1)
         self.normal_thresh = tk.DoubleVar(value=self.thresholds['normal'])
         normal_entry = ttk.Entry(thresholds_grid, textvariable=self.normal_thresh, width=6)
         normal_entry.grid(row=1, column=1, padx=1, pady=1)
         normal_entry.bind("<Return>", lambda e: self.update_thresholds())
+        normal_entry.bind("<FocusOut>", lambda e: self.update_thresholds())
         
         ttk.Label(thresholds_grid, text="Крик:").grid(row=1, column=2, sticky="w", padx=1, pady=1)
         self.shout_thresh = tk.DoubleVar(value=self.thresholds['shout'])
         shout_entry = ttk.Entry(thresholds_grid, textvariable=self.shout_thresh, width=6)
         shout_entry.grid(row=1, column=3, padx=1, pady=1)
         shout_entry.bind("<Return>", lambda e: self.update_thresholds())
+        shout_entry.bind("<FocusOut>", lambda e: self.update_thresholds())
         
         ttk.Button(thresholds_grid, text="Применить", command=self.update_thresholds).grid(
             row=2, column=0, columnspan=4, pady=3, sticky="ew")
@@ -344,13 +362,17 @@ class App:
         states_frame.pack(fill="x", pady=(0, 3))
         states_header = ttk.Frame(states_frame)
         states_header.pack(fill="x")
-        self.states_header_label = ttk.Label(states_header, text="▼ Активные состояния", font=("Arial", 9, "bold"), cursor="hand2")
+        
+        self.states_expanded = self.sections_state.get('states', True)
+        states_text = "▼ Активные состояния" if self.states_expanded else "▶ Активные состояния"
+        self.states_header_label = ttk.Label(states_header, text=states_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.states_header_label.pack(side="left", padx=2, pady=2)
         states_header.bind("<Button-1>", lambda e: self.toggle_section("states"))
         self.states_header_label.bind("<Button-1>", lambda e: self.toggle_section("states"))
         self.states_content = ttk.Frame(states_frame)
-        self.states_content.pack(fill="x", padx=3, pady=(0, 2))
-        self.states_expanded = True
+        
+        if self.states_expanded:
+            self.states_content.pack(fill="x", padx=3, pady=(0, 2))
 
         self.state_vars = {
             'silent': tk.BooleanVar(value=self.settings.get('active_states', {}).get('silent', True)),
@@ -376,13 +398,17 @@ class App:
         effects_frame.pack(fill="x", pady=(0, 3))
         effects_header = ttk.Frame(effects_frame)
         effects_header.pack(fill="x")
-        self.effects_header_label = ttk.Label(effects_header, text="▼ Глобальные эффекты", font=("Arial", 9, "bold"), cursor="hand2")
+        
+        self.effects_expanded = self.sections_state.get('effects', True)
+        effects_text = "▼ Глобальные эффекты" if self.effects_expanded else "▶ Глобальные эффекты"
+        self.effects_header_label = ttk.Label(effects_header, text=effects_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.effects_header_label.pack(side="left", padx=2, pady=2)
         effects_header.bind("<Button-1>", lambda e: self.toggle_section("effects"))
         self.effects_header_label.bind("<Button-1>", lambda e: self.toggle_section("effects"))
         self.effects_content = ttk.Frame(effects_frame)
-        self.effects_content.pack(fill="x", padx=3, pady=(0, 2))
-        self.effects_expanded = True
+        
+        if self.effects_expanded:
+            self.effects_content.pack(fill="x", padx=3, pady=(0, 2))
         
         effects_grid = ttk.Frame(self.effects_content)
         effects_grid.pack(fill="x", padx=2, pady=2)
@@ -412,13 +438,17 @@ class App:
         idle_frame.pack(fill="x", pady=(0, 3))
         idle_header = ttk.Frame(idle_frame)
         idle_header.pack(fill="x")
-        self.idle_header_label = ttk.Label(idle_header, text="▼ Idle-режим", font=("Arial", 9, "bold"), cursor="hand2")
+        
+        self.idle_expanded = self.sections_state.get('idle', True)
+        idle_text = "▼ Idle-режим" if self.idle_expanded else "▶ Idle-режим"
+        self.idle_header_label = ttk.Label(idle_header, text=idle_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.idle_header_label.pack(side="left", padx=2, pady=2)
         idle_header.bind("<Button-1>", lambda e: self.toggle_section("idle"))
         self.idle_header_label.bind("<Button-1>", lambda e: self.toggle_section("idle"))
         self.idle_content = ttk.Frame(idle_frame)
-        self.idle_content.pack(fill="x", padx=3, pady=(0, 2))
-        self.idle_expanded = True
+        
+        if self.idle_expanded:
+            self.idle_content.pack(fill="x", padx=3, pady=(0, 2))
 
         idle_grid = ttk.Frame(self.idle_content)
         idle_grid.pack(fill="x", padx=2, pady=2)
@@ -432,6 +462,7 @@ class App:
         idle_entry = ttk.Entry(idle_grid, textvariable=self.idle_timeout, width=10)
         idle_entry.pack(anchor="w", padx=3, pady=(0, 2))
         idle_entry.bind("<Return>", lambda e: self.update_idle_setting())
+        idle_entry.bind("<FocusOut>", lambda e: self.update_idle_setting())
 
         # Запуск обработки аудио
         self.audio.start()
@@ -455,6 +486,9 @@ class App:
         # Если в настройках есть текущий слот, загружаем его
         if self.current_slot:
             self.load_slot(self.current_slot - 1, silent=True)  # -1 потому что индексация с 0
+            
+        # Завершаем инициализацию
+        self.initializing = False
 
     def open_web_link(self):
         """Открытие ссылки веб-сервера в браузере"""
@@ -514,11 +548,13 @@ class App:
         self.audio.noise_gate_threshold = self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0
         self.audio.start()
         logger.info(f"Audio device changed to: {device_name}")
+        self.save_settings()  # Автоматическое сохранение
 
     def on_sensitivity_change(self):
         """Изменение чувствительности"""
         self.audio.set_sensitivity(self.sensitivity.get())
         logger.info(f"Sensitivity changed to: {self.sensitivity.get()}")
+        self.save_settings()  # Автоматическое сохранение
 
     def toggle_noise_gate(self):
         """Переключение подавления шума"""
@@ -527,6 +563,7 @@ class App:
         self.audio.noise_gate_threshold = threshold
         self.renderer.set_noise_gate(threshold)
         logger.info(f"Noise gate {'enabled' if enabled else 'disabled'} with threshold: {threshold}")
+        self.save_settings()  # Автоматическое сохранение
 
     def update_noise_gate_threshold(self):
         """Обновление порога подавления шума"""
@@ -535,6 +572,7 @@ class App:
             self.audio.noise_gate_threshold = threshold
             self.renderer.set_noise_gate(threshold)
             logger.info(f"Noise gate threshold updated to: {threshold}")
+        self.save_settings()  # Автоматическое сохранение
 
     def update_effects(self):
         """Обновление эффектов"""
@@ -547,6 +585,7 @@ class App:
         }
         self.renderer.set_effects(effects)
         logger.info(f"Effects updated: {effects}")
+        self.save_settings()  # Автоматическое сохранение
 
     def update_idle_setting(self):
         """Обновление настройки idle-режима"""
@@ -554,6 +593,7 @@ class App:
         timeout = self.idle_timeout.get()
         self.renderer.set_idle(enabled, timeout)
         logger.info(f"Idle mode updated: enabled={enabled}, timeout={timeout}")
+        self.save_settings()  # Автоматическое сохранение
 
     def load_settings(self):
         """Загрузка настроек"""
@@ -565,8 +605,11 @@ class App:
                 logger.error(f"Error loading settings: {e}")
         return {}
     
-    def save_settings(self, show_message=True):
-        """Сохранение настроек"""
+    def save_settings(self):
+        """Сохранение настроек (автоматическое, без сообщения)"""
+        if self.initializing:
+            return  # Не сохраняем во время инициализации
+            
         settings = {
             'thresholds': self.thresholds,
             'active_states': {state: var.get() for state, var in self.state_vars.items()},
@@ -583,16 +626,19 @@ class App:
             'mic_device': self.device_var.get(),
             'idle_enabled': self.idle_enabled.get(),
             'idle_timeout': self.idle_timeout.get(),
-            'current_slot': self.current_slot  # Сохраняем текущий слот
+            'current_slot': self.current_slot,
+            'sections_state': {  # Сохраняем состояние раскрытия секций
+                'thresh': self.thresh_expanded,
+                'states': self.states_expanded,
+                'effects': self.effects_expanded,
+                'idle': self.idle_expanded
+            }
         }
         try:
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(settings, f, indent=2)
-            if show_message:
-                messagebox.showinfo("Настройки сохранены", "Настройки успешно сохранены.")
-            logger.info("Settings saved successfully")
+            logger.info("Settings saved automatically")
         except Exception as e:
-            messagebox.showerror("Ошибка сохранения", f"Не удалось сохранить настройки: {e}")
             logger.error(f"Error saving settings: {e}")
     
     def toggle_section(self, section_name):
@@ -633,6 +679,9 @@ class App:
                 self.idle_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.idle_expanded = True
                 self.idle_header_label.config(text="▼ Idle-режим")
+        
+        # Автоматическое сохранение состояния секций
+        self.save_settings()
 
     def refresh_slot_buttons(self):
         """Обновление кнопок слотов"""
@@ -685,6 +734,7 @@ class App:
         self.renderer.set_active_states(active_states)
         self.update_threshold_visuals()  # Обновляем визуализацию порогов
         logger.info(f"Active states updated: {active_states}")
+        self.save_settings()  # Автоматическое сохранение
 
     def update_thresholds(self):
         """Обновление порогов голоса"""
@@ -697,6 +747,7 @@ class App:
         self.renderer.set_thresholds(self.thresholds)
         self.update_threshold_visuals()
         logger.info(f"Thresholds updated: {self.thresholds}")
+        self.save_settings()  # Автоматическое сохранение
 
     def update_threshold_visuals(self):
         """Обновление визуализации порогов - только активные состояния"""
@@ -798,6 +849,9 @@ class App:
         
         # Обновляем текст кнопок слотов
         self.refresh_slot_buttons()
+        
+        # Автоматическое сохранение
+        self.save_settings()
 
         model_name = self.renderer.model.get('name','модель')
         preview_path = os.path.join(slot_dir, "preview.png")
@@ -937,7 +991,7 @@ class App:
         # Отключаем кнопку ссылки при закрытии
         self.link_btn.config(state="disabled")
         
-        self.save_settings(show_message=False)  # Сохраняем без уведомления
+        self.save_settings()  # Сохраняем настройки при закрытии
         logger.info("Application closed")
         self.root.destroy()
 
