@@ -20,16 +20,19 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 # Настройка логирования для webserver
 def setup_webserver_logging():
     logger = logging.getLogger('webserver')
-    logger.setLevel(logging.INFO)  # Уменьшили уровень логирования
+    logger.setLevel(logging.DEBUG)
     
+    # Форматирование
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
+    # Файловый обработчик с ротацией
     log_file = os.path.join(LOGS_DIR, 'webserver.log')
     file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5
+        log_file, maxBytes=1048576, backupCount=5  # 1MB
     )
     file_handler.setFormatter(formatter)
     
+    # Консольный обработчик
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     
@@ -38,6 +41,7 @@ def setup_webserver_logging():
     
     return logger
 
+# Инициализация логгера
 logger = setup_webserver_logging()
 
 # Отключение логирования Flask
@@ -52,31 +56,26 @@ class WebServer:
         self._thread = None
         self.app = Flask("WebPNGTuberStream")
         self.is_running = False
-        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Отключение кэширования
         
         # Определение базовой директории
         if getattr(sys, 'frozen', False):
             self.base_dir = os.path.dirname(sys.executable)
         else:
             self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Оптимизация: кэширование статичных ответов
-        self._index_cache = None
-        self._favicon_cache = None
-        
+
         @self.app.route("/stream")
         def stream():
-            logger.debug("Stream connection established")
+            logger.info("Stream connection established")
             return Response(
-                self._optimized_mjpeg_generator(),
+                self.mjpeg_generator(),
                 mimetype="multipart/x-mixed-replace; boundary=frame"
             )
-        
+
         @self.app.route("/")
         def index():
-            logger.debug("Index page requested")
-            if self._index_cache is None:
-                self._index_cache = """<html>
+            logger.info("Index page requested")
+            return """<html>
 <head>
     <title>WebPNGTuber</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
@@ -86,85 +85,38 @@ class WebServer:
     <img src="/stream" style="width:100vw; height:100vh; object-fit:contain;"/>
 </body>
 </html>"""
-            return self._index_cache
-        
+
         @self.app.route("/favicon.ico")
         def favicon():
-            if self._favicon_cache is None:
-                try:
-                    favicon_path = os.path.join(self.base_dir, 'favicon.ico')
-                    if os.path.exists(favicon_path):
-                        self._favicon_cache = send_from_directory(
-                            self.base_dir,
-                            'favicon.ico',
-                            mimetype='image/vnd.microsoft.icon'
-                        )
-                    else:
-                        # Создаем пустой ответ если иконки нет
-                        self._favicon_cache = ('', 404)
-                except Exception as e:
-                    logger.error(f"Error loading favicon: {e}")
-                    self._favicon_cache = ('', 404)
-            
-            return self._favicon_cache
-    
-    def _optimized_mjpeg_generator(self):
-        """Оптимизированный генератор MJPEG потока"""
-        frame_count = 0
-        last_stats_time = time.time()
-        
+            return send_from_directory(
+                self.base_dir,
+                'favicon.ico',
+                mimetype='image/vnd.microsoft.icon'
+            )
+                
+    def mjpeg_generator(self):
+        """Генератор MJPEG потока"""
         while self.is_running:
-            try:
-                frame_start = time.time()
-                frame = self.renderer.get_frame_bytes()
+            frame = self.renderer.get_frame_bytes()
+            if frame:
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/png\r\n"
+                       b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
+            time.sleep(1.0 / self.renderer.fps)
                 
-                if frame:
-                    # Минимизируем аллокации строк
-                    frame_len = str(len(frame))
-                    yield (b"--frame\r\n"
-                           b"Content-Type: image/png\r\n"
-                           b"Content-Length: " + frame_len.encode() + b"\r\n\r\n" + frame + b"\r\n")
-                
-                frame_count += 1
-                
-                # Логирование статистики
-                current_time = time.time()
-                if current_time - last_stats_time >= 5.0:  # Каждые 5 секунд
-                    fps = frame_count / 5.0
-                    logger.debug(f"Stream FPS: {fps:.1f}")
-                    frame_count = 0
-                    last_stats_time = current_time
-                
-                # Оптимизированная задержка
-                elapsed = time.time() - frame_start
-                target_delay = 1.0 / self.renderer.fps
-                sleep_time = target_delay - elapsed
-                
-                if sleep_time > 0:
-                    time.sleep(min(sleep_time, target_delay))
-                elif elapsed > target_delay * 2:
-                    logger.warning(f"Frame generation took too long: {elapsed*1000:.1f}ms")
-                    
-            except Exception as e:
-                logger.error(f"Error in stream generator: {e}")
-                time.sleep(0.016)  # Спим на 1 кадр при ошибке
-    
     def start(self):
         """Запуск веб-сервера"""
         if self.is_running:
             return
-        
         def run():
             self.is_running = True
             try:
                 logger.info(f"Web server starting on {self.host}:{self.port}")
-                
-                # Оптимизированные настройки Flask
                 self.app.run(
-                    host=self.host,
-                    port=self.port,
-                    threaded=True,
-                    debug=False,
+                    host=self.host, 
+                    port=self.port, 
+                    threaded=True, 
+                    debug=False, 
                     use_reloader=False
                 )
             except Exception as e:
@@ -172,10 +124,10 @@ class WebServer:
             finally:
                 self.is_running = False
                 logger.info("Web server stopped")
-        
+                
         self._thread = Thread(target=run, daemon=True)
         self._thread.start()
-    
+
     def stop(self):
         """Остановка веб-сервера"""
         self.is_running = False

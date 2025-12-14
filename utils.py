@@ -18,16 +18,19 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 # Настройка логирования для utils
 def setup_utils_logging():
     logger = logging.getLogger('utils')
-    logger.setLevel(logging.INFO)  # Уменьшили уровень логирования
+    logger.setLevel(logging.DEBUG)
     
+    # Форматирование
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
+    # Файловый обработчик с ротацией
     log_file = os.path.join(LOGS_DIR, 'utils.log')
     file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5
+        log_file, maxBytes=1048576, backupCount=5  # 1MB
     )
     file_handler.setFormatter(formatter)
     
+    # Консольный обработчик
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     
@@ -36,28 +39,24 @@ def setup_utils_logging():
     
     return logger
 
+# Инициализация логгера
 logger = setup_utils_logging()
 
 def export_model_zip(model_json, model_dir, zip_path=None):
-    """Оптимизированный экспорт модели в ZIP архив"""
+    """Экспорт модели в ZIP архив"""
     try:
-        # Создаем временную папку
+        # Создаем временную папку для экспорта
         export_temp = os.path.join(os.path.dirname(model_dir), "export_temp")
         os.makedirs(export_temp, exist_ok=True)
         
-        # Копируем только используемые файлы
-        file_set = set()
+        # Копируем все файлы модели
         for layer in model_json.get("layers", []):
             filename = layer.get("file")
             if filename:
-                file_set.add(filename)
-        
-        # Копируем файлы
-        for filename in file_set:
-            src = os.path.join(model_dir, filename)
-            dst = os.path.join(export_temp, filename)
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
+                src = os.path.join(model_dir, filename)
+                dst = os.path.join(export_temp, filename)
+                if os.path.exists(src):
+                    shutil.copy2(src, dst)
         
         # Копируем превью если есть
         preview_src = os.path.join(model_dir, "preview.png")
@@ -65,19 +64,18 @@ def export_model_zip(model_json, model_dir, zip_path=None):
         if os.path.exists(preview_src):
             shutil.copy2(preview_src, preview_dst)
         
-        # Сохраняем JSON с оптимизацией
+        # Сохраняем JSON
         json_path = os.path.join(export_temp, "model.json")
         with open(json_path, "w", encoding="utf-8") as f:
-            # Уменьшаем размер JSON
-            json.dump(model_json, f, separators=(',', ':'), ensure_ascii=False)
+            json.dump(model_json, f, indent=2, ensure_ascii=False)
         
-        # Создаем ZIP
+        # Если zip_path не указан, создаем рядом с моделью
         if zip_path is None:
             base = os.path.basename(model_dir.rstrip("/\\"))
             zip_path = os.path.join(os.path.dirname(model_dir), base + ".zip")
         
-        # Используем более высокую степень сжатия
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        # Создаем ZIP
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
             for root, dirs, files in os.walk(export_temp):
                 for file in files:
                     file_path = os.path.join(root, file)
@@ -95,49 +93,55 @@ def export_model_zip(model_json, model_dir, zip_path=None):
         raise
 
 def import_model_zip(zip_path, target_dir=None):
-    """Оптимизированный импорт модели из ZIP архива"""
+    """Импорт модели из ZIP архива"""
     try:
         if not os.path.exists(zip_path):
             raise FileNotFoundError(f"ZIP файл не найден: {zip_path}")
         
         if target_dir is None:
+            # Создаем временную папку для импорта
             import_temp = os.path.join(BASE_DIR, "models", f"import_temp_{int(time.time())}")
             os.makedirs(import_temp, exist_ok=True)
         else:
             import_temp = target_dir
         
-        # Распаковываем с оптимизацией
+        # Распаковываем ZIP
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Сначала извлекаем только model.json
-            model_json_member = None
-            for member in zip_ref.namelist():
-                if member.endswith('model.json') or member == 'model.json':
-                    model_json_member = member
+            zip_ref.extractall(import_temp)
+        
+        # Ищем файл model.json
+        json_path = os.path.join(import_temp, "model.json")
+        if not os.path.exists(json_path):
+            # Ищем во вложенных папках
+            for root, dirs, files in os.walk(import_temp):
+                if "model.json" in files:
+                    json_path = os.path.join(root, "model.json")
                     break
-            
-            if not model_json_member:
-                raise FileNotFoundError("Файл model.json не найден в архиве")
-            
-            # Извлекаем model.json
-            zip_ref.extract(model_json_member, import_temp)
-            json_path = os.path.join(import_temp, model_json_member)
-            
-            # Загружаем модель
-            with open(json_path, 'r', encoding='utf-8') as f:
-                model_data = json.load(f)
-            
-            # Извлекаем только необходимые файлы
-            file_set = set()
-            for layer in model_data.get("layers", []):
-                filename = layer.get("file")
-                if filename:
-                    file_set.add(filename)
-            
-            # Извлекаем файлы
-            for member in zip_ref.namelist():
-                filename = os.path.basename(member)
-                if filename in file_set or filename == "preview.png":
-                    zip_ref.extract(member, import_temp)
+        
+        if not os.path.exists(json_path):
+            raise FileNotFoundError("Файл model.json не найден в архиве")
+        
+        # Загружаем модель
+        with open(json_path, 'r', encoding='utf-8') as f:
+            model_data = json.load(f)
+        
+        # Проверяем наличие всех файлов изображений
+        for layer in model_data.get("layers", []):
+            filename = layer.get("file")
+            if filename:
+                file_path = os.path.join(import_temp, filename)
+                if not os.path.exists(file_path):
+                    # Ищем в подпапках
+                    found = False
+                    for root, dirs, files in os.walk(import_temp):
+                        if filename in files:
+                            # Обновляем путь к файлу в модели
+                            rel_path = os.path.relpath(os.path.join(root, filename), import_temp)
+                            layer["file"] = rel_path
+                            found = True
+                            break
+                    if not found:
+                        logger.warning(f"Файл изображения не найден: {filename}")
         
         logger.info(f"Model imported from ZIP: {zip_path}")
         return model_data, import_temp
