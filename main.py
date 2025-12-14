@@ -74,8 +74,8 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
         # Установка размера окна: компактное
-        root.geometry("1200x700")
-        root.minsize(1000, 500)
+        root.geometry("800x450")
+        root.minsize(800, 450)
         
         logger.info("Application started")
 
