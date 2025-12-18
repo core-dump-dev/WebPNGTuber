@@ -59,39 +59,37 @@ class Renderer:
             'shout': 0.8
         }
         self.noise_gate = 0.01
-        # Активные состояния голоса
         self.active_states = {
             'silent': True,
             'whisper': True,
             'normal': True,
             'shout': True
         }
-        # Порядок состояний по громкости
         self.state_order = ['silent', 'whisper', 'normal', 'shout']
         self.effects = {}
-        # Для случайного эффекта
         self.group_random_timers = {}
         self.group_random_current = {}
-        # Для GIF анимации
-        self._gif_frames = {}
-        self._gif_frame_times = {}
-        self._gif_last_update = {}
-        self._gif_current_frame = {}
-        # Idle режим
         self.idle_enabled = False
         self.idle_timeout = 60.0
         self.last_activity_time = time.time()
         self.idle_brightness = 0.5
-        # Словари для быстрого доступа
-        self.layers_by_name = {}
-        self.groups_by_name = {}
         
-        # ОПТИМИЗАЦИИ: Буфер кадра и кэширование
-        self._frame_buffer = Image.new("RGBA", (self.width, self.height), (0,0,0,0))
+        # Оптимизации
+        self._image_cache = {}  # Кэш загруженных изображений
+        self._transformed_cache = {}  # Кэш трансформированных изображений
+        self._last_frame_time = 0
+        self._frame_interval = 1.0 / fps
+        
+        # Кэш для GIF
+        self._gif_frames = {}
+        self._gif_frame_times = {}
+        self._gif_current_frame = {}
+        self._gif_last_update = {}
+        
+        # Кэш для видимых слоев
         self._visible_layers_cache = []
         self._visible_layers_cache_time = 0
-        self._cache_ttl = 0.016  # Кэш обновляется каждые ~16ms (60 FPS)
-        self._last_state = None  # Кэш последнего состояния для быстрой проверки изменений
+        self._cache_ttl = 0.1  # 100 мс
         
         logger.info("Renderer initialized with optimizations")
     
@@ -135,101 +133,142 @@ class Renderer:
         self.model = model_json
         self.model_dir = model_dir
         
-        # Загружаем размеры холста из модели
         self.width = model_json.get('width', 700)
         self.height = model_json.get('height', 700)
         
-        # Пересоздаем буфер кадра при изменении размера
-        self._frame_buffer = Image.new("RGBA", (self.width, self.height), (0,0,0,0))
+        self._image_cache.clear()
+        self._transformed_cache.clear()
+        self._gif_frames.clear()
+        self._gif_frame_times.clear()
+        self._gif_current_frame.clear()
+        self._gif_last_update.clear()
         
-        self._image_cache = {}
-        self._gif_frames = {}
-        self._gif_frame_times = {}
-        self._gif_last_update = {}
-        self._gif_current_frame = {}
         self.layers_by_name = {l.get('name'): l for l in self.model.get('layers', [])}
         self.groups_by_name = {g.get('name'): g for g in self.model.get('groups', [])}
         
-        # Предзагрузка и кэширование всех изображений и трансформаций
+        # Предзагрузка и кэширование изображений
         for layer in self.model.get("layers", []):
             filename = layer.get("file")
             if not filename:
                 continue
-            fp = os.path.join(self.model_dir, filename)
-            if not os.path.exists(fp):
+            
+            file_path = os.path.join(self.model_dir, filename)
+            if not os.path.exists(file_path):
                 continue
-                
+            
             try:
+                # Загружаем оригинальное изображение
+                img = Image.open(file_path).convert("RGBA")
+                
+                # Ограничиваем размер для производительности
+                if img.width > 2048 or img.height > 2048:
+                    img.thumbnail((2048, 2048), Image.LANCZOS)
+                
+                # Получаем параметры трансформации
                 scale = float(layer.get("scale", 1.0))
                 rotation = int(layer.get("rotation", 0))
                 flip_h = bool(layer.get("flip_horizontal", False))
                 flip_v = bool(layer.get("flip_vertical", False))
+                is_gif = bool(layer.get("is_gif", False))
                 
-                if layer.get("is_gif", False):
-                    # Оптимизированная загрузка GIF
-                    self._gif_frames[layer.get("name")] = []
-                    self._gif_frame_times[layer.get("name")] = []
+                # Для GIF - сохраняем оригинал и все кадры
+                if is_gif and img.is_animated:
+                    # Сохраняем оригинальное GIF изображение
+                    self._image_cache[layer.get("name")] = img.copy()
+                    
+                    # Извлекаем все кадры GIF
+                    frames = []
+                    frame_times = []
+                    
+                    # Сбрасываем к началу
+                    img.seek(0)
+                    
+                    try:
+                        while True:
+                            # Копируем текущий кадр
+                            frame = img.copy().convert("RGBA")
+                            
+                            # Применяем масштаб ПЕРВЫМ
+                            if scale != 1.0:
+                                new_width = max(1, int(frame.width * scale))
+                                new_height = max(1, int(frame.height * scale))
+                                frame = frame.resize((new_width, new_height), Image.LANCZOS)
+                            
+                            # Затем отражение
+                            if flip_h:
+                                frame = frame.transpose(Image.FLIP_LEFT_RIGHT)
+                            if flip_v:
+                                frame = frame.transpose(Image.FLIP_TOP_BOTTOM)
+                            
+                            # Затем поворот
+                            if rotation != 0:
+                                frame = frame.rotate(rotation, expand=True, resample=Image.BICUBIC)
+                            
+                            frames.append(frame)
+                            
+                            # Получаем длительность кадра
+                            try:
+                                duration = img.info.get('duration', 100)
+                                frame_times.append(duration / 1000.0)  # в секундах
+                            except:
+                                frame_times.append(0.1)
+                            
+                            # Переходим к следующему кадру
+                            img.seek(img.tell() + 1)
+                    except EOFError:
+                        pass
+                    
+                    # Сохраняем кадры GIF
+                    self._gif_frames[layer.get("name")] = frames
+                    self._gif_frame_times[layer.get("name")] = frame_times
                     self._gif_current_frame[layer.get("name")] = 0
                     self._gif_last_update[layer.get("name")] = 0
                     
-                    img = Image.open(fp)
-                    # Кэшируем все кадры GIF заранее
-                    for frame in range(img.n_frames):
-                        img.seek(frame)
-                        frame_img = img.copy().convert("RGBA")
-                        
-                        # Применяем трансформации один раз при загрузке
-                        if scale != 1.0:
-                            new_width = max(1, int(frame_img.width * scale))
-                            new_height = max(1, int(frame_img.height * scale))
-                            frame_img = frame_img.resize((new_width, new_height), Image.LANCZOS)
-                        if rotation != 0:
-                            frame_img = frame_img.rotate(rotation, expand=True, resample=Image.BICUBIC)
-                        if flip_h:
-                            frame_img = frame_img.transpose(Image.FLIP_LEFT_RIGHT)
-                        if flip_v:
-                            frame_img = frame_img.transpose(Image.FLIP_TOP_BOTTOM)
-                            
-                        self._gif_frames[layer.get("name")].append(frame_img)
-                        try:
-                            duration = img.info.get('duration', 100) / 1000.0
-                            self._gif_frame_times[layer.get("name")].append(duration)
-                        except:
-                            self._gif_frame_times[layer.get("name")].append(0.1)
                 else:
-                    # Обычные изображения - кэшируем с трансформациями
-                    image = Image.open(fp).convert("RGBA")
+                    # Для статичных изображений
+                    transformed = img.copy()
+                    
+                    # Применяем масштаб ПЕРВЫМ
                     if scale != 1.0:
-                        new_width = max(1, int(image.width * scale))
-                        new_height = max(1, int(image.height * scale))
-                        image = image.resize((new_width, new_height), Image.LANCZOS)
-                    if rotation != 0:
-                        image = image.rotate(rotation, expand=True, resample=Image.BICUBIC)
+                        new_width = max(1, int(transformed.width * scale))
+                        new_height = max(1, int(transformed.height * scale))
+                        transformed = transformed.resize((new_width, new_height), Image.LANCZOS)
+                    
+                    # Затем отражение
                     if flip_h:
-                        image = image.transpose(Image.FLIP_LEFT_RIGHT)
+                        transformed = transformed.transpose(Image.FLIP_LEFT_RIGHT)
                     if flip_v:
-                        image = image.transpose(Image.FLIP_TOP_BOTTOM)
-                        
-                    self._image_cache[layer.get("name")] = image
+                        transformed = transformed.transpose(Image.FLIP_TOP_BOTTOM)
+                    
+                    # Затем поворот
+                    if rotation != 0:
+                        transformed = transformed.rotate(rotation, expand=True, resample=Image.BICUBIC)
+                    
+                    # Кэшируем трансформированное изображение
+                    cache_key = f"{layer.get('name')}_{scale}_{rotation}_{flip_h}_{flip_v}"
+                    self._transformed_cache[cache_key] = transformed
+                    
+                    # Сохраняем в основной кэш
+                    self._image_cache[layer.get("name")] = transformed
+                    
             except Exception as e:
-                logger.error(f"Ошибка загрузки изображения: {e}")
-                
+                logger.error(f"Ошибка загрузки изображения {filename}: {e}")
+        
+        # Инициализация таймеров групп
         for g in self.model.get("groups", []):
             name = g.get("name")
             if name not in self.group_blink_timers:
-                self.group_blink_timers[name] = time.time() + random.uniform(2.0,6.0)
+                self.group_blink_timers[name] = time.time() + random.uniform(2.0, 6.0)
                 self.group_blink_until[name] = 0.0
+            
             if g.get("random_effect", False):
                 self.group_random_timers[name] = time.time()
                 self.group_random_current[name] = None
+            
             if g.get("blink_freq", 0.0) > 0.0:
                 self.group_blink_timers[name] = time.time() + random.uniform(0.5, 2.0)
                 self.group_blink_until[name] = 0.0
         
-        # Сбрасываем кэш видимых слоев
-        self._visible_layers_cache = []
-        self._visible_layers_cache_time = 0
-                
         logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with size {self.width}x{self.height}")
     
     def set_audio_level(self, level):
@@ -323,6 +362,8 @@ class Renderer:
                 layer_name = layer.get("name")
                 if layer_name:
                     visible_layer_names.add(layer_name)
+        
+        # Сортируем согласно порядку в model["layers"]
         ordered_visible_layers = []
         for layer in self.model.get("layers", []):
             layer_name = layer.get("name")
@@ -477,90 +518,56 @@ class Renderer:
         return None
     
     def _loop(self):
-        """Основной цикл рендеринга с оптимизациями для стабильного 60 FPS"""
-        frame_time = 1.0 / self.fps
-        last_frame_time = time.time()
-        
+        """Основной цикл рендеринга с оптимизациями"""
         while self._running:
             frame_start = time.time()
             
-            # Используем буфер кадра вместо создания нового
-            # Очищаем буфер
-            self._frame_buffer.paste((0, 0, 0, 0), (0, 0, self.width, self.height))
+            # Создаем базовое изображение
+            frame_image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
             
             if self.model and self.model_dir:
-                # Получаем список видимых слоев (с кэшированием)
+                # Получаем видимые слои
                 visible_layers = self._get_visible_layers()
                 
                 # Отрисовываем видимые слои в правильном порядке
-                for layer in self.model.get("layers", []):
-                    name = layer.get("name")
-                    
-                    # Проверяем, видим ли слой
-                    if name not in visible_layers:
-                        continue
-                        
-                    # Проверяем видимость слоя
-                    if not layer.get("visible", True):
-                        continue
-                        
-                    # Получаем изображение слоя (из кэша)
-                    image = self._get_layer_image(name)
+                for layer_name in visible_layers:
+                    image = self._get_layer_image(layer_name)
                     if not image:
                         continue
                     
-                    # Сохраняем оригинал для эффектов
-                    orig_image = image
+                    layer = self.layers_by_name.get(layer_name)
+                    if not layer:
+                        continue
                     
-                    # Применяем эффекты
-                    bounce_intensity = 0
-                    if self.effects.get('bounce', False):
-                        bounce_intensity = int(math.sin(time.time() * 5) * min(10, self.audio_level * 20))
-                        
-                    if self.effects.get('shake', False):
-                        shake_intensity = min(1.0, self.audio_level * 5)
-                        offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
-                        offset_y = int((random.random() - 0.5) * 10 * shake_intensity) + bounce_intensity
-                    else:
-                        offset_x, offset_y = 0, bounce_intensity
-                        
-                    if self.effects.get('pulse', False):
-                        pulse_scale = 1.0 + (math.sin(time.time() * 5) * 0.1 * self.audio_level)
-                        new_size = (int(image.width * pulse_scale), int(image.height * pulse_scale))
-                        image = image.resize(new_size, Image.LANCZOS)
-                        
-                    # Позиционируем изображение
-                    px = (self.width - image.width) // 2 + int(layer.get("x", 0)) + offset_x
-                    py = (self.height - image.height) // 2 + int(layer.get("y", 0)) + offset_y
+                    # Позиционирование (центрируем изображение)
+                    px = (self.width - image.width) // 2 + int(layer.get("x", 0))
+                    py = (self.height - image.height) // 2 + int(layer.get("y", 0))
                     
                     try:
-                        self._frame_buffer.alpha_composite(image, (px, py))
+                        frame_image.alpha_composite(image, (px, py))
                     except Exception as e:
-                        logger.error(f"Ошибка композиции слоя {name}: {e}")
+                        logger.error(f"Ошибка композиции слоя {layer_name}: {e}")
             
-            # Применение idle-режима
+            # Применяем idle-режим
             if self.idle_enabled:
                 current_time = time.time()
                 if current_time - self.last_activity_time > self.idle_timeout:
-                    enhancer = ImageEnhance.Brightness(self._frame_buffer)
-                    self._frame_buffer = enhancer.enhance(self.idle_brightness)
+                    enhancer = ImageEnhance.Brightness(frame_image)
+                    frame_image = enhancer.enhance(self.idle_brightness)
             
-            # Сохраняем кадр в байты
+            # Сохраняем кадр
             with io.BytesIO() as buf:
-                self._frame_buffer.save(buf, format="PNG", optimize=True)
+                frame_image.save(buf, format="PNG", optimize=True, compress_level=1)
                 data = buf.getvalue()
-                
+            
             with self._lock:
                 self._frame_bytes = data
             
-            # Контроль FPS - стараемся поддерживать стабильные 60 FPS
+            # Контроль FPS
             elapsed = time.time() - frame_start
-            to_sleep = frame_time - elapsed
+            sleep_time = self._frame_interval - elapsed
             
-            # Если рендеринг занял слишком много времени, пропускаем сон
-            if to_sleep > 0:
-                time.sleep(to_sleep)
-            else:
-                # Если не успеваем, логируем предупреждение
-                if elapsed > frame_time * 1.5:
-                    logger.warning(f"Frame render took {elapsed*1000:.2f}ms, target: {frame_time*1000:.2f}ms")
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            elif elapsed > self._frame_interval * 1.5:
+                logger.warning(f"Frame render took {elapsed*1000:.2f}ms, target: {self._frame_interval*1000:.2f}ms")
