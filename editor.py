@@ -74,6 +74,12 @@ class CanvasItem:
         self._max_zoom_cache = 3
         self._preview_size = (1024, 1024)
         
+        # Атрибуты для GIF
+        self.gif_frames = []
+        self.current_frame = 0
+        self.last_frame_time = 0
+        self.frame_durations = []
+        
         # Загружаем оригинальное изображение (уменьшенное для производительности)
         self._original_image = None
         self._load_original_image()
@@ -89,6 +95,9 @@ class CanvasItem:
                     if img.width > 1024 or img.height > 1024:
                         img.thumbnail((1024, 1024), Image.LANCZOS)
                     self._original_image = img
+                    
+                    # Загружаем кадры GIF для анимации
+                    self._load_gif_frames()
             else:
                 img = Image.open(self.image_path).convert("RGBA")
                 if img.width > 1024 or img.height > 1024:
@@ -98,14 +107,48 @@ class CanvasItem:
             logger.error(f"Ошибка загрузки изображения: {e}")
             self._original_image = Image.new("RGBA", (100, 100), (255, 0, 0, 128))
     
+    def _load_gif_frames(self):
+        """Загружает все кадры GIF"""
+        try:
+            if self.is_gif:
+                with Image.open(self.image_path) as gif:
+                    self.gif_frames = []
+                    self.frame_durations = []
+                    for frame in range(gif.n_frames):
+                        gif.seek(frame)
+                        frame_img = gif.copy().convert("RGBA")
+                        if frame_img.width > 1024 or frame_img.height > 1024:
+                            frame_img.thumbnail((1024, 1024), Image.LANCZOS)
+                        self.gif_frames.append(frame_img)
+                        try:
+                            duration = gif.info.get('duration', 100) / 1000.0
+                            self.frame_durations.append(duration)
+                        except:
+                            self.frame_durations.append(0.1)
+        except Exception as e:
+            logger.error(f"Ошибка загрузки кадров GIF: {e}")
+            self.is_gif = False
+    
+    def get_current_image(self):
+        """Возвращает текущий кадр (для GIF) или изображение"""
+        if self.is_gif and self.gif_frames:
+            now = time.time()
+            if now - self.last_frame_time > self.frame_durations[self.current_frame]:
+                self.current_frame = (self.current_frame + 1) % len(self.gif_frames)
+                self.last_frame_time = now
+            return self.gif_frames[self.current_frame]
+        return self._original_image
+    
     @lru_cache(maxsize=10)
-    def _get_transformed_image_cached(self, zoom_level, scale, rotation, flip_h, flip_v):
+    def _get_transformed_image_cached(self, zoom_level, scale, rotation, flip_h, flip_v, frame_idx=0):
         """Кэшированное получение трансформированного изображения"""
-        if not self._original_image:
+        # Получаем текущее изображение
+        if self.is_gif and self.gif_frames:
+            img = self.gif_frames[frame_idx % len(self.gif_frames)].copy()
+        elif self._original_image:
+            img = self._original_image.copy()
+        else:
             return Image.new("RGBA", (10, 10), (255, 0, 0, 128))
-        
-        # Копируем оригинальное изображение
-        img = self._original_image.copy()
         
         # ПРИМЕНЯЕМ МАСШТАБ К ОРИГИНАЛЬНОМУ ИЗОБРАЖЕНИЮ
         if scale != 1.0:
@@ -133,21 +176,27 @@ class CanvasItem:
 
     def _get_transformed_image(self, zoom_level=1.0):
         """Получает трансформированное изображение для заданного уровня зума"""
+        # Для GIF используем текущий кадр
+        frame_idx = self.current_frame if self.is_gif else 0
+        
         # Проверяем кэш
-        cache_key = f"{zoom_level:.2f}_{self.scale}_{self.rotation}_{self.flip_horizontal}_{self.flip_vertical}"
+        cache_key = f"{zoom_level:.2f}_{self.scale}_{self.rotation}_{self.flip_horizontal}_{self.flip_vertical}_{frame_idx}"
         
         if cache_key in self._zoom_cache:
             return self._zoom_cache[cache_key]
         
-        if not self._original_image:
+        if not self._original_image and not self.gif_frames:
             return Image.new("RGBA", (10, 10), (255, 0, 0, 128))
         
         # Очищаем старый кэш если слишком много записей
         if len(self._zoom_cache) > self._max_zoom_cache:
             self._zoom_cache.clear()
         
-        # Копируем оригинальное изображение
-        img = self._original_image.copy()
+        # Получаем текущее изображение
+        if self.is_gif and self.gif_frames:
+            img = self.gif_frames[frame_idx].copy()
+        else:
+            img = self._original_image.copy()
         
         # ПРИМЕНЯЕМ МАСШТАБ К ОРИГИНАЛЬНОМУ ИЗОБРАЖЕНИЮ
         if self.scale != 1.0:
@@ -184,6 +233,7 @@ class CanvasItem:
     def clear_cache(self):
         """Очищает кэш изображений"""
         self._get_transformed_image_cached.cache_clear()
+        self._zoom_cache.clear()
 
 class ModelEditor(tk.Toplevel):
     def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_threshold=0.01, sensitivity=1.0, thresholds=None, current_slot=None):
@@ -224,7 +274,7 @@ class ModelEditor(tk.Toplevel):
         # ОПТИМИЗАЦИИ
         self._redraw_scheduled = False
         self._redraw_delay = 33  # ~30 FPS для редактора
-        self._canvas_dirty = True
+        self._canvas_cache_valid = False
         self._last_redraw_time = 0
         self._photo_images = {}  # Кэш PhotoImage
         self._photo_cache_limit = 20
@@ -607,6 +657,178 @@ class ModelEditor(tk.Toplevel):
             self.iconbitmap(os.path.join(BASE_DIR, 'favicon.ico'))
         except Exception as e:
             logger.error(f"Error loading icon: {e}")
+    
+    def _get_groups_recursive(self, parent_name=None):
+        """Получает все группы рекурсивно, начиная с указанной родительской группы"""
+        if parent_name is None:
+            # Получаем корневые группы (без родителя)
+            return [g for g in self.model.get("groups", []) if not g.get("parent")]
+        
+        # Получаем дочерние группы для указанной родительской группы
+        return [g for g in self.model.get("groups", []) if g.get("parent") == parent_name]
+    
+    def _get_current_state_for_group(self, group_name):
+        """Определяет текущее состояние для группы с учетом иерархии"""
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
+        if not group:
+            return None
+            
+        logic = group.get("logic", {})
+        now = time.time()
+        
+        # Обработка моргания
+        if self.test_mode_var.get() != "none":
+            blink_freq = float(group.get("blink_freq", 0.0))
+            if group_name not in self.group_blink_timers:
+                self.group_blink_timers[group_name] = now + random.uniform(2.0, 6.0)
+                self.group_blink_until[group_name] = 0.0
+                
+            if blink_freq > 0.001:
+                if now > self.group_blink_timers.get(group_name, 0):
+                    self.group_blink_until[group_name] = now + 0.12
+                    self.group_blink_timers[group_name] = now + blink_freq
+                    
+                if now < self.group_blink_until.get(group_name, 0):
+                    if "blink" in logic and logic["blink"]:
+                        return logic["blink"]
+                    else:
+                        # Автоматический поиск слоя для моргания
+                        for layer in self.model.get("layers", []):
+                            if layer.get("group") == group_name:
+                                name = layer.get("name", "").lower()
+                                if any(kw in name for kw in ["close", "closed", "shut", "blink", "морг", "закр"]):
+                                    return layer.get("name")
+        
+        # Обработка случайного эффекта
+        if group.get("random_effect", False):
+            min_time = group.get("random_min", 5.0)
+            max_time = group.get("random_max", 10.0)
+            
+            if group_name not in self.group_random_timers:
+                self.group_random_timers[group_name] = now
+                self.group_random_current[group_name] = None
+                
+            if now > self.group_random_timers.get(group_name, 0):
+                children = group.get("children", [])
+                if children:
+                    blink_layer = logic.get("blink", "")
+                    open_layer = logic.get("open", "")
+                    # Фильтруем доступные слои (только непосредственные дети группы)
+                    available = []
+                    for child_name in children:
+                        # Проверяем, является ли child_name слоем или группой
+                        if child_name in [l.get("name") for l in self.model.get("layers", [])]:
+                            # Это слой
+                            if child_name != blink_layer and child_name != open_layer:
+                                available.append(child_name)
+                        else:
+                            # Это группа, проверяем есть ли в ней видимые слои
+                            child_group = next((g for g in self.model.get("groups", []) if g.get("name") == child_name), None)
+                            if child_group and child_group.get("random_effect", False):
+                                available.append(child_name)
+                    
+                    if available:
+                        chosen = random.choice(available)
+                        self.group_random_current[group_name] = chosen
+            
+            interval = random.uniform(min_time, max_time)
+            self.group_random_timers[group_name] = now + interval
+            
+        if self.group_random_current.get(group_name):
+            return self.group_random_current.get(group_name)
+        
+        # Обработка голосовых состояний
+        current_state = "silent"
+        if self.audio_level > self.thresholds['shout']:
+            current_state = "shout"
+        elif self.audio_level > self.thresholds['normal']:
+            current_state = "normal"
+        elif self.audio_level > self.thresholds['whisper']:
+            current_state = "whisper"
+        elif self.audio_level > self.thresholds['silent']:
+            current_state = "silent"
+            
+        # Fallback: если состояния нет в логике, пробуем другие варианты
+        if current_state in logic and logic[current_state]:
+            return logic[current_state]
+        elif "open" in logic and logic["open"]:
+            return logic["open"]
+        elif "normal" in logic and logic["normal"]:
+            return logic["normal"]
+        elif "silent" in logic and logic["silent"]:
+            return logic["silent"]
+            
+        # Если ничего не подошло, возвращаем первый доступный слой из группы
+        for layer in self.model.get("layers", []):
+            if layer.get("group") == group_name and layer.get("visible", True):
+                return layer.get("name")
+                
+        return None
+    
+    def _get_all_group_items(self, group_name):
+        """Получает все элементы из указанной группы и её дочерних групп"""
+        items = []
+        
+        # Получаем непосредственные элементы группы
+        for ci in self.items:
+            if ci.layer.get("group") == group_name:
+                items.append(ci)
+        
+        # Получаем дочерние группы
+        child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
+        for child_group in child_groups:
+            items.extend(self._get_all_group_items(child_group.get("name")))
+            
+        return items
+    
+    def _get_visible_items_for_state(self, current_state):
+        """Возвращает список видимых элементов для текущего состояния с учетом иерархии"""
+        visible_items = []
+        processed_groups = set()
+        
+        # Функция для рекурсивной обработки групп
+        def process_group(group_name):
+            if group_name in processed_groups:
+                return
+            processed_groups.add(group_name)
+            
+            # Получаем группу
+            group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
+            if not group:
+                return
+                
+            # Получаем текущее состояние для группы
+            chosen = self._get_current_state_for_group(group_name)
+            
+            if not chosen:
+                # Если ничего не выбрано, показываем все видимые слои группы
+                for ci in self.items:
+                    if ci.layer.get("group") == group_name and ci.visible:
+                        visible_items.append(ci)
+                return
+                
+            # Проверяем, является ли chosen группой или слоем
+            is_group = any(g.get("name") == chosen for g in self.model.get("groups", []))
+            if is_group:
+                # Если это группа - рекурсивно обрабатываем ее
+                process_group(chosen)
+            else:
+                # Если это с層 - добавляем только его в видимые
+                for ci in self.items:
+                    if ci.layer.get("name") == chosen and ci.layer.get("group") == group_name and ci.visible:
+                        visible_items.append(ci)
+        
+        # Обрабатываем корневые группы (без родителя)
+        root_groups = [g.get("name") for g in self.model.get("groups", []) if not g.get("parent")]
+        for group_name in root_groups:
+            process_group(group_name)
+            
+        # Добавляем элементы без групп
+        for ci in self.items:
+            if not ci.layer.get("group") and ci.visible:
+                visible_items.append(ci)
+                
+        return visible_items
     
     def save_to_history(self, description=""):
         """Сохраняет текущее состояние в историю"""
@@ -1047,227 +1269,94 @@ class ModelEditor(tk.Toplevel):
         if canvas_width < 10 or canvas_height < 10:
             return
         
-        # Рисуем только основное изображение
-        center_x = canvas_width // 2
-        center_y = canvas_height // 2
+        # Рассчитываем размеры с учетом зума
+        scaled_width = int(self.canvas_width * self.zoom_level)
+        scaled_height = int(self.canvas_height * self.zoom_level)
         
-        # Рисуем простой фон
+        center_x = canvas_width // 2 + self.offset_x
+        center_y = canvas_height // 2 + self.offset_y
+        
+        canvas_x1 = center_x - scaled_width // 2
+        canvas_y1 = center_y - scaled_height // 2
+        
+        # Рисуем фон холста
         self.canvas.create_rectangle(
-            0, 0, canvas_width, canvas_height,
-            fill="#333", outline=""
+            canvas_x1, canvas_y1, 
+            canvas_x1 + scaled_width, canvas_y1 + scaled_height,
+            outline="#666", width=2, fill="#333"
         )
         
-        # Рисуем видимые элементы
-        for ci in self.items:
-            if not ci.visible:
-                continue
-                
+        # Определяем список элементов для отображения
+        items_to_draw = []
+        
+        if mode == "none":
+            # Режим редактирования - все видимые слои
+            items_to_draw = [ci for ci in self.items if ci.visible]
+        else:
+            # Режим тестирования - используем логику групп
+            current_state = "silent"
+            if level > self.thresholds['shout']:
+                current_state = "shout"
+            elif level > self.thresholds['normal']:
+                current_state = "normal"
+            elif level > self.thresholds['whisper']:
+                current_state = "whisper"
+            elif level > self.thresholds['silent']:
+                current_state = "silent"
+            
+            # Получаем видимые элементы для текущего состояния
+            items_to_draw = self._get_visible_items_for_state(current_state)
+        
+        # Сортируем элементы для правильного наложения (по порядку в self.items)
+        items_to_draw.sort(key=lambda x: self.items.index(x))
+        
+        # Отрисовываем все элементы
+        for ci in items_to_draw:
             img = ci.get_image_for_display(self.zoom_level)
             if img is None:
                 continue
             
-            # Быстрое позиционирование
-            img_x = center_x - img.width // 2 + int(ci.x * self.zoom_level)
-            img_y = center_y - img.height // 2 + int(ci.y * self.zoom_level)
+            # Рассчитываем позицию на холсте
+            img_center_x = scaled_width // 2
+            img_center_y = scaled_height // 2
             
-            # Используем кэшированные PhotoImage
-            photo_key = f"{id(img)}_{self.zoom_level}"
-            if photo_key not in self._photo_images:
+            pos_x = canvas_x1 + img_center_x - img.width // 2 + int(ci.x * self.zoom_level)
+            pos_y = canvas_y1 + img_center_y - img.height // 2 + int(ci.y * self.zoom_level)
+            
+            # Используем кэшированные PhotoImage, но для GIF не кэшируем
+            if ci.is_gif:
+                # Для GIF создаем новый PhotoImage каждый раз
                 photo = ImageTk.PhotoImage(img)
-                self._photo_images[photo_key] = photo
+                # Сохраняем ссылку, чтобы не удалилась сборщиком мусора
+                if not hasattr(ci, '_tk_images'):
+                    ci._tk_images = []
+                ci._tk_images.append(photo)
+                # Ограничиваем количество сохраненных изображений
+                if len(ci._tk_images) > 5:
+                    ci._tk_images.pop(0)
+            else:
+                # Для статических изображений используем кэш
+                photo_key = f"{id(img)}_{self.zoom_level}"
+                if photo_key not in self._photo_images:
+                    photo = ImageTk.PhotoImage(img)
+                    self._photo_images[photo_key] = photo
+                    
+                    # Ограничиваем размер кэша
+                    if len(self._photo_images) > self._photo_cache_limit:
+                        oldest = next(iter(self._photo_images))
+                        del self._photo_images[oldest]
                 
-                # Ограничиваем размер кэша
-                if len(self._photo_images) > self._photo_cache_limit:
-                    oldest = next(iter(self._photo_images))
-                    del self._photo_images[oldest]
+                photo = self._photo_images[photo_key]
             
-            photo = self._photo_images[photo_key]
-            self.canvas.create_image(img_x, img_y, image=photo, anchor="nw")
+            self.canvas.create_image(pos_x, pos_y, image=photo, anchor="nw")
             
-            # Выделение
-            if ci.layer.get("_selected"):
+            # Выделение выбранных элементов (только в режиме редактирования)
+            if mode == "none" and ci.layer.get("_selected"):
                 self.canvas.create_rectangle(
-                    img_x, img_y, img_x + img.width, img_y + img.height,
+                    pos_x, pos_y, pos_x + img.width, pos_y + img.height,
                     outline="cyan", width=2
                 )
 
-    def _do_redraw_canvas(self, level=0.0, mode="none"):
-        """Фактическая перерисовка canvas с кэшированием"""
-        self._redraw_pending = False
-        self._last_redraw_time = time.time()
-        
-        try:
-            # Очищаем canvas
-            self.canvas.delete("all")
-            
-            canvas_width = self.canvas.winfo_width()
-            canvas_height = self.canvas.winfo_height()
-            if canvas_width <= 1 or canvas_height <= 1:
-                return
-            
-            # Рассчитываем размеры с учетом зума
-            scaled_width = int(self.canvas_width * self.zoom_level)
-            scaled_height = int(self.canvas_height * self.zoom_level)
-            
-            center_x = canvas_width // 2 + self.offset_x
-            center_y = canvas_height // 2 + self.offset_y
-            
-            canvas_x1 = center_x - scaled_width // 2
-            canvas_y1 = center_y - scaled_height // 2
-            
-            # Рисуем фон холста
-            self.canvas.create_rectangle(
-                canvas_x1, canvas_y1, 
-                canvas_x1 + scaled_width, canvas_y1 + scaled_height,
-                outline="#666", width=2, fill="#333"
-            )
-            
-            # Создаем состояние для проверки изменений
-            current_state = {
-                'zoom': self.zoom_level,
-                'offset_x': self.offset_x,
-                'offset_y': self.offset_y,
-                'canvas_size': (canvas_width, canvas_height),
-                'items_count': len(self.items),
-                'visible_items': sum(1 for ci in self.items if ci.visible),
-                'mode': mode
-            }
-            
-            # Проверяем, нужно ли перерисовывать
-            if (self._canvas_cache_valid and 
-                self._canvas_image_cache and 
-                current_state == self._last_canvas_state):
-                # Используем кэшированное изображение
-                self.canvas.create_image(canvas_x1, canvas_y1, anchor="nw", image=self._canvas_image_cache)
-                return
-            
-            # Создаем временное изображение для рендеринга
-            render_image = Image.new("RGBA", (scaled_width, scaled_height), (0, 0, 0, 0))
-            
-            # Определяем какие элементы отрисовывать
-            items_to_draw = []
-            
-            if mode == "none":
-                # Режим редактирования - все видимые элементы
-                items_to_draw = [ci for ci in self.items if ci.visible]
-            else:
-                # Режим тестирования - логика групп
-                current_state_name = "silent"
-                if level > self.thresholds['shout']:
-                    current_state_name = "shout"
-                elif level > self.thresholds['normal']:
-                    current_state_name = "normal"
-                elif level > self.thresholds['whisper']:
-                    current_state_name = "whisper"
-                elif level > self.thresholds['silent']:
-                    current_state_name = "silent"
-                
-                # Получаем видимые элементы для текущего состояния
-                items_to_draw = self._get_visible_items_for_state(current_state_name)
-            
-            # Сортируем по Z-порядку
-            items_to_draw.sort(key=lambda x: self.items.index(x))
-            
-            # Отрисовываем элементы
-            for ci in items_to_draw:
-                img = ci.get_image_for_display(self.zoom_level)
-                if img is None:
-                    continue
-                
-                # Рассчитываем позицию с учетом центра холста
-                img_center_x = scaled_width // 2
-                img_center_y = scaled_height // 2
-                
-                pos_x = img_center_x - img.width // 2 + int(ci.x * self.zoom_level)
-                pos_y = img_center_y - img.height // 2 + int(ci.y * self.zoom_level)
-                
-                # Проверяем границы
-                if (pos_x + img.width < 0 or pos_x > scaled_width or 
-                    pos_y + img.height < 0 or pos_y > scaled_height):
-                    continue  # Элемент вне видимой области
-                
-                try:
-                    render_image.alpha_composite(img, (pos_x, pos_y))
-                except Exception as e:
-                    logger.error(f"Ошибка композиции: {e}")
-            
-            # Конвертируем в PhotoImage и отображаем
-            photo_image = ImageTk.PhotoImage(render_image)
-            self._photo_images.append(photo_image)  # Сохраняем ссылку
-            
-            # Ограничиваем количество сохраненных изображений
-            if len(self._photo_images) > 5:
-                self._photo_images.pop(0)
-            
-            self.canvas.create_image(canvas_x1, canvas_y1, anchor="nw", image=photo_image)
-            
-            # Сохраняем в кэш
-            self._canvas_image_cache = photo_image
-            self._last_canvas_state = current_state
-            self._canvas_cache_valid = True
-            
-            # Отрисовываем выделение выбранных элементов (только в режиме редактирования)
-            if mode == "none":
-                for ci in self.items:
-                    if ci.layer.get("_selected"):
-                        img = ci.get_image_for_display(self.zoom_level)
-                        if img is None:
-                            continue
-                        
-                        img_center_x = scaled_width // 2
-                        img_center_y = scaled_height // 2
-                        
-                        pos_x = canvas_x1 + img_center_x - img.width // 2 + int(ci.x * self.zoom_level)
-                        pos_y = canvas_y1 + img_center_y - img.height // 2 + int(ci.y * self.zoom_level)
-                        
-                        self.canvas.create_rectangle(
-                            pos_x, pos_y, 
-                            pos_x + img.width, pos_y + img.height,
-                            outline="cyan", width=2
-                        )
-            
-        except Exception as e:
-            logger.error(f"Error in redraw_canvas: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    
-    def _get_visible_items_for_state(self, current_state):
-        """Возвращает список видимых элементов для текущего состояния"""
-        visible_items = []
-        
-        # Простая реализация для редактора
-        # В реальном рендерере будет сложная логика групп
-        for ci in self.items:
-            if ci.visible:
-                visible_items.append(ci)
-        
-        return visible_items
-    
-    def _get_all_group_items(self, group_name):
-        """Получает все элементы группы"""
-        items = []
-        for ci in self.items:
-            if ci.layer.get("group") == group_name:
-                items.append(ci)
-        return items
-    
-    def _make_group_continuous(self, group_name):
-        """Перемещает элементы группы в непрерывный блок"""
-        group_items = self._get_all_group_items(group_name)
-        if not group_items or len(group_items) < 2:
-            return
-        
-        # Находим позиции группы
-        indices = [self.items.index(item) for item in group_items]
-        start_index = min(indices)
-        
-        # Удаляем и вставляем обратно
-        for item in group_items:
-            self.items.remove(item)
-        
-        for i, item in enumerate(group_items):
-            self.items.insert(start_index + i, item)
-    
     def cleanup_old_temp_folders(self):
         """Очищает старые временные папки"""
         import re
@@ -1309,10 +1398,24 @@ class ModelEditor(tk.Toplevel):
             messagebox.showwarning("Группа", "Имя группы уже существует")
             return
         
+        # Определяем родительскую группу (если все выбранные элементы из одной группы)
+        parent_group = None
+        selected_groups = set()
+        for ci in self.current_selection:
+            group_name = ci.layer.get("group")
+            if group_name:
+                selected_groups.add(group_name)
+                
+        if len(selected_groups) == 1:
+            parent_group = list(selected_groups)[0]
+        elif self.selected_group:
+            # Если выбрана группа в интерфейсе, используем ее как родительскую
+            parent_group = self.selected_group
+        
         new_group = {
             "name": name,
             "children": [ci.layer.get("name") for ci in self.current_selection],
-            "parent": None,
+            "parent": parent_group,
             "logic": {},
             "blink_freq": 0.0,
             "random_effect": False,
@@ -1325,7 +1428,17 @@ class ModelEditor(tk.Toplevel):
         for ci in self.current_selection:
             ci.layer["group"] = name
         
-        self._make_group_continuous(name)
+        # Обновляем родительскую группу (если есть)
+        if parent_group:
+            for g in self.model.get("groups", []):
+                if g.get("name") == parent_group:
+                    # Удаляем элементы из родительской группы
+                    for ci in self.current_selection:
+                        if ci.layer.get("name") in g.get("children", []):
+                            g["children"].remove(ci.layer.get("name"))
+                    # Добавляем новую группу как дочерний элемент
+                    g["children"].append(name)
+                    break
         
         self._save_tree_state()
         self.tree_state["preserve_selection"] = True
@@ -1338,7 +1451,7 @@ class ModelEditor(tk.Toplevel):
         self._canvas_cache_valid = False
         self.redraw_canvas()
         
-        logger.info(f"Created new group: {name}")
+        logger.info(f"Created new group: {name} with parent {parent_group}")
         self.save_to_history("Создание группы")
     
     def _save_tree_state(self):
@@ -1383,31 +1496,68 @@ class ModelEditor(tk.Toplevel):
             group_nodes = {}
             items_added = set()
             
-            # Сначала добавляем корневые элементы (без группы)
-            for ci in reversed(self.items):
-                if not ci.layer.get("group"):
-                    item_id = id(ci)
-                    self.tree.insert("", "end", text=self._get_item_display_text(ci),
-                                    values=("item", item_id))
-                    items_added.add(item_id)
+            # Функция для получения пути группы (от корня до текущей группы)
+            def get_group_path(group_name):
+                path = []
+                current = group_name
+                while current:
+                    path.insert(0, current)
+                    group = groups_by_name.get(current)
+                    current = group.get("parent") if group else None
+                return path
             
-            # Добавляем группы и элементы в них
-            for group in self.model.get("groups", []):
-                if not group.get("parent"):
-                    group_node = self.tree.insert("", "end", text=f"📁 {group.get('name')}",
-                                                 values=("group", group.get('name')))
-                    group_nodes[group.get('name')] = group_node
+            # Создаем узлы для всех групп (если они еще не созданы)
+            def ensure_group_node(group_name):
+                if group_name in group_nodes:
+                    return group_nodes[group_name]
+                    
+                group = groups_by_name.get(group_name)
+                if not group:
+                    return None
+                    
+                # Получаем путь группы
+                path = get_group_path(group_name)
+                
+                # Создаем узлы для всех групп в пути
+                parent_node = ""
+                for group_in_path in path:
+                    if group_in_path in group_nodes:
+                        parent_node = group_nodes[group_in_path]
+                        continue
+                        
+                    # Создаем узел для этой группы
+                    group_node = self.tree.insert(parent_node, "end", text=f"📁 {group_in_path}",
+                                                 values=("group", group_in_path))
+                    group_nodes[group_in_path] = group_node
+                    parent_node = group_node
+                    
+                return group_nodes[group_name]
             
-            # Добавляем элементы в группы
+            # Проходим по элементам в ОБРАТНОМ порядке
             for ci in reversed(self.items):
                 item_id = id(ci)
                 if item_id in items_added:
                     continue
-                
+                    
                 group_name = ci.layer.get("group")
-                if group_name and group_name in group_nodes:
-                    self.tree.insert(group_nodes[group_name], "end", 
-                                    text=self._get_item_display_text(ci),
+                
+                if group_name:
+                    # Убеждаемся, что узел группы существует
+                    group_node = ensure_group_node(group_name)
+                    if group_node:
+                        # Добавляем элемент в группу
+                        self.tree.insert(group_node, "end", 
+                                        text=self._get_item_display_text(ci),
+                                        values=("item", item_id))
+                        items_added.add(item_id)
+                    else:
+                        # Группа не найдена, добавляем в корень
+                        self.tree.insert("", "end", text=self._get_item_display_text(ci),
+                                        values=("item", item_id))
+                        items_added.add(item_id)
+                else:
+                    # Элемент без группы - добавляем в корень
+                    self.tree.insert("", "end", text=self._get_item_display_text(ci),
                                     values=("item", item_id))
                     items_added.add(item_id)
             
@@ -2427,56 +2577,120 @@ class ModelEditor(tk.Toplevel):
         if self.selected_group:
             group_name = self.selected_group
             
-            # Удаляем группу из модели
+            # Получаем группу
+            group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
+            if not group:
+                return
+                
+            parent_group = group.get("parent")
+            
+            # Если есть родительская группа, переносим элементы в нее
+            if parent_group:
+                parent = next((g for g in self.model.get("groups", []) if g.get("name") == parent_group), None)
+                if parent:
+                    # Переносим элементы в родительскую группу
+                    for ci in self.items:
+                        if ci.layer.get("group") == group_name:
+                            ci.layer["group"] = parent_group
+                            if ci.layer.get("name") not in parent.get("children", []):
+                                parent.setdefault("children", []).append(ci.layer.get("name"))
+                    # Удаляем ссылку на группу из родительской группы
+                    if group_name in parent.get("children", []):
+                        parent["children"].remove(group_name)
+            else:
+                # Если нет родительской группы, удаляем группу у элементов
+                for ci in self.items:
+                    if ci.layer.get("group") == group_name:
+                        ci.layer["group"] = None
+            
+            # Удаляем группу
             self.model["groups"] = [g for g in self.model.get("groups", []) if g.get("name") != group_name]
             
-            # Удаляем ссылку на группу у элементов
-            for ci in self.items:
-                if ci.layer.get("group") == group_name:
-                    ci.layer["group"] = None
+            # Удаляем все дочерние группы этой группы
+            child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
+            for child_group in child_groups:
+                # Рекурсивно удаляем дочерние группы
+                self._delete_group_and_children(child_group.get("name"))
+                
+            self.selected_group = parent_group
             
-            self.selected_group = None
-            self.group_label.config(text="(нет группы)")
-        
-        elif self.current_selection:
-            # Удаляем группу у выделенных элементов
-            for ci in self.current_selection:
+            # Сохраняем состояние дерева
+            self._save_tree_state()
+            self.tree_state["preserve_selection"] = True
+            
+            self.refresh_tree()
+            self._canvas_cache_valid = False
+            self.redraw_canvas()
+            logger.info(f"Ungrouped group: {group_name}")
+            self.save_to_history("Разгруппирование")
+            return
+            
+        if not self.current_selection:
+            return
+            
+        # Разгруппирование отдельных элементов
+        for ci in self.current_selection:
+            grp = ci.layer.get("group")
+            if grp:
+                for g in list(self.model.get("groups", [])):
+                    if g.get("name") == grp and ci.layer.get("name") in g.get("children", []):
+                        g["children"].remove(ci.layer.get("name"))
+                        if not g["children"]:
+                            # Если группа пуста, удаляем ее
+                            self.model["groups"].remove(g)
                 ci.layer["group"] = None
-        
+                
+        # Сохраняем состояние дерева
         self._save_tree_state()
         self.tree_state["preserve_selection"] = True
         
         self.refresh_tree()
         self._canvas_cache_valid = False
         self.redraw_canvas()
+        logger.info(f"Ungrouped {len(self.current_selection)} items")
+        self.save_to_history("Разгруппирование элементов")
+
+    def _delete_group_and_children(self, group_name):
+        """Рекурсивно удаляет группу и все ее дочерние группы"""
+        # Удаляем группу у элементов
+        for ci in self.items:
+            if ci.layer.get("group") == group_name:
+                ci.layer["group"] = None
         
-        logger.info("Ungrouped selection")
-        self.save_to_history("Разгруппирование")
+        # Удаляем дочерние группы
+        child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
+        for child_group in child_groups:
+            self._delete_group_and_children(child_group.get("name"))
+        
+        # Удаляем саму группу
+        self.model["groups"] = [g for g in self.model.get("groups", []) if g.get("name") != group_name]
     
     def update_group_logic_menus(self, group_name):
         """Обновляет меню логики группы"""
-        group = None
-        for g in self.model.get("groups", []):
-            if g.get("name") == group_name:
-                group = g
-                break
-        
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
         if not group:
             return
         
-        # Собираем опции: слои в группе
+        # Собираем все возможные варианты: слои в группе и дочерние группы
         options = [""]
-        for ci in self.items:
-            if ci.layer.get("group") == group_name:
-                options.append(ci.layer.get("name", ""))
         
-        # Обновляем меню
+        # Добавляем слои, принадлежащие этой группе
+        for layer in self.model.get("layers", []):
+            if layer.get("group") == group_name:
+                options.append(layer.get("name"))
+        
+        # Добавляем дочерние группы
+        for g in self.model.get("groups", []):
+            if g.get("parent") == group_name:
+                options.append(g.get("name"))
+        
+        # Обновляем все меню для состояний
         for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
             menu_widget = getattr(self, f"{state}_menu")
             menu = menu_widget['menu']
             menu.delete(0, 'end')
-            
             var = self.state_vars[state]
+            # Добавляем новые опции
             for option in options:
                 menu.add_command(
                     label=option,
@@ -2485,12 +2699,7 @@ class ModelEditor(tk.Toplevel):
     
     def load_group_settings(self, group_name):
         """Загружает настройки группы"""
-        group = None
-        for g in self.model.get("groups", []):
-            if g.get("name") == group_name:
-                group = g
-                break
-        
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
         if not group:
             return
         
@@ -2777,6 +2986,30 @@ class ModelEditor(tk.Toplevel):
                 
         self.redraw_canvas(0, "none")
         self.after(200, self._show_normal_preview)
+    
+    def _show_normal_preview(self):
+        if not self.blink_preview_running:
+            return
+            
+        gname = self.selected_group
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == gname), None)
+        if not group:
+            return
+            
+        logic = group.get("logic", {})
+        open_layer = logic.get("open") or logic.get("normal") or logic.get("whisper") or logic.get("silent")
+        
+        # Скрываем все элементы в группе
+        for ci in self.items:
+            if ci.layer.get("group") == gname:
+                # Показываем только основной слой
+                ci.visible = (ci.layer.get("name") == open_layer)
+                
+        self.redraw_canvas(0, "none")
+        
+        blink_freq = float(group.get("blink_freq", 0.0))
+        if blink_freq > 0.1:
+            self.after(int(blink_freq * 1000), self._blink_preview_loop)
     
     def _preview_loop(self):
         """Основной цикл предпросмотра"""
