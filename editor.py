@@ -2754,14 +2754,29 @@ class ModelEditor(tk.Toplevel):
         logger.info("Blink preview stopped")
     
     def _blink_preview_loop(self):
-        """Цикл превью моргания"""
         if not self.blink_preview_running:
             return
+            
+        gname = self.selected_group
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == gname), None)
+        if not group:
+            return
+            
+        blink_freq = float(group.get("blink_freq", 0.0))
+        if blink_freq < 0.1:
+            return
+            
+        logic = group.get("logic", {})
+        blink_layer = logic.get("blink", "")
         
-        # Простая реализация превью моргания
-        # В реальном редакторе должна быть более сложная логика
-        
-        self.after(200, self._blink_preview_loop)
+        # Скрываем все элементы в группе
+        for ci in self.items:
+            if ci.layer.get("group") == gname:
+                # Показываем только слой для моргания
+                ci.visible = (ci.layer.get("name") == blink_layer)
+                
+        self.redraw_canvas(0, "none")
+        self.after(200, self._show_normal_preview)
     
     def _preview_loop(self):
         """Основной цикл предпросмотра"""
