@@ -121,10 +121,16 @@ class CanvasItem:
                             frame_img.thumbnail((1024, 1024), Image.LANCZOS)
                         self.gif_frames.append(frame_img)
                         try:
-                            duration = gif.info.get('duration', 100) / 1000.0
-                            self.frame_durations.append(duration)
+                            duration = gif.info.get('duration', 100)
+                            if duration == 0:
+                                duration = 100  # Защита от нулевой длительности
+                            self.frame_durations.append(duration / 1000.0)  # Конвертируем в секунды
                         except:
                             self.frame_durations.append(0.1)
+                    
+                    # Инициализируем таймер
+                    self.current_frame = 0
+                    self.last_frame_time = time.time()
         except Exception as e:
             logger.error(f"Ошибка загрузки кадров GIF: {e}")
             self.is_gif = False
@@ -176,11 +182,16 @@ class CanvasItem:
 
     def _get_transformed_image(self, zoom_level=1.0):
         """Получает трансформированное изображение для заданного уровня зума"""
-        # Для GIF используем текущий кадр
-        frame_idx = self.current_frame if self.is_gif else 0
+        # Для GIF сначала обновляем текущий кадр
+        if self.is_gif and self.gif_frames:
+            self._update_gif_frame()
         
         # Проверяем кэш
-        cache_key = f"{zoom_level:.2f}_{self.scale}_{self.rotation}_{self.flip_horizontal}_{self.flip_vertical}_{frame_idx}"
+        cache_key = f"{zoom_level:.2f}_{self.scale}_{self.rotation}_{self.flip_horizontal}_{self.flip_vertical}"
+        
+        if self.is_gif:
+            # Для GIF добавляем номер кадра в ключ кэша
+            cache_key += f"_{self.current_frame}"
         
         if cache_key in self._zoom_cache:
             return self._zoom_cache[cache_key]
@@ -194,7 +205,8 @@ class CanvasItem:
         
         # Получаем текущее изображение
         if self.is_gif and self.gif_frames:
-            img = self.gif_frames[frame_idx].copy()
+            # Для GIF используем текущий кадр
+            img = self.gif_frames[self.current_frame].copy()
         else:
             img = self._original_image.copy()
         
@@ -224,6 +236,16 @@ class CanvasItem:
         self._zoom_cache[cache_key] = img
         return img
     
+    def _update_gif_frame(self):
+        """Обновляет текущий кадр GIF на основе времени"""
+        if not self.is_gif or not self.gif_frames:
+            return
+        
+        now = time.time()
+        if now - self.last_frame_time >= self.frame_durations[self.current_frame]:
+            self.current_frame = (self.current_frame + 1) % len(self.gif_frames)
+            self.last_frame_time = now
+
     def get_image_for_display(self, zoom_level=1.0):
         """Возвращает изображение для отображения с учетом зума"""
         if not self.visible:
