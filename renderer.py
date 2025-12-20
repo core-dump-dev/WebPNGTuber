@@ -4,6 +4,7 @@ import os, io, math, random
 import logging
 import logging.handlers
 from datetime import datetime
+from functools import lru_cache
 
 # Определение базовой директории
 import sys
@@ -392,7 +393,7 @@ class Renderer:
         return None
     
     def _choose_group_child(self, group):
-        """Выбирает дочерний элемент группы в зависимости от текущего состояния - оптимизировано"""
+        """Выбирает дочерный элемент группы в зависимости от текущего состояния - оптимизировано"""
         group_name = group.get("name")
         logic = group.get("logic", {})
         now = time.time()

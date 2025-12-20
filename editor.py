@@ -19,6 +19,7 @@ import zipfile
 import tempfile
 import queue
 import weakref
+from functools import lru_cache
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -97,6 +98,39 @@ class CanvasItem:
             logger.error(f"Ошибка загрузки изображения: {e}")
             self._original_image = Image.new("RGBA", (100, 100), (255, 0, 0, 128))
     
+    @lru_cache(maxsize=10)
+    def _get_transformed_image_cached(self, zoom_level, scale, rotation, flip_h, flip_v):
+        """Кэшированное получение трансформированного изображения"""
+        if not self._original_image:
+            return Image.new("RGBA", (10, 10), (255, 0, 0, 128))
+        
+        # Копируем оригинальное изображение
+        img = self._original_image.copy()
+        
+        # ПРИМЕНЯЕМ МАСШТАБ К ОРИГИНАЛЬНОМУ ИЗОБРАЖЕНИЮ
+        if scale != 1.0:
+            new_width = max(1, int(img.width * scale))
+            new_height = max(1, int(img.height * scale))
+            img = img.resize((new_width, new_height), Image.LANCZOS)
+        
+        # Отражение (применяется после масштабирования)
+        if flip_h:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        if flip_v:
+            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+        
+        # Поворот
+        if rotation != 0:
+            img = img.rotate(rotation, expand=True, resample=Image.BICUBIC)
+        
+        # Масштаб зума (для отображения в редакторе)
+        if zoom_level != 1.0:
+            final_width = max(1, int(img.width * zoom_level))
+            final_height = max(1, int(img.height * zoom_level))
+            img = img.resize((final_width, final_height), Image.LANCZOS)
+        
+        return img
+
     def _get_transformed_image(self, zoom_level=1.0):
         """Получает трансформированное изображение для заданного уровня зума"""
         # Проверяем кэш
@@ -116,7 +150,6 @@ class CanvasItem:
         img = self._original_image.copy()
         
         # ПРИМЕНЯЕМ МАСШТАБ К ОРИГИНАЛЬНОМУ ИЗОБРАЖЕНИЮ
-        # Это ключевое изменение - масштаб должен применяться до всех остальных трансформаций
         if self.scale != 1.0:
             new_width = max(1, int(img.width * self.scale))
             new_height = max(1, int(img.height * self.scale))
@@ -150,7 +183,7 @@ class CanvasItem:
     
     def clear_cache(self):
         """Очищает кэш изображений"""
-        self._zoom_cache.clear()
+        self._get_transformed_image_cached.cache_clear()
 
 class ModelEditor(tk.Toplevel):
     def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_threshold=0.01, sensitivity=1.0, thresholds=None, current_slot=None):
@@ -189,15 +222,19 @@ class ModelEditor(tk.Toplevel):
         self.blink_preview_running = False
         
         # ОПТИМИЗАЦИИ
-        self._redraw_pending = False
+        self._redraw_scheduled = False
+        self._redraw_delay = 33  # ~30 FPS для редактора
+        self._canvas_dirty = True
         self._last_redraw_time = 0
-        self._redraw_throttle_ms = 50  # 20 FPS для редактора
-        self._canvas_image_cache = None  # Кэш отрисованного изображения
-        self._canvas_cache_valid = False
-        self._last_canvas_state = None  # Состояние для проверки изменений
+        self._photo_images = {}  # Кэш PhotoImage
+        self._photo_cache_limit = 20
         
-        # Кэш PhotoImage чтобы не удалялся сборщиком мусора
-        self._photo_images = []
+        # Кэширование изображений для дерева
+        self._tree_image_cache = {}
+        
+        # Оптимизация событий мыши
+        self._last_mouse_event = 0
+        self._mouse_event_throttle = 0.016  # ~60 FPS для событий мыши
         
         # Система отмены/повтора
         self.history = []
@@ -980,19 +1017,80 @@ class ModelEditor(tk.Toplevel):
         logger.info(f"Model name updated to: {self.model['name']}")
     
     def redraw_canvas(self, level=0.0, mode="none"):
-        """Перерисовка canvas с троттлингом и кэшированием"""
-        now = time.time()
-        time_since_last = (now - self._last_redraw_time) * 1000
+        """Оптимизированная перерисовка холста"""
+        if self._redraw_scheduled:
+            return
+            
+        self._redraw_scheduled = True
         
-        if time_since_last < self._redraw_throttle_ms:
-            if not self._redraw_pending:
-                self._redraw_pending = True
-                self.after(int(self._redraw_throttle_ms - time_since_last), 
-                          lambda: self._do_redraw_canvas(level, mode))
+        def do_redraw():
+            self._redraw_scheduled = False
+            if not self.winfo_exists():
+                return
+                
+            try:
+                # Быстрая очистка
+                self.canvas.delete("all")
+                
+                # Простой рендеринг без сложных вычислений
+                self._fast_render_canvas(level, mode)
+            except Exception as e:
+                logger.error(f"Redraw error: {e}")
+        
+        self.after(self._redraw_delay, do_redraw)
+    
+    def _fast_render_canvas(self, level=0.0, mode="none"):
+        """Быстрый рендеринг холста"""
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        
+        if canvas_width < 10 or canvas_height < 10:
             return
         
-        self._do_redraw_canvas(level, mode)
-    
+        # Рисуем только основное изображение
+        center_x = canvas_width // 2
+        center_y = canvas_height // 2
+        
+        # Рисуем простой фон
+        self.canvas.create_rectangle(
+            0, 0, canvas_width, canvas_height,
+            fill="#333", outline=""
+        )
+        
+        # Рисуем видимые элементы
+        for ci in self.items:
+            if not ci.visible:
+                continue
+                
+            img = ci.get_image_for_display(self.zoom_level)
+            if img is None:
+                continue
+            
+            # Быстрое позиционирование
+            img_x = center_x - img.width // 2 + int(ci.x * self.zoom_level)
+            img_y = center_y - img.height // 2 + int(ci.y * self.zoom_level)
+            
+            # Используем кэшированные PhotoImage
+            photo_key = f"{id(img)}_{self.zoom_level}"
+            if photo_key not in self._photo_images:
+                photo = ImageTk.PhotoImage(img)
+                self._photo_images[photo_key] = photo
+                
+                # Ограничиваем размер кэша
+                if len(self._photo_images) > self._photo_cache_limit:
+                    oldest = next(iter(self._photo_images))
+                    del self._photo_images[oldest]
+            
+            photo = self._photo_images[photo_key]
+            self.canvas.create_image(img_x, img_y, image=photo, anchor="nw")
+            
+            # Выделение
+            if ci.layer.get("_selected"):
+                self.canvas.create_rectangle(
+                    img_x, img_y, img_x + img.width, img_y + img.height,
+                    outline="cyan", width=2
+                )
+
     def _do_redraw_canvas(self, level=0.0, mode="none"):
         """Фактическая перерисовка canvas с кэшированием"""
         self._redraw_pending = False

@@ -7,6 +7,7 @@ import logging
 import logging.handlers
 from datetime import datetime
 from collections import deque
+import queue
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -60,6 +61,16 @@ class AudioProcessor:
         self._smoothing_buffer = deque(maxlen=3)  # Буфер для сглаживания
         self._smoothing_alpha = 0.7  # Коэффициент сглаживания (0-1, чем больше, тем быстрее реакция)
         self._last_smoothed_level = 0.0
+
+        # Оптимизации
+        self._audio_queue = queue.Queue(maxsize=10)  # Ограниченная очередь для избежания накопления
+        self._processing_thread = None
+        self._buffer = np.zeros(256, dtype=np.float32)  # Уменьшенный буфер
+        
+        # Используем прямой доступ к буферу для минимальной задержки
+        self._callback_lock = threading.Lock()
+        self._last_callback_time = 0
+        self._callback_interval = 0.01  # 10ms минимальный интервал
 
         # Подавление вывода ошибок для EXE
         if getattr(sys, 'frozen', False):
@@ -141,53 +152,58 @@ class AudioProcessor:
         return raw_level
 
     def _capture_loop(self):
-        """Основной цикл захвата аудио с оптимизацией"""
-        import queue
-        q = queue.Queue()
-        
+        """Оптимизированный цикл захвата аудио"""
         def callback(indata, frames, time_info, status):
-            """Аудио callback функция"""
-            if not self.running:
+            """Низкоуровневый callback с минимальной обработкой"""
+            if not self.running or status:
                 return
-            q.put(indata.copy())
+            
+            current_time = time.time()
+            if current_time - self._last_callback_time < self._callback_interval:
+                return  # Пропускаем слишком частые вызовы
+            
+            with self._callback_lock:
+                # Быстрое копирование данных
+                np.copyto(self._buffer, indata[:, 0])
+                
+                # Быстрое вычисление RMS
+                rms = np.sqrt(np.mean(self._buffer ** 2))
+                raw_level = min(1.0, rms * 10 * self.sensitivity)
+                
+                # Подавление шума
+                if raw_level < self.noise_gate_threshold:
+                    raw_level = 0.0
+                
+                # Экспоненциальное сглаживание
+                self._level = self._smoothing_alpha * raw_level + \
+                            (1 - self._smoothing_alpha) * self._level
+                
+                # Быстрый вызов callback если он зарегистрирован
+                if self.callback:
+                    try:
+                        self.callback(self._level)
+                    except:
+                        pass
+                
+                self._last_callback_time = current_time
         
         try:
             device_params = {}
             if self.device_index is not None:
                 device_params['device'] = self.device_index
                 
-            # Уменьшенная частота дискретизации до 22050 Гц для лучшей производительности
+            # Оптимизированные параметры потока
             with sd.InputStream(
                 channels=1, 
                 callback=callback, 
-                samplerate=22050,  # Уменьшено с 44100 до 22050
-                blocksize=512,  # Уменьшен размер блока для более быстрой реакции
+                samplerate=22050,
+                blocksize=256,  # Уменьшенный размер блока для снижения задержки
+                latency='low',  # Низкая задержка
                 **device_params
             ):
                 while self.running:
-                    try:
-                        data = q.get(timeout=0.1)  # Уменьшен таймаут для быстрой реакции
-                    except queue.Empty:
-                        continue
+                    time.sleep(0.01)  # Короткие sleep для быстрой реакции
                     
-                    # Быстрое вычисление RMS
-                    rms = np.sqrt(np.mean(data**2))
-                    raw_level = min(1.0, rms * 10 * self.sensitivity)
-                    
-                    # Улучшенное подавление шума
-                    if raw_level < self.noise_gate_threshold:
-                        raw_level = 0.0
-                    
-                    # Применяем сглаживание для уменьшения дрожания
-                    smoothed_level = self._smooth_level(raw_level)
-                    
-                    self._level = smoothed_level
-                    if self.callback:
-                        try:
-                            # Передаем сглаженный уровень для более стабильной работы
-                            self.callback(smoothed_level)
-                        except Exception as e:
-                            logger.error(f"Error in callback: {e}")
         except Exception as e:
             logger.error(f"Audio capture error: {e}")
             self._simulate_loop()

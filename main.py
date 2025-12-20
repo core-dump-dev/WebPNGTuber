@@ -82,6 +82,14 @@ class App:
         # Флаг инициализации для предотвращения сохранения при начальной загрузке
         self.initializing = True
         
+        # Оптимизации Tkinter
+        root.update_idletasks()  # Обновление всех отложенных задач
+        root.option_add('*tearOff', False)
+        
+        # Оптимизация частоты обновления UI
+        self._ui_update_interval = 50  # 20 FPS для UI
+        self._last_ui_update = 0
+        
         # Загрузка настроек
         self.settings = self.load_settings()
 
@@ -490,6 +498,71 @@ class App:
         # Завершаем инициализацию
         self.initializing = False
 
+    def on_audio_level(self, level):
+        """Оптимизированная обработка уровня аудио"""
+        now = time.time()
+        
+        # Троттлинг обновления UI (максимум 20 FPS)
+        if now - self._last_ui_update < 0.05:  # 50ms
+            # Только обновляем рендерер без UI
+            self.renderer.set_audio_level(level * self.sensitivity.get())
+            return
+            
+        try:
+            self.audio_level_scaled = level * self.sensitivity.get()
+            
+            # Пакетное обновление UI
+            self.root.after_idle(self._batch_ui_update, self.audio_level_scaled)
+            
+            # Немедленная передача в рендерер
+            self.renderer.set_audio_level(self.audio_level_scaled)
+            
+            self._last_ui_update = now
+        except Exception as e:
+            logger.error(f"Audio level error: {e}")
+    
+    def _batch_ui_update(self, level):
+        """Пакетное обновление UI элементов"""
+        try:
+            self.vol_label.config(text=f"{level:.2f}")
+            self.update_level_indicator(level)
+        except:
+            pass  # Игнорируем ошибки в UI обновлении
+
+    def refresh_slot_buttons(self):
+        """Оптимизированное обновление кнопок слотов"""
+        # Обновляем только видимые слоты
+        for idx in range(6):
+            if idx < len(self.model_slots):
+                self._update_single_slot(idx)
+    
+    def _update_single_slot(self, idx):
+        """Обновление одного слота (отложенное)"""
+        def update():
+            try:
+                slot_dir = os.path.join(MODELS_DIR, f"slot{idx+1}")
+                json_path = os.path.join(slot_dir, "model.json")
+                btn = self.model_slots[idx]
+                
+                is_current = (idx + 1 == self.current_slot)
+                prefix = "★ " if is_current else ""
+                
+                if os.path.exists(json_path):
+                    try:
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            model_data = json.load(f)
+                        model_name = model_data.get('name', f"Слот {idx+1}")
+                        btn.config(text=f"{prefix}Слот {idx+1}\n{model_name[:15]}")
+                    except:
+                        btn.config(text=f"{prefix}Слот {idx+1}\n(ошибка)")
+                else:
+                    btn.config(text=f"{prefix}Слот {idx+1}\n(пустой)")
+            except Exception as e:
+                logger.debug(f"Slot update error: {e}")
+        
+        # Отложенное обновление для снижения нагрузки
+        self.root.after(idx * 50, update)  # Смещение по времени
+
     def open_web_link(self):
         """Открытие ссылки веб-сервера в браузере"""
         import webbrowser
@@ -682,49 +755,6 @@ class App:
         
         # Автоматическое сохранение состояния секций
         self.save_settings()
-
-    def refresh_slot_buttons(self):
-        """Обновление кнопок слотов"""
-        if not hasattr(self, "model_slots"):
-            return
-
-        for idx in range(6):
-            slot_dir = os.path.join(MODELS_DIR, f"slot{idx+1}")
-            json_path = os.path.join(slot_dir, "model.json")
-
-            btn = self.model_slots[idx]
-            preview_path = os.path.join(slot_dir, "preview.png")
-
-            # Определяем, является ли этот слот текущим
-            is_current = (idx + 1 == self.current_slot)
-            
-            # Префикс со звездочкой для текущего слота
-            prefix = "★ " if is_current else ""
-
-            if os.path.exists(json_path):
-                try:
-                    with open(json_path, "r", encoding="utf-8") as f:
-                        model_data = json.load(f)
-                    model_name = model_data.get('name', f"Слот {idx+1}")
-                    btn.config(text=f"{prefix}Слот {idx+1}\n{model_name}")
-                except Exception as e:
-                    btn.config(text=f"{prefix}Слот {idx+1}\n(ошибка)")
-                    logger.error(f"Error loading model from slot {idx+1}: {e}")
-            else:
-                btn.config(text=f"{prefix}Слот {idx+1}\n(пустой)")
-
-            if os.path.exists(preview_path):
-                try:
-                    img = Image.open(preview_path)
-                    img.thumbnail((85, 85), Image.LANCZOS)  # Увеличили превью
-                    photo = ImageTk.PhotoImage(img)
-                    self.slot_previews[idx] = photo
-                    btn.config(image=photo)
-                except Exception as e:
-                    btn.config(image='')
-                    logger.error(f"Error loading preview for slot {idx+1}: {e}")
-            else:
-                btn.config(image='')
 
     def update_active_states(self):
         """Обновление активных состояний"""
@@ -921,16 +951,15 @@ class App:
             self.root.attributes('-disabled', False)
 
     def on_model_saved(self, model_data, model_dir, slot_num=None):
-        """Обработка сохранения модели - НЕ загружаем автоматически в рендерер"""
-        # Только обновляем кнопки слотов, НЕ загружаем модель
+        """Обработка сохранения модели"""
+        # Обновляем кнопки слотов
         self.refresh_slot_buttons()
         logger.info(f"Model saved to directory: {model_dir}")
         
-        # Если сохранено в текущий слот, то обновляем только отображение
+        # Если сохранено в текущий слот, перезагружаем модель
         if slot_num == self.current_slot:
-            logger.info(f"Model saved to current slot {slot_num}, updating display only")
-            # Обновляем кнопку текущего слота
-            self.refresh_slot_buttons()
+            logger.info(f"Model saved to current slot {slot_num}, reloading")
+            self.load_slot(slot_num - 1, silent=True)  # -1 потому что индексация с 0
 
     def toggle_server(self):
         """Переключение веб-сервера"""
@@ -956,21 +985,6 @@ class App:
             except Exception as e:
                 logger.error(f"Error starting web server: {e}")
                 messagebox.showerror("Ошибка", f"Не удалось запустить веб-сервер: {e}")
-
-    def on_audio_level(self, level):
-        """Обработка уровня аудио - быстрая реакция без задержек"""
-        try:
-            self.audio_level_scaled = level * self.sensitivity.get()
-        except Exception as e:
-            self.audio_level_scaled = level
-            logger.error(f"Error scaling audio level: {e}")
-        try:
-            self.vol_label.config(text=f"{self.audio_level_scaled:.2f}")
-        except Exception as e:
-            logger.error(f"Error updating volume label: {e}")
-        self.update_level_indicator(self.audio_level_scaled)
-        # Немедленная передача уровня в рендерер для минимальной задержки
-        self.renderer.set_audio_level(self.audio_level_scaled)
 
     def on_close(self):
         """Обработка закрытия приложения"""

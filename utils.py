@@ -3,6 +3,8 @@ import logging
 import logging.handlers
 import time
 from datetime import datetime
+from functools import lru_cache
+from PIL import Image
 
 # Определение базовой директории
 import sys
@@ -41,6 +43,18 @@ def setup_utils_logging():
 
 # Инициализация логгера
 logger = setup_utils_logging()
+
+@lru_cache(maxsize=32)
+def load_image_cached(path, size=None):
+    """Кэшированная загрузка изображений"""
+    try:
+        img = Image.open(path)
+        if size:
+            img.thumbnail(size, Image.LANCZOS)
+        return img
+    except Exception as e:
+        logger.error(f"Error loading image {path}: {e}")
+        return None
 
 def export_model_zip(model_json, model_dir, zip_path=None):
     """Экспорт модели в ZIP архив"""
