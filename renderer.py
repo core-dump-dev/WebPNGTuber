@@ -564,9 +564,29 @@ class Renderer:
                     if not layer:
                         continue
                     
-                    # Позиционирование (центрируем изображение)
-                    px = (self.width - image.width) // 2 + int(layer.get("x", 0))
-                    py = (self.height - image.height) // 2 + int(layer.get("y", 0))
+                    # Сохраняем оригинал для эффектов
+                    orig_image = image
+                    
+                    # ПРИМЕНЯЕМ ЭФФЕКТЫ ТУТ
+                    bounce_intensity = 0
+                    if self.effects.get('bounce', False):
+                        bounce_intensity = int(math.sin(time.time() * 5) * min(10, self.audio_level * 20))
+                    
+                    if self.effects.get('shake', False):
+                        shake_intensity = min(1.0, self.audio_level * 5)
+                        offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
+                        offset_y = int((random.random() - 0.5) * 10 * shake_intensity) + bounce_intensity
+                    else:
+                        offset_x, offset_y = 0, bounce_intensity
+                    
+                    if self.effects.get('pulse', False):
+                        pulse_scale = 1.0 + (math.sin(time.time() * 5) * 0.1 * self.audio_level)
+                        new_size = (int(image.width * pulse_scale), int(image.height * pulse_scale))
+                        image = image.resize(new_size, Image.LANCZOS)
+                    
+                    # Позиционирование (центрируем изображение) с учетом эффектов
+                    px = (self.width - image.width) // 2 + int(layer.get("x", 0)) + offset_x
+                    py = (self.height - image.height) // 2 + int(layer.get("y", 0)) + offset_y
                     
                     try:
                         frame_image.alpha_composite(image, (px, py))
