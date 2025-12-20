@@ -92,6 +92,10 @@ class Renderer:
         self._visible_layers_cache_time = 0
         self._cache_ttl = 0.1  # 100 мс
         
+        # ДОБАВЬТЕ ЭТИ СТРОКИ:
+        self.layers_by_name = {}
+        self.groups_by_name = {}
+        
         logger.info("Renderer initialized with optimizations")
     
     def set_idle(self, enabled, timeout):
@@ -335,6 +339,10 @@ class Renderer:
     
     def _get_visible_layers(self):
         """Возвращает список видимых слоев с учетом иерархии групп и порядка в model["layers"]"""
+        # ДОБАВЬТЕ ЭТУ ПРОВЕРКУ:
+        if not self.model:
+            return []
+        
         # Кэширование видимых слоев для оптимизации
         now = time.time()
         if now - self._visible_layers_cache_time < self._cache_ttl and self._visible_layers_cache:
