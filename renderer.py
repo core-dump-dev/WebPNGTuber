@@ -553,54 +553,58 @@ class Renderer:
     def _loop(self):
         """Основной цикл рендеринга с оптимизациями"""
         while self._running:
+            # Если нет модели или папки модели, ждем чтобы не нагружать CPU
+            if not self.model or not self.model_dir:
+                time.sleep(0.1)  # Спим, пока модель не загружена
+                continue
+                
             frame_start = time.time()
             
             # Создаем базовое изображение
             frame_image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
             
-            if self.model and self.model_dir:
-                # Получаем видимые слои
-                visible_layers = self._get_visible_layers()
-                
-                # Отрисовываем видимые слои в правильном порядке
-                for layer_name in visible_layers:
-                    image = self._get_layer_image(layer_name)
-                    if not image:
-                        continue
-                    
-                    layer = self.layers_by_name.get(layer_name)
-                    if not layer:
-                        continue
-                    
-                    # Сохраняем оригинал для эффектов
-                    orig_image = image
-                    
-                    # ПРИМЕНЯЕМ ЭФФЕКТЫ ТУТ
-                    bounce_intensity = 0
-                    if self.effects.get('bounce', False):
-                        bounce_intensity = int(math.sin(time.time() * 5) * min(10, self.audio_level * 20))
-                    
-                    if self.effects.get('shake', False):
-                        shake_intensity = min(1.0, self.audio_level * 5)
-                        offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
-                        offset_y = int((random.random() - 0.5) * 10 * shake_intensity) + bounce_intensity
-                    else:
-                        offset_x, offset_y = 0, bounce_intensity
-                    
-                    if self.effects.get('pulse', False):
-                        pulse_scale = 1.0 + (math.sin(time.time() * 5) * 0.1 * self.audio_level)
-                        new_size = (int(image.width * pulse_scale), int(image.height * pulse_scale))
-                        image = image.resize(new_size, Image.LANCZOS)
-                    
-                    # Позиционирование (центрируем изображение) с учетом эффектов
-                    px = (self.width - image.width) // 2 + int(layer.get("x", 0)) + offset_x
-                    py = (self.height - image.height) // 2 + int(layer.get("y", 0)) + offset_y
-                    
-                    try:
-                        frame_image.alpha_composite(image, (px, py))
-                    except Exception as e:
-                        logger.error(f"Ошибка композиции слоя {layer_name}: {e}")
+            # Получаем видимые слои
+            visible_layers = self._get_visible_layers()
             
+            # Отрисовываем видимые слои в правильном порядке
+            for layer_name in visible_layers:
+                image = self._get_layer_image(layer_name)
+                if not image:
+                    continue
+                
+                layer = self.layers_by_name.get(layer_name)
+                if not layer:
+                    continue
+                
+                # Сохраняем оригинал для эффектов
+                orig_image = image
+                
+                # ПРИМЕНЯЕМ ЭФФЕКТЫ ТУТ
+                bounce_intensity = 0
+                if self.effects.get('bounce', False):
+                    bounce_intensity = int(math.sin(time.time() * 5) * min(10, self.audio_level * 20))
+                
+                if self.effects.get('shake', False):
+                    shake_intensity = min(1.0, self.audio_level * 5)
+                    offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
+                    offset_y = int((random.random() - 0.5) * 10 * shake_intensity) + bounce_intensity
+                else:
+                    offset_x, offset_y = 0, bounce_intensity
+                
+                if self.effects.get('pulse', False):
+                    pulse_scale = 1.0 + (math.sin(time.time() * 5) * 0.1 * self.audio_level)
+                    new_size = (int(image.width * pulse_scale), int(image.height * pulse_scale))
+                    image = image.resize(new_size, Image.LANCZOS)
+                
+                # Позиционирование (центрируем изображение) с учетом эффектов
+                px = (self.width - image.width) // 2 + int(layer.get("x", 0)) + offset_x
+                py = (self.height - image.height) // 2 + int(layer.get("y", 0)) + offset_y
+                
+                try:
+                    frame_image.alpha_composite(image, (px, py))
+                except Exception as e:
+                    logger.error(f"Ошибка композиции слоя {layer_name}: {e}")
+        
             # Применяем idle-режим
             if self.idle_enabled:
                 current_time = time.time()

@@ -109,6 +109,11 @@ class WebServer:
         last_frame_hash = None
         
         while self.is_running:
+            # Если рендерер не готов (нет модели), ждем
+            if not self.renderer or not self.renderer.model:
+                time.sleep(0.1)
+                continue
+                
             frame = self.renderer.get_frame_bytes()
             if frame:
                 # Простая дедупликация кадров

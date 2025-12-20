@@ -99,6 +99,7 @@ class App:
                                    device=self.settings.get('mic_device'))
         self.audio.noise_gate_threshold = self.settings.get('noise_gate_threshold', 0.01)
         self.webserver = None
+        self.renderer_was_started = False  # Флаг для отслеживания запуска рендерера
 
         # Настройки по умолчанию
         self.thresholds = self.settings.get('thresholds', {
@@ -476,8 +477,7 @@ class App:
         self.audio.start()
         self.toggle_noise_gate()
 
-        # Запуск рендерера
-        self.renderer.start()
+        # Настраиваем рендерер, но НЕ запускаем его
         self.renderer.set_thresholds(self.thresholds)
         self.renderer.set_noise_gate(self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
         self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
@@ -504,8 +504,9 @@ class App:
         
         # Троттлинг обновления UI (максимум 20 FPS)
         if now - self._last_ui_update < 0.05:  # 50ms
-            # Только обновляем рендерер без UI
-            self.renderer.set_audio_level(level * self.sensitivity.get())
+            # Только передаем в рендерер если он запущен
+            if self.renderer_was_started:
+                self.renderer.set_audio_level(level * self.sensitivity.get())
             return
             
         try:
@@ -514,8 +515,9 @@ class App:
             # Пакетное обновление UI
             self.root.after_idle(self._batch_ui_update, self.audio_level_scaled)
             
-            # Немедленная передача в рендерер
-            self.renderer.set_audio_level(self.audio_level_scaled)
+            # Передаем в рендерер только если он запущен
+            if self.renderer_was_started:
+                self.renderer.set_audio_level(self.audio_level_scaled)
             
             self._last_ui_update = now
         except Exception as e:
@@ -964,23 +966,50 @@ class App:
     def toggle_server(self):
         """Переключение веб-сервера"""
         if self.webserver and getattr(self.webserver, "is_running", False):
+            # Останавливаем веб-сервер
             self.webserver.stop()
             self.server_btn.config(text="🌐 Запустить веб-сервер")
-            self.link_btn.config(state="disabled")  # Отключаем кнопку ссылки
+            self.link_btn.config(state="disabled")
             logger.info("Web server stopped")
-            # Не удаляем webserver, чтобы можно было перезапустить
+            
+            # Останавливаем рендерер только если он был запущен для веб-сервера
+            if self.renderer_was_started:
+                try:
+                    self.renderer.stop()
+                    self.renderer_was_started = False
+                    logger.info("Renderer stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping renderer: {e}")
         else:
             if not self.webserver:
-                # Создаем новый экземпляр если его нет
                 self.webserver = WebServer(self.renderer)
             elif not self.webserver.is_running:
-                # Если экземпляр есть, но сервер не запущен, обновляем рендерер
                 self.webserver.renderer = self.renderer
+            
+            # Запускаем рендерер перед запуском веб-сервера
+            if not self.renderer_was_started:
+                try:
+                    # Настраиваем параметры рендерера перед запуском
+                    self.renderer.set_thresholds(self.thresholds)
+                    self.renderer.set_noise_gate(self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
+                    self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
+                    self.renderer.set_effects(self.effects)
+                    
+                    # Обновляем активные состояния
+                    active_states = {state: var.get() for state, var in self.state_vars.items()}
+                    self.renderer.set_active_states(active_states)
+                    
+                    # Запускаем рендерер
+                    self.renderer.start()
+                    self.renderer_was_started = True
+                    logger.info("Renderer started for web server")
+                except Exception as e:
+                    logger.error(f"Error starting renderer: {e}")
             
             try:
                 self.webserver.start()
                 self.server_btn.config(text="⏹️ Остановить веб-сервер")
-                self.link_btn.config(state="normal")  # Активируем кнопку ссылки
+                self.link_btn.config(state="normal")
                 logger.info("Web server started")
             except Exception as e:
                 logger.error(f"Error starting web server: {e}")
@@ -992,10 +1021,14 @@ class App:
             self.audio.stop()
         except Exception as e:
             logger.error(f"Error stopping audio: {e}")
-        try:
-            self.renderer.stop()
-        except Exception as e:
-            logger.error(f"Error stopping renderer: {e}")
+        
+        # Останавливаем рендерер только если он был запущен
+        if self.renderer_was_started:
+            try:
+                self.renderer.stop()
+            except Exception as e:
+                logger.error(f"Error stopping renderer: {e}")
+        
         if self.webserver:
             try:
                 self.webserver.stop()
