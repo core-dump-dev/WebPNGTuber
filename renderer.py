@@ -158,22 +158,20 @@ class Renderer:
                 continue
             
             try:
-                # Загружаем оригинальное изображение
-                img = Image.open(file_path).convert("RGBA")
+                # Загружаем оригинальное изображение БЕЗ конвертации
+                img = Image.open(file_path)
                 
-                # Ограничиваем размер для производительности
-                if img.width > 2048 or img.height > 2048:
-                    img.thumbnail((2048, 2048), Image.LANCZOS)
+                # Проверяем, является ли изображение анимированным GIF
+                is_animated = getattr(img, 'is_animated', False) and img.format == 'GIF'
                 
                 # Получаем параметры трансформации
                 scale = float(layer.get("scale", 1.0))
                 rotation = int(layer.get("rotation", 0))
                 flip_h = bool(layer.get("flip_horizontal", False))
                 flip_v = bool(layer.get("flip_vertical", False))
-                is_gif = bool(layer.get("is_gif", False))
                 
                 # Для GIF - сохраняем оригинал и все кадры
-                if is_gif and img.is_animated:
+                if is_animated:
                     # Сохраняем оригинальное GIF изображение
                     self._image_cache[layer.get("name")] = img.copy()
                     
@@ -186,7 +184,7 @@ class Renderer:
                     
                     try:
                         while True:
-                            # Копируем текущий кадр
+                            # Копируем текущий кадр и конвертируем в RGBA
                             frame = img.copy().convert("RGBA")
                             
                             # Применяем масштаб ПЕРВЫМ
@@ -226,7 +224,13 @@ class Renderer:
                     self._gif_last_update[layer.get("name")] = 0
                     
                 else:
-                    # Для статичных изображений
+                    # Для статичных изображений конвертируем в RGBA
+                    img = img.convert("RGBA")
+                    
+                    # Ограничиваем размер для производительности
+                    if img.width > 2048 or img.height > 2048:
+                        img.thumbnail((2048, 2048), Image.LANCZOS)
+                    
                     transformed = img.copy()
                     
                     # Применяем масштаб ПЕРВЫМ
@@ -254,6 +258,26 @@ class Renderer:
                     
             except Exception as e:
                 logger.error(f"Ошибка загрузки изображения {filename}: {e}")
+                # Создаем placeholder для пропущенного изображения
+                placeholder = Image.new("RGBA", (100, 100), (255, 0, 0, 128))
+                self._image_cache[layer.get("name")] = placeholder
+        
+        # Инициализация таймеров групп
+        for g in self.model.get("groups", []):
+            name = g.get("name")
+            if name not in self.group_blink_timers:
+                self.group_blink_timers[name] = time.time() + random.uniform(2.0, 6.0)
+                self.group_blink_until[name] = 0.0
+            
+            if g.get("random_effect", False):
+                self.group_random_timers[name] = time.time()
+                self.group_random_current[name] = None
+            
+            if g.get("blink_freq", 0.0) > 0.0:
+                self.group_blink_timers[name] = time.time() + random.uniform(0.5, 2.0)
+                self.group_blink_until[name] = 0.0
+        
+        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with size {self.width}x{self.height}")
         
         # Инициализация таймеров групп
         for g in self.model.get("groups", []):

@@ -24,7 +24,7 @@
   "mic_device": "",
   "idle_enabled": true,
   "idle_timeout": 5.0,
-  "current_slot": 1,
+  "current_slot": 2,
   "sections_state": {
     "thresh": true,
     "states": true,
