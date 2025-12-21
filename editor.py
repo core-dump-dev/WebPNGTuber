@@ -638,7 +638,7 @@ class ModelEditor(tk.Toplevel):
             setattr(self, f"{s}_menu", om)
         
         # Случайный эффект
-        random_frame = ttk.LabelFrame(groups_frame, text="Случайный эффект")
+        random_frame = ttk.LabelFrame(groups_tab, text="Случайный эффект")
         random_frame.pack(fill="x", pady=(0, 10))
         
         self.random_effect_var = tk.BooleanVar(value=False)
@@ -656,7 +656,7 @@ class ModelEditor(tk.Toplevel):
         ttk.Label(interval_frame, text="сек").pack(side="left")
         
         # Настройки моргания
-        blink_frame = ttk.LabelFrame(groups_frame, text="Настройки моргания")
+        blink_frame = ttk.LabelFrame(groups_tab, text="Настройки моргания")
         blink_frame.pack(fill="x", pady=(0, 10))
         
         freq_frame = ttk.Frame(blink_frame)
@@ -835,7 +835,7 @@ class ModelEditor(tk.Toplevel):
                 # Если это группа - рекурсивно обрабатываем ее
                 process_group(chosen)
             else:
-                # Если это с層 - добавляем только его в видимые
+                # Если это слой - добавляем только его в видимые
                 for ci in self.items:
                     if ci.layer.get("name") == chosen and ci.layer.get("group") == group_name and ci.visible:
                         visible_items.append(ci)
@@ -1510,6 +1510,11 @@ class ModelEditor(tk.Toplevel):
     def refresh_tree(self):
         """Обновляет дерево элементов"""
         try:
+            # Сохраняем текущее выделение
+            selected_ids = []
+            for ci in self.current_selection:
+                selected_ids.append(id(ci))
+            
             self._save_tree_state()
             
             self.tree.delete(*self.tree.get_children())
@@ -1585,6 +1590,15 @@ class ModelEditor(tk.Toplevel):
             
             self._restore_tree_state()
             
+            # Восстанавливаем выделение
+            self.current_selection = []
+            for ci in self.items:
+                if id(ci) in selected_ids:
+                    ci.layer["_selected"] = True
+                    self.current_selection.append(ci)
+                    # Выделяем в дереве
+                    self._select_item_in_tree(ci)
+            
         except Exception as e:
             logger.error(f"Error refreshing tree: {e}")
     
@@ -1623,6 +1637,35 @@ class ModelEditor(tk.Toplevel):
             if id(ci) == item_id:
                 return ci
         return None
+    
+    def _select_item_in_tree(self, canvas_item):
+        """Выделяет элемент в дереве по CanvasItem"""
+        # Находим ID элемента в дереве
+        for item_id in self.tree.get_children():
+            values = self.tree.item(item_id, "values")
+            if values and values[0] == "item":
+                item_id_int = int(values[1])
+                if item_id_int == id(canvas_item):
+                    self.tree.selection_set(item_id)
+                    self.tree.focus(item_id)
+                    # Прокручиваем к выбранному элементу
+                    self.tree.see(item_id)
+                    return
+        
+        # Проверяем дочерние элементы (для элементов в группах)
+        for parent_id in self.tree.get_children():
+            for child_id in self.tree.get_children(parent_id):
+                values = self.tree.item(child_id, "values")
+                if values and values[0] == "item":
+                    item_id_int = int(values[1])
+                    if item_id_int == id(canvas_item):
+                        self.tree.selection_set(child_id)
+                        self.tree.focus(child_id)
+                        # Раскрываем родительскую группу
+                        self.tree.item(parent_id, open=True)
+                        # Прокручиваем к выбранному элементу
+                        self.tree.see(child_id)
+                        return
     
     def on_tree_select(self, event=None):
         """Обработчик выбора в дереве"""
@@ -1663,8 +1706,8 @@ class ModelEditor(tk.Toplevel):
                             ci.layer["_selected"] = True
                             selected_items.add(ci)
                 elif item_values[0] == "item":
-                    item_id = int(item_values[1])
-                    ci = self._get_item_by_id(item_id)
+                    item_id_int = int(item_values[1])
+                    ci = self._get_item_by_id(item_id_int)
                     if ci:
                         ci.layer["_selected"] = True
                         selected_items.add(ci)
@@ -2772,6 +2815,7 @@ class ModelEditor(tk.Toplevel):
         self.current_selection = []
         self.drag_data = {"item": None, "x": mx, "y": my, "group_items": []}
         found = None
+        found_items = []  # Собираем все элементы под курсором
         
         # Ищем элемент под курсором (с конца для правильного Z-порядка)
         for ci in reversed(self.items):
@@ -2795,22 +2839,29 @@ class ModelEditor(tk.Toplevel):
                 
                 # Проверяем прозрачность пикселя
                 try:
+                    is_opaque = False
                     if img.mode == 'RGBA':
                         pixel_x = int((event.x - canvas_x1) - pos_x)
                         pixel_y = int((event.y - canvas_y1) - pos_y)
                         
                         if 0 <= pixel_x < img.width and 0 <= pixel_y < img.height:
                             pixel = img.getpixel((pixel_x, pixel_y))
-                            if len(pixel) >= 4 and pixel[3] > 0:
-                                found = ci
-                                break
+                            if len(pixel) >= 4 and pixel[3] > 10:  # Порог прозрачности
+                                is_opaque = True
                     else:
-                        found = ci
-                        break
+                        # Для непрозрачных форматов всегда считаем непрозрачным
+                        is_opaque = True
+                    
+                    if is_opaque:
+                        found_items.append(ci)  # Добавляем в список
+                        
                 except Exception as e:
                     logger.error(f"Error checking pixel: {e}")
-                    found = ci
-                    break
+                    found_items.append(ci)  # В случае ошибки тоже добавляем
+        
+        # ВЫБИРАЕМ САМЫЙ ВЕРХНИЙ НЕПРОЗРАЧНЫЙ ЭЛЕМЕНТ
+        if found_items:
+            found = found_items[0]  # Берем первый (самый верхний) элемент
         
         if found:
             # Выделяем элемент
@@ -2827,16 +2878,20 @@ class ModelEditor(tk.Toplevel):
             self.drag_data["item"] = found
             self.drag_data["group_items"] = self.current_selection.copy()
             
-            self._save_tree_state()
-            self.tree_state["preserve_selection"] = True
+            # ВЫДЕЛЯЕМ ЭЛЕМЕНТ В ДЕРЕВЕ
+            self._select_item_in_tree(found)
             
-            self.refresh_tree()
+            # Загружаем свойства элемента
+            if self.current_selection:
+                self.load_item_props(self.current_selection[0])
         else:
             # Сбрасываем выделение
             self.selected_group = None
             self.group_label.config(text="(нет группы)")
             self.clear_props_fields()
-            self.refresh_tree()
+            
+            # СНИМАЕМ ВЫДЕЛЕНИЕ В ДЕРЕВЕ
+            self.tree.selection_remove(self.tree.selection())
         
         self._canvas_cache_valid = False
         self.redraw_canvas()
