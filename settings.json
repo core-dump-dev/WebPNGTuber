@@ -12,19 +12,19 @@
     "shout": true
   },
   "effects": {
-    "shake": true,
-    "bounce": true,
-    "pulse": true,
+    "shake": false,
+    "bounce": false,
+    "pulse": false,
     "blink": true,
     "random_effect": true
   },
   "sensitivity": 1.5,
   "noise_gate_enabled": true,
   "noise_gate_threshold": 0.01,
-  "mic_device": "",
+  "mic_device": "\u041f\u0435\u0440\u0435\u043d\u0430\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0437\u0432\u0443\u043a\u043e\u0432\u044b\u0445 \u0443\u0441\u0442\u0440. - Input",
   "idle_enabled": true,
   "idle_timeout": 5.0,
-  "current_slot": 1,
+  "current_slot": 2,
   "sections_state": {
     "thresh": true,
     "states": true,
