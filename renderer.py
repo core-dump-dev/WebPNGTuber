@@ -148,11 +148,30 @@ class Renderer:
         self._gif_current_frame.clear()
         self._gif_last_update.clear()
         
-        self.layers_by_name = {l.get('name'): l for l in self.model.get('layers', [])}
+        # ВАЖНОЕ ИСПРАВЛЕНИЕ: используем индекс как часть ключа для одинаковых имен
+        self.layers_by_name = {}
+        for idx, layer in enumerate(self.model.get('layers', [])):
+            layer_name = layer.get('name')
+            if not layer_name:
+                continue
+                
+            # Если имя уже существует, добавляем индекс для уникальности
+            unique_name = layer_name
+            counter = 1
+            while unique_name in self.layers_by_name:
+                unique_name = f"{layer_name}_{counter}"
+                counter += 1
+                
+            # Создаем копию слоя с уникальным именем для внутреннего использования
+            layer_copy = layer.copy()
+            layer_copy['_unique_name'] = unique_name
+            layer_copy['_original_index'] = idx  # Сохраняем оригинальный индекс
+            self.layers_by_name[unique_name] = layer_copy
+        
         self.groups_by_name = {g.get('name'): g for g in self.model.get('groups', [])}
         
         # Предзагрузка и кэширование изображений
-        for layer in self.model.get("layers", []):
+        for idx, layer in enumerate(self.model.get("layers", [])):
             filename = layer.get("file")
             if not filename:
                 continue
@@ -162,6 +181,18 @@ class Renderer:
                 continue
             
             try:
+                # Находим уникальное имя для этого слоя
+                layer_name = layer.get("name")
+                unique_name = None
+                for uname, ldata in self.layers_by_name.items():
+                    if ldata.get('name') == layer_name and ldata.get('_original_index') == idx:
+                        unique_name = uname
+                        break
+                
+                if not unique_name:
+                    logger.warning(f"Не найден уникальный ключ для слоя {layer_name}, индекс {idx}")
+                    continue
+                    
                 # Загружаем оригинальное изображение БЕЗ конвертации
                 img = Image.open(file_path)
                 
@@ -177,7 +208,7 @@ class Renderer:
                 # Для GIF - сохраняем оригинал и все кадры
                 if is_animated:
                     # Сохраняем оригинальное GIF изображение
-                    self._image_cache[layer.get("name")] = img.copy()
+                    self._image_cache[unique_name] = img.copy()
                     
                     # Извлекаем все кадры GIF
                     frames = []
@@ -222,10 +253,10 @@ class Renderer:
                         pass
                     
                     # Сохраняем кадры GIF
-                    self._gif_frames[layer.get("name")] = frames
-                    self._gif_frame_times[layer.get("name")] = frame_times
-                    self._gif_current_frame[layer.get("name")] = 0
-                    self._gif_last_update[layer.get("name")] = 0
+                    self._gif_frames[unique_name] = frames
+                    self._gif_frame_times[unique_name] = frame_times
+                    self._gif_current_frame[unique_name] = 0
+                    self._gif_last_update[unique_name] = time.time()
                     
                 else:
                     # Для статичных изображений конвертируем в RGBA
@@ -254,17 +285,17 @@ class Renderer:
                         transformed = transformed.rotate(rotation, expand=True, resample=Image.BICUBIC)
                     
                     # Кэшируем трансформированное изображение
-                    cache_key = f"{layer.get('name')}_{scale}_{rotation}_{flip_h}_{flip_v}"
+                    cache_key = f"{unique_name}_{scale}_{rotation}_{flip_h}_{flip_v}"
                     self._transformed_cache[cache_key] = transformed
                     
                     # Сохраняем в основной кэш
-                    self._image_cache[layer.get("name")] = transformed
+                    self._image_cache[unique_name] = transformed
                     
             except Exception as e:
                 logger.error(f"Ошибка загрузки изображения {filename}: {e}")
                 # Создаем placeholder для пропущенного изображения
                 placeholder = Image.new("RGBA", (100, 100), (255, 0, 0, 128))
-                self._image_cache[layer.get("name")] = placeholder
+                self._image_cache[unique_name] = placeholder
         
         # Инициализация таймеров групп
         for g in self.model.get("groups", []):
@@ -283,22 +314,10 @@ class Renderer:
         
         logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with size {self.width}x{self.height}")
         
-        # Инициализация таймеров групп
-        for g in self.model.get("groups", []):
-            name = g.get("name")
-            if name not in self.group_blink_timers:
-                self.group_blink_timers[name] = time.time() + random.uniform(2.0, 6.0)
-                self.group_blink_until[name] = 0.0
-            
-            if g.get("random_effect", False):
-                self.group_random_timers[name] = time.time()
-                self.group_random_current[name] = None
-            
-            if g.get("blink_freq", 0.0) > 0.0:
-                self.group_blink_timers[name] = time.time() + random.uniform(0.5, 2.0)
-                self.group_blink_until[name] = 0.0
-        
-        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with size {self.width}x{self.height}")
+        # Инициализация таймеров групп (дублирование удалено)
+        logger.info(f"Total layers loaded: {len(self.layers_by_name)}")
+        for uname, layer in self.layers_by_name.items():
+            logger.debug(f"  - {uname}: {layer.get('name')} at ({layer.get('x')}, {layer.get('y')})")
     
     def set_audio_level(self, level):
         # Быстрая реакция на изменения уровня без задержек
@@ -348,6 +367,15 @@ class Renderer:
         if now - self._visible_layers_cache_time < self._cache_ttl and self._visible_layers_cache:
             return self._visible_layers_cache
         
+        # Создаем маппинг оригинальных имен на уникальные
+        name_to_unique = {}
+        for unique_name, layer_data in self.layers_by_name.items():
+            orig_name = layer_data.get('name')
+            if orig_name:
+                if orig_name not in name_to_unique:
+                    name_to_unique[orig_name] = []
+                name_to_unique[orig_name].append(unique_name)
+        
         # Сначала собираем все слои, которые должны быть видны согласно логике групп
         visible_layer_names = set()
         processed_groups = set()
@@ -368,11 +396,15 @@ class Renderer:
             
             # Если состояние не определено, показываем все видимые слои группы
             if not chosen:
-                for layer in self.model.get("layers", []):
-                    if layer.get("group") == group_name and layer.get("visible", True):
-                        layer_name = layer.get("name")
-                        if layer_name:
-                            visible_layer_names.add(layer_name)
+                for layer in self.model.get('layers', []):
+                    if layer.get('group') == group_name and layer.get('visible', True):
+                        layer_name = layer.get('name')
+                        if layer_name and layer_name in name_to_unique:
+                            for unique_name in name_to_unique[layer_name]:
+                                # Проверяем, что это именно тот слой (по оригинальным данным)
+                                layer_data = self.layers_by_name[unique_name]
+                                if layer_data.get('_original_index') == self.model.get('layers', []).index(layer):
+                                    visible_layer_names.add(unique_name)
                 return
                 
             # Проверяем, является ли chosen группой или слоем
@@ -380,28 +412,38 @@ class Renderer:
                 # Если это группа - рекурсивно обрабатываем ее
                 process_group(chosen)
             else:
-                # Если это слой - добавляем его в видимые
-                if chosen and chosen in self.layers_by_name:
-                    visible_layer_names.add(chosen)
+                # Если это слой - добавляем все его варианты в видимые
+                if chosen and chosen in name_to_unique:
+                    for unique_name in name_to_unique[chosen]:
+                        visible_layer_names.add(unique_name)
         
         # Обрабатываем корневые группы (без родителя)
-        root_groups = [name for name, g in self.groups_by_name.items() if not g.get("parent")]
+        root_groups = [name for name, g in self.groups_by_name.items() if not g.get('parent')]
         for group_name in root_groups:
             process_group(group_name)
             
         # Добавляем элементы без групп
-        for layer in self.model.get("layers", []):
-            if not layer.get("group") and layer.get("visible", True):
-                layer_name = layer.get("name")
-                if layer_name:
-                    visible_layer_names.add(layer_name)
+        for layer in self.model.get('layers', []):
+            if not layer.get('group') and layer.get('visible', True):
+                layer_name = layer.get('name')
+                if layer_name and layer_name in name_to_unique:
+                    for unique_name in name_to_unique[layer_name]:
+                        # Проверяем, что это именно тот слой (по оригинальным данным)
+                        layer_data = self.layers_by_name[unique_name]
+                        if layer_data.get('_original_index') == self.model.get('layers', []).index(layer):
+                            visible_layer_names.add(unique_name)
         
         # Сортируем согласно порядку в model["layers"]
         ordered_visible_layers = []
-        for layer in self.model.get("layers", []):
-            layer_name = layer.get("name")
-            if layer_name in visible_layer_names and layer.get("visible", True):
-                ordered_visible_layers.append(layer_name)
+        for layer in self.model.get('layers', []):
+            layer_name = layer.get('name')
+            if layer_name and layer_name in name_to_unique:
+                for unique_name in name_to_unique[layer_name]:
+                    # Проверяем, что это именно тот слой (по оригинальным данным)
+                    layer_data = self.layers_by_name[unique_name]
+                    if (layer_data.get('_original_index') == self.model.get('layers', []).index(layer) and
+                        unique_name in visible_layer_names):
+                        ordered_visible_layers.append(unique_name)
         
         # Обновляем кэш
         self._visible_layers_cache = ordered_visible_layers
@@ -567,13 +609,13 @@ class Renderer:
             visible_layers = self._get_visible_layers()
             
             # Отрисовываем видимые слои в правильном порядке
-            for layer_name in visible_layers:
-                image = self._get_layer_image(layer_name)
+            for unique_name in visible_layers:
+                image = self._get_layer_image(unique_name)
                 if not image:
                     continue
                 
-                layer = self.layers_by_name.get(layer_name)
-                if not layer:
+                layer_data = self.layers_by_name.get(unique_name)
+                if not layer_data:
                     continue
                 
                 # Сохраняем оригинал для эффектов
@@ -597,13 +639,13 @@ class Renderer:
                     image = image.resize(new_size, Image.LANCZOS)
                 
                 # Позиционирование (центрируем изображение) с учетом эффектов
-                px = (self.width - image.width) // 2 + int(layer.get("x", 0)) + offset_x
-                py = (self.height - image.height) // 2 + int(layer.get("y", 0)) + offset_y
+                px = (self.width - image.width) // 2 + int(layer_data.get("x", 0)) + offset_x
+                py = (self.height - image.height) // 2 + int(layer_data.get("y", 0)) + offset_y
                 
                 try:
                     frame_image.alpha_composite(image, (px, py))
                 except Exception as e:
-                    logger.error(f"Ошибка композиции слоя {layer_name}: {e}")
+                    logger.error(f"Ошибка композиции слоя {unique_name}: {e}")
         
             # Применяем idle-режим
             if self.idle_enabled:
