@@ -156,26 +156,23 @@ class App:
         for r in range(3):
             for c in range(2):
                 idx = r*2 + c
-                preview_path = os.path.join(MODELS_DIR, f"slot{idx+1}", "preview.png")
-                photo = None
-                if os.path.exists(preview_path):
-                    try:
-                        img = Image.open(preview_path)
-                        # Увеличиваем превью и убираем лишние паддинги
-                        img.thumbnail((85, 85), Image.LANCZOS)  # Увеличили превью
-                        photo = ImageTk.PhotoImage(img)
-                        self.slot_previews[idx] = photo
-                    except:
-                        photo = None
-
+                
+                # Загружаем превью для каждого слота
+                photo = self.load_preview_for_slot(idx)
+                
                 # Создаем фрейм для кнопки с минимумом паддингов
                 btn_frame = ttk.Frame(slots_grid)
                 btn_frame.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
                 
                 btn = ttk.Button(btn_frame, text=f"Слот {idx+1}", 
-                                 image=photo, compound="top",
-                                 command=lambda i=idx: self.load_slot(i))
-                btn.pack(fill="both", expand=True, padx=0, pady=0)  # Минимальные паддинги
+                                image=photo, compound="top",
+                                command=lambda i=idx: self.load_slot(i))
+                btn.pack(fill="both", expand=True, padx=0, pady=0)
+                
+                # Сохраняем ссылку на изображение
+                if photo:
+                    btn.photo = photo
+                    
                 self.model_slots.append(btn)
         
         # Равномерное распределение кнопок
@@ -498,6 +495,23 @@ class App:
         # Завершаем инициализацию
         self.initializing = False
 
+    def load_preview_for_slot(self, slot_idx):
+        """Загрузка превью для слота"""
+        preview_path = os.path.join(MODELS_DIR, f"slot{slot_idx+1}", "preview.png")
+        
+        if os.path.exists(preview_path):
+            try:
+                img = Image.open(preview_path)
+                img.thumbnail((85, 85), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                self.slot_previews[slot_idx] = photo
+                return photo
+            except Exception as e:
+                logger.error(f"Error loading preview for slot {slot_idx+1}: {e}")
+                return None
+        
+        return None
+
     def on_audio_level(self, level):
         """Оптимизированная обработка уровня аудио"""
         now = time.time()
@@ -533,13 +547,12 @@ class App:
 
     def refresh_slot_buttons(self):
         """Оптимизированное обновление кнопок слотов"""
-        # Обновляем только видимые слоты
         for idx in range(6):
             if idx < len(self.model_slots):
                 self._update_single_slot(idx)
-    
+
     def _update_single_slot(self, idx):
-        """Обновление одного слота (отложенное)"""
+        """Обновление одного слота"""
         def update():
             try:
                 slot_dir = os.path.join(MODELS_DIR, f"slot{idx+1}")
@@ -559,11 +572,18 @@ class App:
                         btn.config(text=f"{prefix}Слот {idx+1}\n(ошибка)")
                 else:
                     btn.config(text=f"{prefix}Слот {idx+1}\n(пустой)")
+                
+                # Обновляем превью
+                photo = self.load_preview_for_slot(idx)
+                if photo:
+                    btn.config(image=photo)
+                    btn.photo = photo  # Сохраняем ссылку
+                    
             except Exception as e:
                 logger.debug(f"Slot update error: {e}")
         
-        # Отложенное обновление для снижения нагрузки
-        self.root.after(idx * 50, update)  # Смещение по времени
+        # Отложенное обновление
+        self.root.after(idx * 50, update)
 
     def open_web_link(self):
         """Открытие ссылки веб-сервера в браузере"""
@@ -872,31 +892,20 @@ class App:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.renderer.load_model(data, slot_dir)
-            # Обновляем веб-сервер, если он запущен
             if self.webserver:
-                self.webserver.renderer = self.renderer  # Просто обновляем ссылку на рендерер
+                self.webserver.renderer = self.renderer
 
         # Устанавливаем текущий слот
         self.current_slot = idx + 1
         
-        # Обновляем текст кнопок слотов
+        # Обновляем кнопки слотов и превью
         self.refresh_slot_buttons()
         
-        # Автоматическое сохранение
+        # Сохраняем настройки
         self.save_settings()
 
         model_name = self.renderer.model.get('name','модель')
-        preview_path = os.path.join(slot_dir, "preview.png")
-        if os.path.exists(preview_path):
-            try:
-                img = Image.open(preview_path)
-                img.thumbnail((85, 85), Image.LANCZOS)  # Увеличили превью
-                photo = ImageTk.PhotoImage(img)
-                self.slot_previews[idx] = photo
-                self.model_slots[idx].config(image=photo)
-            except Exception as e:
-                logger.error(f"Error loading preview for slot {idx+1}: {e}")
-
+        
         if not silent:
             logger.info(f"Model loaded from slot {idx+1}: {model_name}")
             messagebox.showinfo("Загружено", f"Модель загружена из слота {idx+1}")
