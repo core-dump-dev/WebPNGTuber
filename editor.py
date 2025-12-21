@@ -68,6 +68,7 @@ class CanvasItem:
         self.flip_horizontal = bool(layer.get("flip_horizontal", False))
         self.flip_vertical = bool(layer.get("flip_vertical", False))
         self.visible = bool(layer.get("visible", True))
+        self.alpha = float(layer.get("alpha", 1.0))  # <--- ДОБАВЛЕНО: Прозрачность
         
         # Кэширование изображений для разных уровней зума
         self._zoom_cache = {}
@@ -146,7 +147,7 @@ class CanvasItem:
         return self._original_image
     
     @lru_cache(maxsize=10)
-    def _get_transformed_image_cached(self, zoom_level, scale, rotation, flip_h, flip_v, frame_idx=0):
+    def _get_transformed_image_cached(self, zoom_level, scale, rotation, flip_h, flip_v, frame_idx=0, alpha=1.0):
         """Кэшированное получение трансформированного изображения"""
         # Получаем текущее изображение
         if self.is_gif and self.gif_frames:
@@ -173,7 +174,14 @@ class CanvasItem:
         if rotation != 0:
             img = img.rotate(rotation, expand=True, resample=Image.BICUBIC)
         
-        # 4. Зум для отображения (только для редактора)
+        # 4. Применяем прозрачность (если не 1.0)
+        if alpha < 1.0:
+            if img.mode == 'RGBA':
+                r, g, b, a = img.split()
+                a = a.point(lambda x: int(x * alpha))
+                img = Image.merge('RGBA', (r, g, b, a))
+        
+        # 5. Зум для отображения (только для редактора)
         if zoom_level != 1.0:
             final_width = max(1, int(img.width * zoom_level))
             final_height = max(1, int(img.height * zoom_level))
@@ -184,14 +192,14 @@ class CanvasItem:
     def _get_transformed_image(self, zoom_level=1.0):
         """Получает трансформированное изображение для заданного уровня зума"""
         logger.debug(f"Getting transformed image: scale={self.scale}, rotation={self.rotation}, "
-                     f"flip_h={self.flip_horizontal}, flip_v={self.flip_vertical}, zoom={zoom_level}")
+                     f"flip_h={self.flip_horizontal}, flip_v={self.flip_vertical}, zoom={zoom_level}, alpha={self.alpha}")
         
         # Для GIF сначала обновляем текущий кадр
         if self.is_gif and self.gif_frames:
             self._update_gif_frame()
         
         # Проверяем кэш
-        cache_key = f"{zoom_level:.2f}_{self.scale}_{self.rotation}_{self.flip_horizontal}_{self.flip_vertical}"
+        cache_key = f"{zoom_level:.2f}_{self.scale}_{self.rotation}_{self.flip_horizontal}_{self.flip_vertical}_{self.alpha}"
         
         if self.is_gif:
             # Для GIF добавляем номер кадра в ключ кэша
@@ -231,7 +239,15 @@ class CanvasItem:
         if self.rotation != 0:
             img = img.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
         
-        # 4. Зум для отображения (только для редактора)
+        # 4. Применяем прозрачность (если не 1.0)
+        if self.alpha < 1.0:
+            if img.mode == 'RGBA':
+                # Создаем новое изображение с измененной прозрачностью
+                r, g, b, a = img.split()
+                a = a.point(lambda x: int(x * self.alpha))
+                img = Image.merge('RGBA', (r, g, b, a))
+        
+        # 5. Зум для отображения (только для редактора)
         if zoom_level != 1.0:
             final_width = max(1, int(img.width * zoom_level))
             final_height = max(1, int(img.height * zoom_level))
@@ -584,6 +600,12 @@ class ModelEditor(tk.Toplevel):
         self.rotation_entry.bind("<Return>", self.apply_props_from_entry)
         self.rotation_entry.bind("<FocusIn>", lambda e: "break")
         
+        ttk.Label(grid_frame, text="Прозрачность:").grid(row=5, column=0, sticky="w", padx=2, pady=2)  # <--- ДОБАВЛЕНО: Поле прозрачности
+        self.alpha_entry = ttk.Entry(grid_frame)
+        self.alpha_entry.grid(row=5, column=1, sticky="ew", padx=2, pady=2)
+        self.alpha_entry.bind("<Return>", self.apply_props_from_entry)
+        self.alpha_entry.bind("<FocusIn>", lambda e: "break")
+        
         # Зеркалирование
         mirror_frame = ttk.Frame(props)
         mirror_frame.pack(fill="x", padx=5, pady=2)
@@ -618,7 +640,7 @@ class ModelEditor(tk.Toplevel):
         self.group_label.pack(side="left")
         
         # Настройки логики
-        logic_frame = ttk.LabelFrame(groups_frame, text="Состояние → Слой/Группа")
+        logic_frame = ttk.LabelFrame(groups_frame, text="Состояния → Слой/Группа")
         logic_frame.pack(fill="x", pady=(0, 10))
         
         self.state_vars = {
@@ -885,6 +907,7 @@ class ModelEditor(tk.Toplevel):
                 'flip_horizontal': ci.flip_horizontal,
                 'flip_vertical': ci.flip_vertical,
                 'visible': ci.visible,
+                'alpha': ci.alpha,  # <--- ДОБАВЛЕНО: Сохранение прозрачности
                 'is_gif': ci.is_gif,
                 'image_path': ci.image_path
             }
@@ -962,6 +985,7 @@ class ModelEditor(tk.Toplevel):
                 ci.flip_horizontal = item_state['flip_horizontal']
                 ci.flip_vertical = item_state['flip_vertical']
                 ci.visible = item_state['visible']
+                ci.alpha = item_state.get('alpha', 1.0)  # <--- ДОБАВЛЕНО: Загрузка прозрачности
                 ci.is_gif = item_state['is_gif']
                 self.items.append(ci)
             
@@ -1094,6 +1118,7 @@ class ModelEditor(tk.Toplevel):
                         "is_gif": ci.is_gif,
                         "scale": float(ci.scale),
                         "rotation": int(ci.rotation),
+                        "alpha": float(ci.alpha),  # <--- ДОБАВЛЕНО: Экспорт прозрачности
                         "group": layer.get("group", None),
                         "flip_horizontal": bool(ci.flip_horizontal),
                         "flip_vertical": bool(ci.flip_vertical)
@@ -1154,6 +1179,13 @@ class ModelEditor(tk.Toplevel):
                     
                     if ci.rotation != 0:
                         img = img.rotate(ci.rotation, expand=True, resample=Image.BICUBIC)
+                    
+                    # Применяем прозрачность
+                    if ci.alpha < 1.0:
+                        if img.mode == 'RGBA':
+                            r, g, b, a = img.split()
+                            a = a.point(lambda x: int(x * ci.alpha))
+                            img = Image.merge('RGBA', (r, g, b, a))
                     
                     px = center_x - img.size[0] // 2 + int(ci.x)
                     py = center_y - img.size[1] // 2 + int(ci.y)
@@ -1647,6 +1679,9 @@ class ModelEditor(tk.Toplevel):
         
         if ci.scale != 1.0:
             flags.append(f"⤢{ci.scale}")
+        
+        if ci.alpha < 1.0:  # <--- ДОБАВЛЕНО: Отображение прозрачности
+            flags.append(f"α{ci.alpha:.1f}")
         
         flag_text = f" ({', '.join(flags)})" if flags else ""
         return f"{name}{flag_text}"
@@ -2301,6 +2336,7 @@ class ModelEditor(tk.Toplevel):
             layer["is_gif"] = ci.is_gif
             layer["scale"] = float(ci.scale)
             layer["rotation"] = int(ci.rotation)
+            layer["alpha"] = float(ci.alpha)  # <--- ДОБАВЛЕНО: Сохранение прозрачности
             layer["flip_horizontal"] = bool(ci.flip_horizontal)
             layer["flip_vertical"] = bool(ci.flip_vertical)
             
@@ -2531,6 +2567,13 @@ class ModelEditor(tk.Toplevel):
                     if ci.rotation != 0:
                         img = img.rotate(ci.rotation, expand=True, resample=Image.BICUBIC)
                     
+                    # 4. Применяем прозрачность
+                    if ci.alpha < 1.0:
+                        if img.mode == 'RGBA':
+                            r, g, b, a = img.split()
+                            a = a.point(lambda x: int(x * ci.alpha))
+                            img = Image.merge('RGBA', (r, g, b, a))
+                    
                     # Рассчитываем позицию
                     px = center_x - img.size[0] // 2 + int(ci.x)
                     py = center_y - img.size[1] // 2 + int(ci.y)
@@ -2594,6 +2637,7 @@ class ModelEditor(tk.Toplevel):
                     "y": 0,
                     "scale": 1.0,
                     "rotation": 0,
+                    "alpha": 1.0,  # <--- ДОБАВЛЕНО: Значение прозрачности по умолчанию
                     "group": None,
                     "is_gif": is_gif,
                     "flip_horizontal": False,
@@ -2642,6 +2686,7 @@ class ModelEditor(tk.Toplevel):
         self.y_entry.delete(0, "end")
         self.scale_entry.delete(0, "end")
         self.rotation_entry.delete(0, "end")
+        self.alpha_entry.delete(0, "end")  # <--- ДОБАВЛЕНО: Очистка поля прозрачности
         self.flip_h_var.set(False)
         self.flip_v_var.set(False)
         self.visible_var.set(True)
@@ -2663,6 +2708,9 @@ class ModelEditor(tk.Toplevel):
             
             self.rotation_entry.delete(0, "end")
             self.rotation_entry.insert(0, str(ci.rotation))
+            
+            self.alpha_entry.delete(0, "end")  # <--- ДОБАВЛЕНО: Загрузка прозрачности
+            self.alpha_entry.insert(0, str(ci.alpha))
             
             self.flip_h_var.set(bool(ci.flip_horizontal))
             self.flip_v_var.set(bool(ci.flip_vertical))
@@ -2700,6 +2748,17 @@ class ModelEditor(tk.Toplevel):
                 ci.rotation = int(self.rotation_entry.get().strip())
             except ValueError:
                 messagebox.showwarning("Ошибка", "Масштаб должен быть дробным числом, поворот - целым")
+                return
+            
+            # Прозрачность
+            try:
+                alpha = float(self.alpha_entry.get().strip())
+                if alpha < 0.0 or alpha > 1.0:
+                    messagebox.showwarning("Ошибка", "Прозрачность должна быть от 0.0 до 1.0")
+                    return
+                ci.alpha = alpha
+            except ValueError:
+                messagebox.showwarning("Ошибка", "Прозрачность должна быть числом")
                 return
             
             # Видимость и отражение
@@ -2840,7 +2899,7 @@ class ModelEditor(tk.Toplevel):
         
         # Обновляем все меню для состояний
         for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
-            menu_widget = getattr(self, f"{state}_menu")
+            menu_widget = getattr(self, f"{s}_menu")
             menu = menu_widget['menu']
             menu.delete(0, 'end')
             var = self.state_vars[state]
@@ -3055,6 +3114,7 @@ class ModelEditor(tk.Toplevel):
                         "y": 0,
                         "scale": 1.0,
                         "rotation": 0,
+                        "alpha": 1.0,  # <--- ДОБАВЛЕНО: Прозрачность по умолчанию
                         "group": None,
                         "is_gif": is_gif,
                         "flip_horizontal": False,
@@ -3205,6 +3265,7 @@ class ModelEditor(tk.Toplevel):
                                 "is_gif": ci.is_gif,
                                 "scale": float(ci.scale),
                                 "rotation": int(ci.rotation),
+                                "alpha": float(ci.alpha),  # <--- ДОБАВЛЕНО: Сохранение прозрачности в автосохранении
                                 "group": ci.layer.get("group", None),
                                 "flip_horizontal": bool(ci.flip_horizontal),
                                 "flip_vertical": bool(ci.flip_vertical)
