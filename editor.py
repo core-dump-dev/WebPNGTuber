@@ -604,6 +604,7 @@ class ModelEditor(tk.Toplevel):
         self.visible_cb.pack(anchor="w", padx=5, pady=(0, 5))
         
         ttk.Button(props, text="Применить к выбранному", command=self.apply_props).pack(fill="x", padx=5, pady=5)
+        ttk.Button(props, text="- Удалить выбранные", command=self.delete_selected_items).pack(fill="x", padx=5, pady=5)
         
         # ---- Вкладка "Логика групп" ----
         groups_frame = ttk.LabelFrame(groups_tab, text="Логика групп")
@@ -1799,6 +1800,54 @@ class ModelEditor(tk.Toplevel):
         logger.info("Sent selection backward")
         self.save_to_history("Перемещение назад")
     
+    def delete_selected_items(self):
+        """Удаляет выбранные элементы с холста"""
+        if not self.current_selection:
+            messagebox.showwarning("Нет выбора", "Сначала выберите элемент(ы)")
+            return
+        
+        confirm = messagebox.askyesno(
+            "Удаление элементов",
+            f"Вы уверены, что хотите удалить {len(self.current_selection)} выбранных элементов?"
+        )
+        
+        if not confirm:
+            return
+        
+        # Удаляем выбранные элементы из списка items
+        items_to_remove = set(self.current_selection)
+        self.items = [ci for ci in self.items if ci not in items_to_remove]
+        
+        # Удаляем соответствующие слои из модели
+        layer_names_to_remove = {ci.layer.get("name") for ci in items_to_remove}
+        self.model["layers"] = [layer for layer in self.model.get("layers", []) 
+                               if layer.get("name") not in layer_names_to_remove]
+        
+        # Обновляем группы: удаляем ссылки на удаленные слои
+        for group in self.model.get("groups", []):
+            if "children" in group:
+                group["children"] = [child for child in group["children"] 
+                                   if child not in layer_names_to_remove]
+        
+        # Сбрасываем выделение
+        for ci in self.current_selection:
+            if hasattr(ci, '_tk_images'):
+                ci._tk_images.clear()
+        
+        self.current_selection = []
+        self.clear_props_fields()
+        
+        # Обновляем интерфейс
+        self._save_tree_state()
+        self.tree_state["preserve_selection"] = False
+        
+        self.refresh_tree()
+        self._canvas_cache_valid = False
+        self.redraw_canvas()
+        
+        logger.info(f"Deleted {len(items_to_remove)} selected items")
+        self.save_to_history("Удаление выбранных элементов")
+    
     def apply_group_logic(self):
         """Применяет логику группы"""
         if not self.selected_group:
@@ -2584,7 +2633,6 @@ class ModelEditor(tk.Toplevel):
             icon = "GIF" if is_gif else "PNG"
             ttk.Label(row, text=f"{icon}: {fname}", width=20).pack(side="left", padx=2)
             ttk.Button(row, text="+", width=2, command=lambda f=fname: self.add_to_canvas(f)).pack(side="left", padx=2)
-            ttk.Button(row, text="-", width=2, command=lambda f=fname: self.remove_from_canvas_by_file(f)).pack(side="left", padx=2)
             ttk.Button(row, text="🗑️", width=2, command=lambda f=fname: self.delete_file(f)).pack(side="left", padx=2)
     
     def clear_props_fields(self):
