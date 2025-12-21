@@ -588,8 +588,10 @@ class ModelEditor(tk.Toplevel):
                        command=self.on_mirror_change)
         self.flip_v_cb.pack(side="left", padx=5)
         
+        # ВИДИМОСТЬ
         self.visible_var = tk.BooleanVar(value=True)
-        self.visible_cb = ttk.Checkbutton(props, text="Видимый", variable=self.visible_var)
+        self.visible_cb = ttk.Checkbutton(props, text="Видимый", variable=self.visible_var,
+                                         command=self.on_visible_change)
         self.visible_cb.pack(anchor="w", padx=5, pady=(0, 5))
         
         ttk.Button(props, text="Применить к выбранному", command=self.apply_props).pack(fill="x", padx=5, pady=5)
@@ -1343,7 +1345,7 @@ class ModelEditor(tk.Toplevel):
             img_center_y = scaled_height // 2
             
             pos_x = canvas_x1 + img_center_x - img.width // 2 + int(ci.x * self.zoom_level)
-            pos_y = canvas_y1 + img_center_y - img.height // 2 + int(ci.y * self.zoom_level)
+            pos_y = canvas_x1 + img_center_y - img.height // 2 + int(ci.y * self.zoom_level)
             
             # Используем кэшированные PhotoImage, но для GIF не кэшируем
             if ci.is_gif:
@@ -1840,6 +1842,20 @@ class ModelEditor(tk.Toplevel):
         
         self._canvas_cache_valid = False
         self.redraw_canvas()
+        self.save_to_history("Изменение отражения")
+    
+    def on_visible_change(self):
+        """Обработчик изменения видимости"""
+        if not self.current_selection:
+            return
+        
+        for ci in self.current_selection:
+            ci.visible = self.visible_var.get()
+            ci.clear_cache()  # Очищаем кэш
+        
+        self._canvas_cache_valid = False
+        self.redraw_canvas()
+        self.save_to_history("Изменение видимости")
     
     def zoom_in(self):
         """Увеличивает масштаб"""
