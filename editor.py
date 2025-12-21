@@ -156,23 +156,24 @@ class CanvasItem:
         else:
             return Image.new("RGBA", (10, 10), (255, 0, 0, 128))
         
-        # ПРИМЕНЯЕМ МАСШТАБ К ОРИГИНАЛЬНОМУ ИЗОБРАЖЕНИЮ
+        # ПРАВИЛЬНЫЙ ПОРЯДОК ТРАНСФОРМАЦИЙ:
+        # 1. Масштаб элемента
         if scale != 1.0:
             new_width = max(1, int(img.width * scale))
             new_height = max(1, int(img.height * scale))
             img = img.resize((new_width, new_height), Image.LANCZOS)
         
-        # Отражение (применяется после масштабирования)
+        # 2. Отражение
         if flip_h:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
         if flip_v:
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
         
-        # Поворот
+        # 3. Поворот
         if rotation != 0:
             img = img.rotate(rotation, expand=True, resample=Image.BICUBIC)
         
-        # Масштаб зума (для отображения в редакторе)
+        # 4. Зум для отображения (только для редактора)
         if zoom_level != 1.0:
             final_width = max(1, int(img.width * zoom_level))
             final_height = max(1, int(img.height * zoom_level))
@@ -182,6 +183,9 @@ class CanvasItem:
 
     def _get_transformed_image(self, zoom_level=1.0):
         """Получает трансформированное изображение для заданного уровня зума"""
+        logger.debug(f"Getting transformed image: scale={self.scale}, rotation={self.rotation}, "
+                     f"flip_h={self.flip_horizontal}, flip_v={self.flip_vertical}, zoom={zoom_level}")
+        
         # Для GIF сначала обновляем текущий кадр
         if self.is_gif and self.gif_frames:
             self._update_gif_frame()
@@ -210,23 +214,24 @@ class CanvasItem:
         else:
             img = self._original_image.copy()
         
-        # ПРИМЕНЯЕМ МАСШТАБ К ОРИГИНАЛЬНОМУ ИЗОБРАЖЕНИЮ
+        # ПРАВИЛЬНЫЙ ПОРЯДОК ТРАНСФОРМАЦИЙ:
+        # 1. Масштаб элемента
         if self.scale != 1.0:
             new_width = max(1, int(img.width * self.scale))
             new_height = max(1, int(img.height * self.scale))
             img = img.resize((new_width, new_height), Image.LANCZOS)
         
-        # Отражение (применяется после масштабирования)
+        # 2. Отражение
         if self.flip_horizontal:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
         if self.flip_vertical:
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
         
-        # Поворот
+        # 3. Поворот
         if self.rotation != 0:
             img = img.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
         
-        # Масштаб зума (для отображения в редакторе)
+        # 4. Зум для отображения (только для редактора)
         if zoom_level != 1.0:
             final_width = max(1, int(img.width * zoom_level))
             final_height = max(1, int(img.height * zoom_level))
@@ -256,6 +261,10 @@ class CanvasItem:
         """Очищает кэш изображений"""
         self._get_transformed_image_cached.cache_clear()
         self._zoom_cache.clear()
+        
+        # Также очищаем Tkinter PhotoImage кэш
+        if hasattr(self, '_tk_images'):
+            self._tk_images.clear()
 
 class ModelEditor(tk.Toplevel):
     def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_threshold=0.01, sensitivity=1.0, thresholds=None, current_slot=None):
@@ -1131,19 +1140,19 @@ class ModelEditor(tk.Toplevel):
                 try:
                     img = Image.open(ci.image_path).convert("RGBA")
                     
-                    # Применяем трансформации
+                    # Применяем трансформации в ПРАВИЛЬНОМ ПОРЯДКЕ (как в редакторе)
                     if ci.scale != 1.0:
                         new_width = max(1, int(img.width * ci.scale))
                         new_height = max(1, int(img.height * ci.scale))
                         img = img.resize((new_width, new_height), Image.LANCZOS)
                     
-                    if ci.rotation != 0:
-                        img = img.rotate(ci.rotation, expand=True, resample=Image.BICUBIC)
-                    
                     if ci.flip_horizontal:
                         img = img.transpose(Image.FLIP_LEFT_RIGHT)
                     if ci.flip_vertical:
                         img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                    
+                    if ci.rotation != 0:
+                        img = img.rotate(ci.rotation, expand=True, resample=Image.BICUBIC)
                     
                     px = center_x - img.size[0] // 2 + int(ci.x)
                     py = center_y - img.size[1] // 2 + int(ci.y)
@@ -1297,16 +1306,20 @@ class ModelEditor(tk.Toplevel):
         scaled_width = int(self.canvas_width * self.zoom_level)
         scaled_height = int(self.canvas_height * self.zoom_level)
         
+        # Убедитесь, что scaled_width и scaled_height не отрицательные
+        scaled_width = max(10, scaled_width)
+        scaled_height = max(10, scaled_height)
+        
         center_x = canvas_width // 2 + self.offset_x
         center_y = canvas_height // 2 + self.offset_y
         
         canvas_x1 = center_x - scaled_width // 2
         canvas_y1 = center_y - scaled_height // 2
         
-        # Рисуем фон холста
+        # Рисуем фон холста с учетом границ
         self.canvas.create_rectangle(
-            canvas_x1, canvas_y1, 
-            canvas_x1 + scaled_width, canvas_y1 + scaled_height,
+            max(0, canvas_x1), max(0, canvas_y1),
+            min(canvas_width, canvas_x1 + scaled_width), min(canvas_height, canvas_y1 + scaled_height),
             outline="#666", width=2, fill="#333"
         )
         
@@ -1341,11 +1354,15 @@ class ModelEditor(tk.Toplevel):
                 continue
             
             # Рассчитываем позицию на холсте
-            img_center_x = scaled_width // 2
-            img_center_y = scaled_height // 2
+            center_x_scaled = scaled_width // 2
+            center_y_scaled = scaled_height // 2
             
-            pos_x = canvas_x1 + img_center_x - img.width // 2 + int(ci.x * self.zoom_level)
-            pos_y = canvas_x1 + img_center_y - img.height // 2 + int(ci.y * self.zoom_level)
+            # Координаты относительно центра с учетом зума
+            offset_x = int(ci.x * self.zoom_level)
+            offset_y = int(ci.y * self.zoom_level)
+            
+            pos_x = canvas_x1 + center_x_scaled - img.width // 2 + offset_x
+            pos_y = canvas_y1 + center_y_scaled - img.height // 2 + offset_y
             
             # Используем кэшированные PhotoImage, но для GIF не кэшируем
             if ci.is_gif:
@@ -1840,6 +1857,8 @@ class ModelEditor(tk.Toplevel):
             ci.flip_vertical = self.flip_v_var.get()
             ci.clear_cache()  # Очищаем кэш
         
+        # Очищаем кэш редактора
+        self._photo_images.clear()
         self._canvas_cache_valid = False
         self.redraw_canvas()
         self.save_to_history("Изменение отражения")
@@ -1853,6 +1872,8 @@ class ModelEditor(tk.Toplevel):
             ci.visible = self.visible_var.get()
             ci.clear_cache()  # Очищаем кэш
         
+        # Очищаем кэш редактора
+        self._photo_images.clear()
         self._canvas_cache_valid = False
         self.redraw_canvas()
         self.save_to_history("Изменение видимости")
@@ -2444,19 +2465,20 @@ class ModelEditor(tk.Toplevel):
                 try:
                     img = Image.open(ci.image_path).convert("RGBA")
                     
-                    # Применяем масштаб ПЕРВЫМ (как в рендерере)
+                    # ПРАВИЛЬНЫЙ ПОРЯДОК ТРАНСФОРМАЦИЙ (такой же как в редакторе):
+                    # 1. Масштаб элемента
                     if ci.scale != 1.0:
                         new_width = max(1, int(img.width * ci.scale))
                         new_height = max(1, int(img.height * ci.scale))
                         img = img.resize((new_width, new_height), Image.LANCZOS)
                     
-                    # Затем отражение
+                    # 2. Отражение
                     if ci.flip_horizontal:
                         img = img.transpose(Image.FLIP_LEFT_RIGHT)
                     if ci.flip_vertical:
                         img = img.transpose(Image.FLIP_TOP_BOTTOM)
                     
-                    # Затем поворот
+                    # 3. Поворот
                     if ci.rotation != 0:
                         img = img.rotate(ci.rotation, expand=True, resample=Image.BICUBIC)
                     
@@ -2637,14 +2659,17 @@ class ModelEditor(tk.Toplevel):
             ci.flip_horizontal = self.flip_h_var.get()
             ci.flip_vertical = self.flip_v_var.get()
             
-            # Очищаем кэш
+            # Очищаем кэш изображения
             ci.clear_cache()
+        
+        # Очищаем кэш редактора
+        self._photo_images.clear()
+        self._canvas_cache_valid = False
         
         self._save_tree_state()
         self.tree_state["preserve_selection"] = True
         
         self.refresh_tree()
-        self._canvas_cache_valid = False
         self.redraw_canvas()
         self.last_autosave = time.time()
         
@@ -2843,22 +2868,25 @@ class ModelEditor(tk.Toplevel):
                 continue
             
             # Позиция элемента
-            img_center_x = scaled_width // 2
-            img_center_y = scaled_height // 2
+            center_x_scaled = scaled_width // 2
+            center_y_scaled = scaled_height // 2
             
-            pos_x = img_center_x - img.width // 2 + int(ci.x * self.zoom_level)
-            pos_y = img_center_y - img.height // 2 + int(ci.y * self.zoom_level)
+            offset_x = int(ci.x * self.zoom_level)
+            offset_y = int(ci.y * self.zoom_level)
+            
+            pos_x = canvas_x1 + center_x_scaled - img.width // 2 + offset_x
+            pos_y = canvas_y1 + center_y_scaled - img.height // 2 + offset_y
             
             # Проверяем попадание
-            if (pos_x <= event.x - canvas_x1 <= pos_x + img.width and
-                pos_y <= event.y - canvas_y1 <= pos_y + img.height):
+            if (pos_x <= event.x <= pos_x + img.width and
+                pos_y <= event.y <= pos_y + img.height):
                 
                 # Проверяем прозрачность пикселя
                 try:
                     is_opaque = False
                     if img.mode == 'RGBA':
-                        pixel_x = int((event.x - canvas_x1) - pos_x)
-                        pixel_y = int((event.y - canvas_y1) - pos_y)
+                        pixel_x = int(event.x - pos_x)
+                        pixel_y = int(event.y - pos_y)
                         
                         if 0 <= pixel_x < img.width and 0 <= pixel_y < img.height:
                             pixel = img.getpixel((pixel_x, pixel_y))
