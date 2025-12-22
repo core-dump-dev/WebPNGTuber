@@ -512,6 +512,30 @@ class App:
         
         return None
 
+    def show_temporary_message(self, title, message, duration_ms=3000):
+        """Показать временное сообщение, которое исчезнет через указанное время"""
+        # Создаем всплывающее окно
+        popup = tk.Toplevel(self.root)
+        popup.title(title)
+        popup.transient(self.root)  # Делаем окно зависимым от главного
+        popup.resizable(False, False)
+        
+        # Центрируем окно
+        popup.geometry("+%d+%d" % (
+            self.root.winfo_rootx() + self.root.winfo_width() // 2 - 150,
+            self.root.winfo_rooty() + self.root.winfo_height() // 2 - 50
+        ))
+        
+        # Добавляем текст сообщения
+        message_label = ttk.Label(popup, text=message, padding=10)
+        message_label.pack()
+        
+        # Автоматическое закрытие через указанное время
+        popup.after(duration_ms, popup.destroy)
+        
+        # Даем фокус главному окну
+        self.root.focus_set()
+
     def on_audio_level(self, level):
         """Оптимизированная обработка уровня аудио"""
         now = time.time()
@@ -908,7 +932,8 @@ class App:
         
         if not silent:
             logger.info(f"Model loaded from slot {idx+1}: {model_name}")
-            messagebox.showinfo("Загружено", f"Модель загружена из слота {idx+1}")
+            # Используем временное сообщение вместо стандартного messagebox
+            self.show_temporary_message("Загружено", f"Модель загружена из слота {idx+1}")
 
     def open_editor(self):
         """Открытие редактора моделей"""
