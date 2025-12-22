@@ -662,14 +662,16 @@ class ModelEditor(tk.Toplevel):
             "open": "Открыто"
         }
         
-        for i, s in enumerate(states.keys()):
+        for i, state in enumerate(states.keys()):
             row = ttk.Frame(logic_frame)
             row.pack(fill="x", padx=5, pady=2)
-            ttk.Label(row, text=states[s] + ":", width=10).pack(side="left")
+            ttk.Label(row, text=states[state] + ":", width=10).pack(side="left")
+            
+            # Создаем OptionMenu с пустым начальным значением
             initial_value = ""
-            om = ttk.OptionMenu(row, self.state_vars[s], initial_value)
+            om = ttk.OptionMenu(row, self.state_vars[state], initial_value)
             om.pack(side="left", fill="x", expand=True)
-            setattr(self, f"{s}_menu", om)
+            setattr(self, f"{state}_menu", om)
         
         # Случайный эффект
         random_frame = ttk.LabelFrame(groups_tab, text="Случайный эффект")
@@ -1883,6 +1885,64 @@ class ModelEditor(tk.Toplevel):
         logger.info(f"Deleted {len(items_to_remove)} selected items")
         self.save_to_history("Удаление выбранных элементов")
     
+    def update_group_logic_menus(self, group_name):
+        """Обновляет меню логики группы - ВОССТАНОВЛЕНА ЛОГИКА ВЫБОРА"""
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
+        if not group:
+            return
+        
+        # Собираем ВСЕ доступные опции:
+        # 1. Слои этой группы
+        # 2. Дочерние группы
+        # 3. Слои из дочерних групп (рекурсивно)
+        options = [""]  # Пустая опция для очистки
+        
+        # Функция для рекурсивного сбора всех слоев из группы и ее дочерних групп
+        def collect_group_items(group_name, indent=""):
+            items = []
+            
+            # Собираем слои этой группы
+            for layer in self.model.get("layers", []):
+                if layer.get("group") == group_name:
+                    display_name = f"{indent}📄 {layer.get('name')}"
+                    items.append((display_name, layer.get('name'), "layer"))
+            
+            # Собираем дочерние группы
+            for g in self.model.get("groups", []):
+                if g.get("parent") == group_name:
+                    child_name = g.get("name")
+                    display_name = f"{indent}📁 {child_name}"
+                    items.append((display_name, child_name, "group"))
+                    # Рекурсивно собираем элементы из дочерней группы
+                    items.extend(collect_group_items(child_name, indent + "  "))
+            
+            return items
+        
+        # Собираем все элементы
+        all_items = collect_group_items(group_name)
+        
+        # Очищаем и заполняем меню для каждого состояния
+        for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
+            # Получаем виджет меню
+            menu_widget = getattr(self, f"{state}_menu")
+            menu = menu_widget['menu']
+            menu.delete(0, 'end')
+            
+            # Добавляем пустую опцию
+            menu.add_command(
+                label="(нет)",
+                command=lambda v=self.state_vars[state], val="": v.set(val)
+            )
+            
+            # Добавляем все собранные элементы
+            for display_name, real_name, item_type in all_items:
+                menu.add_command(
+                    label=display_name,
+                    command=lambda v=self.state_vars[state], val=real_name: v.set(val)
+                )
+        
+        logger.debug(f"Updated group logic menus for {group_name}, items: {len(all_items)}")
+    
     def apply_group_logic(self):
         """Применяет логику группы"""
         if not self.selected_group:
@@ -2782,6 +2842,32 @@ class ModelEditor(tk.Toplevel):
         
         self.save_to_history("Изменение свойств элемента")
     
+    def load_group_settings(self, group_name):
+        """Загружает настройки группы - ВОССТАНОВЛЕНА ЛОГИКА"""
+        group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
+        if not group:
+            return
+        
+        # Сначала обновляем меню
+        self.update_group_logic_menus(group_name)
+        
+        # Затем загружаем значения
+        logic = group.get("logic", {})
+        for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
+            if state in logic:
+                self.state_vars[state].set(logic[state])
+            else:
+                self.state_vars[state].set("")
+        
+        # Настройки моргания
+        blink_freq = group.get("blink_freq", 0.0)
+        self.blink_freq.set(blink_freq)
+        
+        # Случайный эффект
+        self.random_effect_var.set(group.get("random_effect", False))
+        self.random_min_var.set(group.get("random_min", 5.0))
+        self.random_max_var.set(group.get("random_max", 10.0))
+    
     def ungroup_selected(self):
         """Разгруппировывает выделенные элементы"""
         if not self.selected_group and not self.current_selection:
@@ -2877,62 +2963,6 @@ class ModelEditor(tk.Toplevel):
         
         # Удаляем саму группу
         self.model["groups"] = [g for g in self.model.get("groups", []) if g.get("name") != group_name]
-    
-    def update_group_logic_menus(self, group_name):
-        """Обновляет меню логики группы"""
-        group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
-        if not group:
-            return
-        
-        # Собираем все возможные варианты: слои в группе и дочерние группы
-        options = [""]
-        
-        # Добавляем слои, принадлежащие этой группе
-        for layer in self.model.get("layers", []):
-            if layer.get("group") == group_name:
-                options.append(layer.get("name"))
-        
-        # Добавляем дочерние группы
-        for g in self.model.get("groups", []):
-            if g.get("parent") == group_name:
-                options.append(g.get("name"))
-        
-        # Обновляем все меню для состояний
-        for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
-            menu_widget = getattr(self, f"{s}_menu")
-            menu = menu_widget['menu']
-            menu.delete(0, 'end')
-            var = self.state_vars[state]
-            # Добавляем новые опции
-            for option in options:
-                menu.add_command(
-                    label=option,
-                    command=lambda val=option, v=var: v.set(val)
-                )
-    
-    def load_group_settings(self, group_name):
-        """Загружает настройки группы"""
-        group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
-        if not group:
-            return
-        
-        self.update_group_logic_menus(group_name)
-        
-        logic = group.get("logic", {})
-        for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
-            if state in logic:
-                self.state_vars[state].set(logic[state])
-            else:
-                self.state_vars[state].set("")
-        
-        # Настройки моргания
-        blink_freq = group.get("blink_freq", 0.0)
-        self.blink_freq.set(blink_freq)
-        
-        # Случайный эффект
-        self.random_effect_var.set(group.get("random_effect", False))
-        self.random_min_var.set(group.get("random_min", 5.0))
-        self.random_max_var.set(group.get("random_max", 10.0))
     
     def on_canvas_mouse_down(self, event):
         """Обработчик нажатия мыши на холсте"""
