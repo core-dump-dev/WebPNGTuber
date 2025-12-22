@@ -2162,7 +2162,7 @@ class ModelEditor(tk.Toplevel):
         try:
             # Сохраняем в историю перед изменением
             self.save_to_history("Изменение размера холста")
-            
+
             new_width = max(100, min(1500, self.canvas_width_var.get()))
             new_height = max(100, min(1500, self.canvas_height_var.get()))
             self.canvas_width = new_width
@@ -2758,6 +2758,19 @@ class ModelEditor(tk.Toplevel):
                 base = os.path.basename(file_path)
                 dest = os.path.join(self.model_dir, base)
                 
+                # Если файл уже существует, создаем уникальное имя
+                if os.path.exists(dest):
+                    name, ext = os.path.splitext(base)
+                    counter = 1
+                    while True:
+                        new_base = f"{name}({counter}){ext}"
+                        new_dest = os.path.join(self.model_dir, new_base)
+                        if not os.path.exists(new_dest):
+                            base = new_base
+                            dest = new_dest
+                            break
+                        counter += 1
+                
                 if os.path.abspath(file_path) != os.path.abspath(dest):
                     shutil.copy2(file_path, dest)
                 
@@ -2775,16 +2788,27 @@ class ModelEditor(tk.Toplevel):
                 
                 self.imported_files.append((base, preview_img, is_gif))
                 
+                # Генерируем уникальное имя для слоя
+                base_name = os.path.splitext(base)[0]
+                layer_name = base_name
+                counter = 1
+                
+                # Проверяем, существует ли уже слой с таким именем
+                existing_names = {layer.get("name") for layer in self.model.get("layers", [])}
+                while layer_name in existing_names:
+                    layer_name = f"{base_name}({counter})"
+                    counter += 1
+                
                 # Создаем слой
                 layer = {
-                    "name": os.path.splitext(base)[0], 
+                    "name": layer_name,  # Используем уникальное имя
                     "file": base, 
                     "visible": True, 
                     "x": 0, 
                     "y": 0,
                     "scale": 1.0,
                     "rotation": 0,
-                    "alpha": 1.0,  # <--- ДОБАВЛЕНО: Значение прозрачности по умолчанию
+                    "alpha": 1.0,
                     "group": None,
                     "is_gif": is_gif,
                     "flip_horizontal": False,
@@ -2821,8 +2845,19 @@ class ModelEditor(tk.Toplevel):
             row = ttk.Frame(self.import_inner)
             row.pack(fill="x", padx=2, pady=2)
             
+            # Показываем превью изображения
+            try:
+                photo = ImageTk.PhotoImage(img)
+                preview_label = ttk.Label(row, image=photo)
+                preview_label.image = photo  # Сохраняем ссылку
+                preview_label.pack(side="left", padx=2)
+            except:
+                pass
+            
             icon = "GIF" if is_gif else "PNG"
             ttk.Label(row, text=f"{icon}: {fname}", width=20).pack(side="left", padx=2)
+            
+            # Кнопка добавления на холст (теперь будет создавать новый слой с уникальным именем)
             ttk.Button(row, text="+", width=2, command=lambda f=fname: self.add_to_canvas(f)).pack(side="left", padx=2)
             ttk.Button(row, text="🗑️", width=2, command=lambda f=fname: self.delete_file(f)).pack(side="left", padx=2)
     
@@ -3220,32 +3255,36 @@ class ModelEditor(tk.Toplevel):
         self.drag_data["group_items"] = []
     
     def add_to_canvas(self, filename):
-        """Добавляет файл на холст"""
+        """Добавляет файл на холст с уникальным именем"""
         for fname, img, is_gif in self.imported_files:
             if fname == filename:
-                # Ищем слой
-                layer = None
-                for l in self.model.get("layers", []):
-                    if l.get("file") == fname:
-                        layer = l
-                        break
+                # Генерируем уникальное имя для нового слоя
+                base_name = os.path.splitext(fname)[0]
+                layer_name = base_name
+                counter = 1
                 
-                if not layer:
-                    layer = {
-                        "name": os.path.splitext(fname)[0], 
-                        "file": fname, 
-                        "visible": True, 
-                        "x": 0, 
-                        "y": 0,
-                        "scale": 1.0,
-                        "rotation": 0,
-                        "alpha": 1.0,  # <--- ДОБАВЛЕНО: Прозрачность по умолчанию
-                        "group": None,
-                        "is_gif": is_gif,
-                        "flip_horizontal": False,
-                        "flip_vertical": False
-                    }
-                    self.model.setdefault("layers", []).append(layer)
+                # Проверяем существующие имена слоев
+                existing_names = {layer.get("name") for layer in self.model.get("layers", [])}
+                while layer_name in existing_names:
+                    layer_name = f"{base_name}({counter})"
+                    counter += 1
+                
+                # Создаем новый слой с уникальным именем
+                layer = {
+                    "name": layer_name,  # Уникальное имя
+                    "file": fname, 
+                    "visible": True, 
+                    "x": 0, 
+                    "y": 0,
+                    "scale": 1.0,
+                    "rotation": 0,
+                    "alpha": 1.0,
+                    "group": None,
+                    "is_gif": is_gif,
+                    "flip_horizontal": False,
+                    "flip_vertical": False
+                }
+                self.model.setdefault("layers", []).append(layer)
                 
                 # Создаем элемент
                 image_path = os.path.join(self.model_dir, fname)
