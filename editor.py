@@ -889,19 +889,31 @@ class ModelEditor(tk.Toplevel):
         return visible_items
     
     def save_to_history(self, description=""):
-        """Сохраняет текущее состояние в историю"""
+        """Сохраняет ТОЛЬКО изменения в историю, а не полное состояние"""
         if self.history_index < len(self.history) - 1:
             self.history = self.history[:self.history_index + 1]
         
+        # Создаем легковесное состояние с ТОЛЬКО изменениями
         state = {
-            'model': json.dumps(self.model, ensure_ascii=False),
-            'items': [],
-            'description': description
+            'model_snapshot': json.dumps({
+                'name': self.model.get('name', ''),
+                'width': self.model.get('width', 700),
+                'height': self.model.get('height', 700),
+                'layers': [],
+                'groups': self.model.get('groups', [])
+            }, ensure_ascii=False),
+            'items_changes': [],  # Только изменения элементов
+            'description': description,
+            'timestamp': time.time()
         }
         
-        for ci in self.items:
+        # Сохраняем ТОЛЬКО выбранные элементы или все, если описание указывает на глобальное изменение
+        items_to_save = self.current_selection if self.current_selection else self.items
+        
+        for ci in items_to_save:
             item_state = {
-                'layer': ci.layer.copy(),
+                'layer_id': id(ci),  # Используем ID для отслеживания
+                'layer_name': ci.layer.get('name', ''),
                 'x': ci.x,
                 'y': ci.y,
                 'scale': ci.scale,
@@ -909,18 +921,19 @@ class ModelEditor(tk.Toplevel):
                 'flip_horizontal': ci.flip_horizontal,
                 'flip_vertical': ci.flip_vertical,
                 'visible': ci.visible,
-                'alpha': ci.alpha,  # <--- ДОБАВЛЕНО: Сохранение прозрачности
+                'alpha': ci.alpha,
                 'is_gif': ci.is_gif,
                 'image_path': ci.image_path
             }
-            state['items'].append(item_state)
+            state['items_changes'].append(item_state)
         
         self.history.append(state)
         self.history_index = len(self.history) - 1
         
         if len(self.history) > self.max_history_size:
             self.history.pop(0)
-            self.history_index -= 1
+            if self.history_index > 0:
+                self.history_index -= 1
         
         logger.info(f"History saved: {description}, index: {self.history_index}, size: {len(self.history)}")
     
@@ -954,71 +967,142 @@ class ModelEditor(tk.Toplevel):
         return ImageTk.PhotoImage(img)
     
     def undo(self, event=None):
-        """Отмена последнего действия"""
+        """Отмена последнего действия с проверкой"""
         if self.history_index > 0:
+            old_index = self.history_index
             self.history_index -= 1
+            
+            # Сохраняем текущее состояние перед отменой
+            current_state = self._capture_current_state()
+            
+            # Загружаем предыдущее состояние
             self.load_from_history()
-            logger.info(f"Undo to index: {self.history_index}")
+            
+            # Если что-то пошло не так, возвращаемся
+            if not self._validate_state():
+                self.history_index = old_index
+                self.load_from_history()
+                logger.warning("Undo validation failed, restored to previous state")
+            else:
+                logger.info(f"Undo successful: {old_index} -> {self.history_index}")
     
     def redo(self, event=None):
-        """Повтор отмененного действия"""
+        """Повтор отмененного действия с проверкой"""
         if self.history_index < len(self.history) - 1:
+            old_index = self.history_index
             self.history_index += 1
+            
+            # Сохраняем текущее состояние перед повтором
+            current_state = self._capture_current_state()
+            
+            # Загружаем следующее состояние
             self.load_from_history()
-            logger.info(f"Redo to index: {self.history_index}")
+            
+            # Если что-то пошло не так, возвращаемся
+            if not self._validate_state():
+                self.history_index = old_index
+                self.load_from_history()
+                logger.warning("Redo validation failed, restored to previous state")
+            else:
+                logger.info(f"Redo successful: {old_index} -> {self.history_index}")
     
     def load_from_history(self):
-        """Загружает состояние из истории"""
+        """Загружает состояние из истории, применяя ТОЛЬКО изменения"""
         if self.history_index < 0 or self.history_index >= len(self.history):
             return
         
         state = self.history[self.history_index]
         
         try:
-            self.model = json.loads(state['model'])
+            # Восстанавливаем только изменения элементов
+            for item_state in state['items_changes']:
+                layer_id = item_state['layer_id']
+                layer_name = item_state['layer_name']
+                
+                # Ищем элемент по ID или по имени
+                target_item = None
+                for ci in self.items:
+                    if id(ci) == layer_id or ci.layer.get('name') == layer_name:
+                        target_item = ci
+                        break
+                
+                if target_item:
+                    # Применяем изменения ТОЛЬКО к найденному элементу
+                    target_item.x = item_state['x']
+                    target_item.y = item_state['y']
+                    target_item.scale = item_state['scale']
+                    target_item.rotation = item_state['rotation']
+                    target_item.flip_horizontal = item_state['flip_horizontal']
+                    target_item.flip_vertical = item_state['flip_vertical']
+                    target_item.visible = item_state['visible']
+                    target_item.alpha = item_state.get('alpha', 1.0)
+                    target_item.is_gif = item_state['is_gif']
+                    
+                    # Обновляем слой в модели
+                    if target_item.layer:
+                        target_item.layer.update({
+                            'x': item_state['x'],
+                            'y': item_state['y'],
+                            'visible': item_state['visible'],
+                            'scale': item_state['scale'],
+                            'rotation': item_state['rotation'],
+                            'alpha': item_state.get('alpha', 1.0),
+                            'flip_horizontal': item_state['flip_horizontal'],
+                            'flip_vertical': item_state['flip_vertical']
+                        })
             
-            self.items = []
-            for item_state in state['items']:
-                ci = CanvasItem(item_state['layer'], item_state['image_path'])
-                ci.x = item_state['x']
-                ci.y = item_state['y']
-                ci.scale = item_state['scale']
-                ci.rotation = item_state['rotation']
-                ci.flip_horizontal = item_state['flip_horizontal']
-                ci.flip_vertical = item_state['flip_vertical']
-                ci.visible = item_state['visible']
-                ci.alpha = item_state.get('alpha', 1.0)  # <--- ДОБАВЛЕНО: Загрузка прозрачности
-                ci.is_gif = item_state['is_gif']
-                self.items.append(ci)
+            # Восстанавливаем основные параметры модели
+            if 'model_snapshot' in state:
+                model_snapshot = json.loads(state['model_snapshot'])
+                self.model['name'] = model_snapshot.get('name', self.model.get('name', ''))
+                self.model['width'] = model_snapshot.get('width', 700)
+                self.model['height'] = model_snapshot.get('height', 700)
+                self.model['groups'] = model_snapshot.get('groups', [])
+                
+                self.model_name_var.set(self.model['name'])
+                self.canvas_width = self.model['width']
+                self.canvas_height = self.model['height']
+                self.canvas_width_var.set(self.canvas_width)
+                self.canvas_height_var.set(self.canvas_height)
             
-            self.model_name_var.set(self.model.get("name", "Без названия"))
-            self.canvas_width = self.model.get("width", 700)
-            self.canvas_height = self.model.get("height", 700)
-            self.canvas_width_var.set(self.canvas_width)
-            self.canvas_height_var.set(self.canvas_height)
-            
-            self.imported_files.clear()
-            for f in os.listdir(self.model_dir) if self.model_dir else []:
-                if f.lower().endswith((".png", ".gif")):
-                    try:
-                        fp = os.path.join(self.model_dir, f)
-                        with Image.open(fp) as img:
-                            is_gif = img.format == "GIF" and img.is_animated
-                            img.seek(0)
-                            preview_img = img.copy().convert("RGBA")
-                            preview_img.thumbnail((50, 50), Image.LANCZOS)
-                        self.imported_files.append((f, preview_img, is_gif))
-                    except Exception as e:
-                        logger.error(f"Error loading imported file: {e}")
-            
-            self.refresh_import_list()
             self.refresh_tree()
             self._canvas_cache_valid = False
             self.redraw_canvas()
             
         except Exception as e:
             logger.error(f"Error loading from history: {e}")
+            import traceback
+            traceback.print_exc()
     
+    def _capture_current_state(self):
+        """Захватывает текущее состояние для валидации"""
+        state = {
+            'items_count': len(self.items),
+            'items_ids': [id(ci) for ci in self.items],
+            'model_name': self.model.get('name', ''),
+            'canvas_size': (self.canvas_width, self.canvas_height)
+        }
+        return state
+    
+    def _validate_state(self):
+        """Проверяет валидность текущего состояния"""
+        try:
+            # Проверяем базовую целостность
+            if len(self.items) == 0 and self.model.get('layers'):
+                logger.warning("Validation failed: items list empty but model has layers")
+                return False
+            
+            # Проверяем, что все элементы имеют правильные атрибуты
+            for ci in self.items:
+                if not hasattr(ci, 'x') or not hasattr(ci, 'y'):
+                    logger.warning(f"Validation failed: item missing coordinates")
+                    return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Validation error: {e}")
+            return False
+
     def delete_model(self):
         """Удаление текущей модели"""
         if not self.model_dir:
@@ -2076,6 +2160,9 @@ class ModelEditor(tk.Toplevel):
     def update_canvas_size(self, event=None):
         """Обновляет размер холста"""
         try:
+            # Сохраняем в историю перед изменением
+            self.save_to_history("Изменение размера холста")
+            
             new_width = max(100, min(1500, self.canvas_width_var.get()))
             new_height = max(100, min(1500, self.canvas_height_var.get()))
             self.canvas_width = new_width
@@ -2788,6 +2875,9 @@ class ModelEditor(tk.Toplevel):
             messagebox.showwarning("Нет выбора", "Сначала выберите элемент")
             return
         
+        # Сохраняем предыдущее состояние перед изменением
+        self.save_to_history("Изменение свойств элемента")
+        
         for ci in self.current_selection:
             # Имя
             name = self.name_entry.get().strip()
@@ -3120,9 +3210,14 @@ class ModelEditor(tk.Toplevel):
     
     def on_canvas_mouse_up(self, event):
         """Обработчик отпускания кнопки мыши"""
+        if self.drag_data.get("item"):
+            # Сохраняем в историю только если было перемещение
+            if (self.drag_data.get("x", 0) != 0 or 
+                self.drag_data.get("y", 0) != 0):
+                self.save_to_history("Перемещение элемента")
+        
         self.drag_data["item"] = None
-        self.last_autosave = time.time()
-        self.save_to_history("Перемещение элемента")
+        self.drag_data["group_items"] = []
     
     def add_to_canvas(self, filename):
         """Добавляет файл на холст"""
