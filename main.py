@@ -508,9 +508,17 @@ class App:
                 return photo
             except Exception as e:
                 logger.error(f"Error loading preview for slot {slot_idx+1}: {e}")
-                return None
+                # В случае ошибки возвращаем пустое изображение
+                img = Image.new("RGBA", (85, 85), (0, 0, 0, 0))
+                photo = ImageTk.PhotoImage(img)
+                self.slot_previews[slot_idx] = photo
+                return photo
         
-        return None
+        # Если превью нет, возвращаем пустое изображение
+        img = Image.new("RGBA", (85, 85), (0, 0, 0, 0))
+        photo = ImageTk.PhotoImage(img)
+        self.slot_previews[slot_idx] = photo
+        return photo
 
     def show_temporary_message(self, title, message, duration_ms=3000):
         """Показать временное сообщение, которое исчезнет через указанное время"""
@@ -597,12 +605,11 @@ class App:
                 else:
                     btn.config(text=f"{prefix}Слот {idx+1}\n(пустой)")
                 
-                # Обновляем превью
+                # Обновляем превью - всегда загружаем заново
                 photo = self.load_preview_for_slot(idx)
-                if photo:
-                    btn.config(image=photo)
-                    btn.photo = photo  # Сохраняем ссылку
-                    
+                btn.config(image=photo)
+                btn.photo = photo  # Сохраняем ссылку
+                
             except Exception as e:
                 logger.debug(f"Slot update error: {e}")
         
@@ -939,6 +946,8 @@ class App:
         """Открытие редактора моделей"""
         try:
             main_window = self.root
+            # ВАЖНО: Устанавливаем атрибут app для главного окна
+            main_window.app = self
             main_window.attributes('-disabled', True)
             
             editor = ModelEditor(
