@@ -32,10 +32,10 @@
   "idle_timeout": 5.0,
   "current_slot": 2,
   "sections_state": {
-    "thresh": false,
+    "thresh": true,
     "states": true,
     "effects": true,
-    "wave": false,
+    "wave": true,
     "idle": true
   }
 }
