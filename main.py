@@ -116,7 +116,7 @@ class App:
             'pulse': False,
             'blink': True,
             'random_effect': False,
-            'wave': False  # Переименован с 'distortion' на 'wave'
+            'wave': False
         })
         
         # Параметры эффекта "Волна"
@@ -140,6 +140,7 @@ class App:
             'thresh': True,
             'states': True,
             'effects': True,
+            'wave': True,  # Добавляем состояние секции "Волна"
             'idle': True
         })
 
@@ -310,7 +311,7 @@ class App:
         
         # Фрейм для содержимого внутри canvas
         self.expand_content = ttk.Frame(self.expand_canvas)
-        self.expand_canvas.create_window((0, 0), window=self.expand_content, anchor="nw", width=350)  # Уменьшили ширину
+        self.expand_canvas.create_window((0, 0), window=self.expand_content, anchor="nw", width=350)
         
         # Функция обновления прокрутки
         def configure_scrollregion(event):
@@ -455,17 +456,32 @@ class App:
         ttk.Checkbutton(effects_grid, text="Случайная смена", variable=self.random_effect,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
         
-        # Эффект "Волна" (переименовано с "Водная рябь")
-        self.wave = tk.BooleanVar(value=self.effects.get('wave', False))
-        ttk.Checkbutton(effects_grid, text="Волна", variable=self.wave,
+        self.wave_effect = tk.BooleanVar(value=self.effects.get('wave', False))
+        ttk.Checkbutton(effects_grid, text="Волна", variable=self.wave_effect,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
 
-        # Настройки эффекта "Волна" (появляются только при включении)
-        self.wave_settings_frame = ttk.Frame(effects_grid)
-        self.wave_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
+        # Настройки эффекта "Волна" (отдельная сворачиваемая секция)
+        wave_frame = ttk.Frame(self.expand_content)
+        wave_frame.pack(fill="x", pady=(0, 3))
+        wave_header = ttk.Frame(wave_frame)
+        wave_header.pack(fill="x")
+        
+        self.wave_expanded = self.sections_state.get('wave', True)
+        wave_text = "▼ Настройки Волны" if self.wave_expanded else "▶ Настройки Волны"
+        self.wave_header_label = ttk.Label(wave_header, text=wave_text, font=("Arial", 9, "bold"), cursor="hand2")
+        self.wave_header_label.pack(side="left", padx=2, pady=2)
+        wave_header.bind("<Button-1>", lambda e: self.toggle_section("wave"))
+        self.wave_header_label.bind("<Button-1>", lambda e: self.toggle_section("wave"))
+        self.wave_content = ttk.Frame(wave_frame)
+        
+        if self.wave_expanded:
+            self.wave_content.pack(fill="x", padx=3, pady=(0, 2))
+        
+        wave_settings_grid = ttk.Frame(self.wave_content)
+        wave_settings_grid.pack(fill="x", padx=2, pady=2)
 
         # Амплитуда с шагом 0.25 и отображением значения
-        amplitude_frame = ttk.Frame(self.wave_settings_frame)
+        amplitude_frame = ttk.Frame(wave_settings_grid)
         amplitude_frame.pack(fill="x", padx=3, pady=(2, 0))
         ttk.Label(amplitude_frame, text="Сила (0.5-10.0):").pack(anchor="w", side="left")
         self.wave_amplitude = tk.DoubleVar(value=self._round_to_step(self.wave_params.get('amplitude', 3.0), 0.25))
@@ -478,7 +494,7 @@ class App:
         wave_amp_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
 
         # Частота с шагом 0.25 и отображением значения
-        frequency_frame = ttk.Frame(self.wave_settings_frame)
+        frequency_frame = ttk.Frame(wave_settings_grid)
         frequency_frame.pack(fill="x", padx=3, pady=(2, 0))
         ttk.Label(frequency_frame, text="Частота (0.1-2.0):").pack(anchor="w", side="left")
         self.wave_frequency = tk.DoubleVar(value=self._round_to_step(self.wave_params.get('frequency', 0.5), 0.25))
@@ -491,7 +507,7 @@ class App:
         wave_freq_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
 
         # Скорость с шагом 0.25 и отображением значения
-        speed_frame = ttk.Frame(self.wave_settings_frame)
+        speed_frame = ttk.Frame(wave_settings_grid)
         speed_frame.pack(fill="x", padx=3, pady=(2, 0))
         ttk.Label(speed_frame, text="Скорость (0.1-3.0):").pack(anchor="w", side="left")
         self.wave_speed = tk.DoubleVar(value=self._round_to_step(self.wave_params.get('speed', 1.0), 0.25))
@@ -502,10 +518,6 @@ class App:
         wave_speed_scale.pack(fill="x", padx=3, pady=(0, 2))
         wave_speed_scale.configure(command=lambda val: self._on_wave_scale_move('speed', val))
         wave_speed_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
-
-        # Показываем/скрываем настройки в зависимости от состояния чекбокса
-        self._update_wave_ui()
-        self.wave.trace('w', lambda *args: self._update_wave_ui())
 
         # Настройки idle-режима (сворачиваемые)
         idle_frame = ttk.Frame(self.expand_content)
@@ -783,13 +795,6 @@ class App:
             logger.info(f"Noise gate threshold updated to: {threshold}")
         self.save_settings()  # Автоматическое сохранение
 
-    def _update_wave_ui(self):
-        """Показывает/скрывает настройки эффекта 'Волна'"""
-        if self.wave.get():
-            self.wave_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
-        else:
-            self.wave_settings_frame.pack_forget()
-
     def update_wave_params(self):
         """Обновляет параметры эффекта 'Волна'"""
         self.wave_params = {
@@ -798,7 +803,8 @@ class App:
             'speed': self.wave_speed.get()
         }
         
-        if self.wave.get():
+        # Обновляем эффект в рендерере, если он включен
+        if self.wave_effect.get():
             self.renderer.set_wave(
                 True,
                 self.wave_params['amplitude'],
@@ -816,12 +822,12 @@ class App:
             'pulse': self.pulse.get(),
             'blink': self.blink.get(),
             'random_effect': self.random_effect.get(),
-            'wave': self.wave.get()  # Переименовано
+            'wave': self.wave_effect.get()
         }
         self.renderer.set_effects(effects)
         
         # Обновляем параметры эффекта 'Волна' если он включен
-        if self.wave.get():
+        if self.wave_effect.get():
             self.update_wave_params()
         
         logger.info(f"Effects updated: {effects}")
@@ -859,9 +865,9 @@ class App:
                 'pulse': self.pulse.get(),
                 'blink': self.blink.get(),
                 'random_effect': self.random_effect.get(),
-                'wave': self.wave.get()  # Переименовано
+                'wave': self.wave_effect.get()
             },
-            'wave_params': self.wave_params,  # Переименовано
+            'wave_params': self.wave_params,
             'sensitivity': self.sensitivity.get(),
             'noise_gate_enabled': self.noise_gate_enabled.get(),
             'noise_gate_threshold': self.noise_gate_threshold.get(),
@@ -873,6 +879,7 @@ class App:
                 'thresh': self.thresh_expanded,
                 'states': self.states_expanded,
                 'effects': self.effects_expanded,
+                'wave': self.wave_expanded,  # Добавляем состояние секции "Волна"
                 'idle': self.idle_expanded
             }
         }
@@ -912,6 +919,15 @@ class App:
                 self.effects_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.effects_expanded = True
                 self.effects_header_label.config(text="▼ Глобальные эффекты")
+        elif section_name == "wave":
+            if self.wave_expanded:
+                self.wave_content.pack_forget()
+                self.wave_expanded = False
+                self.wave_header_label.config(text="▶ Настройки Волны")
+            else:
+                self.wave_content.pack(fill="x", padx=3, pady=(0, 2))
+                self.wave_expanded = True
+                self.wave_header_label.config(text="▼ Настройки Волны")
         elif section_name == "idle":
             if self.idle_expanded:
                 self.idle_content.pack_forget()
@@ -1155,7 +1171,7 @@ class App:
                     self.renderer.set_effects(self.effects)
                     
                     # Обновляем эффект "Волна"
-                    if self.wave.get():
+                    if self.wave_effect.get():
                         self.renderer.set_wave(
                             True,
                             self.wave_params['amplitude'],
