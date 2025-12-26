@@ -109,30 +109,30 @@ class App:
             'shout': 0.8
         })
 
-        # Глобальные эффекты (добавляем distortion)
+        # Глобальные эффекты
         self.effects = self.settings.get('effects', {
             'shake': False,
             'bounce': False,
             'pulse': False,
             'blink': True,
             'random_effect': False,
-            'distortion': False  # Новый эффект
+            'wave': False  # Переименован с 'distortion' на 'wave'
         })
         
-        # Параметры искажения
-        self.distortion_params = self.settings.get('distortion_params', {
+        # Параметры эффекта "Волна"
+        self.wave_params = self.settings.get('wave_params', {
             'amplitude': 3.0,
             'frequency': 0.5,
             'speed': 1.0
         })
         
         self.renderer.set_effects(self.effects)
-        # Устанавливаем параметры искажения
-        self.renderer.set_distortion(
-            self.effects.get('distortion', False),
-            self.distortion_params.get('amplitude', 3.0),
-            self.distortion_params.get('frequency', 0.5),
-            self.distortion_params.get('speed', 1.0)
+        # Устанавливаем параметры эффекта "Волна"
+        self.renderer.set_wave(
+            self.effects.get('wave', False),
+            self.wave_params.get('amplitude', 3.0),
+            self.wave_params.get('frequency', 0.5),
+            self.wave_params.get('speed', 1.0)
         )
 
         # Состояние раскрытия секций (по умолчанию все открыты)
@@ -447,43 +447,6 @@ class App:
         ttk.Checkbutton(effects_grid, text="Пульсация", variable=self.pulse,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
         
-        # Эффект искажения/волны
-        self.distortion = tk.BooleanVar(value=self.effects.get('distortion', False))
-        ttk.Checkbutton(effects_grid, text="Волна", variable=self.distortion,
-                       command=self.update_effects).pack(anchor="w", padx=3, pady=1)
-
-        # Настройки эффекта искажения (появляются только при включении)
-        self.distortion_settings_frame = ttk.Frame(effects_grid)
-        self.distortion_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
-
-        # Амплитуда
-        ttk.Label(self.distortion_settings_frame, text="Сила:").pack(anchor="w", padx=3, pady=(2, 0))
-        self.distortion_amplitude = tk.DoubleVar(value=self.distortion_params.get('amplitude', 3.0))
-        dist_amp_scale = ttk.Scale(self.distortion_settings_frame, from_=0.5, to=10.0, 
-                                  variable=self.distortion_amplitude, orient="horizontal", length=150)
-        dist_amp_scale.pack(fill="x", padx=3, pady=(0, 2))
-        dist_amp_scale.bind("<ButtonRelease-1>", lambda e: self.update_distortion_params())
-
-        # Частота
-        ttk.Label(self.distortion_settings_frame, text="Частота:").pack(anchor="w", padx=3, pady=(2, 0))
-        self.distortion_frequency = tk.DoubleVar(value=self.distortion_params.get('frequency', 0.5))
-        dist_freq_scale = ttk.Scale(self.distortion_settings_frame, from_=0.1, to=2.0, 
-                                   variable=self.distortion_frequency, orient="horizontal", length=150)
-        dist_freq_scale.pack(fill="x", padx=3, pady=(0, 2))
-        dist_freq_scale.bind("<ButtonRelease-1>", lambda e: self.update_distortion_params())
-
-        # Скорость
-        ttk.Label(self.distortion_settings_frame, text="Скорость:").pack(anchor="w", padx=3, pady=(2, 0))
-        self.distortion_speed = tk.DoubleVar(value=self.distortion_params.get('speed', 1.0))
-        dist_speed_scale = ttk.Scale(self.distortion_settings_frame, from_=0.1, to=3.0, 
-                                    variable=self.distortion_speed, orient="horizontal", length=150)
-        dist_speed_scale.pack(fill="x", padx=3, pady=(0, 2))
-        dist_speed_scale.bind("<ButtonRelease-1>", lambda e: self.update_distortion_params())
-
-        # Показываем/скрываем настройки в зависимости от состояния чекбокса
-        self._update_distortion_ui()
-        self.distortion.trace('w', lambda *args: self._update_distortion_ui())
-
         self.blink = tk.BooleanVar(value=self.effects.get('blink', True))
         ttk.Checkbutton(effects_grid, text="Моргание", variable=self.blink,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
@@ -491,6 +454,58 @@ class App:
         self.random_effect = tk.BooleanVar(value=self.effects.get('random_effect', False))
         ttk.Checkbutton(effects_grid, text="Случайная смена", variable=self.random_effect,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
+        
+        # Эффект "Волна" (переименовано с "Водная рябь")
+        self.wave = tk.BooleanVar(value=self.effects.get('wave', False))
+        ttk.Checkbutton(effects_grid, text="Волна", variable=self.wave,
+                       command=self.update_effects).pack(anchor="w", padx=3, pady=1)
+
+        # Настройки эффекта "Волна" (появляются только при включении)
+        self.wave_settings_frame = ttk.Frame(effects_grid)
+        self.wave_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
+
+        # Амплитуда с шагом 0.25 и отображением значения
+        amplitude_frame = ttk.Frame(self.wave_settings_frame)
+        amplitude_frame.pack(fill="x", padx=3, pady=(2, 0))
+        ttk.Label(amplitude_frame, text="Сила (0.5-10.0):").pack(anchor="w", side="left")
+        self.wave_amplitude = tk.DoubleVar(value=self._round_to_step(self.wave_params.get('amplitude', 3.0), 0.25))
+        self.wave_amplitude_label = ttk.Label(amplitude_frame, text=f"{self.wave_amplitude.get():.2f}")
+        self.wave_amplitude_label.pack(anchor="e", side="right", padx=5)
+        wave_amp_scale = ttk.Scale(amplitude_frame, from_=0.5, to=10.0, 
+                                  variable=self.wave_amplitude, orient="horizontal", length=150)
+        wave_amp_scale.pack(fill="x", padx=3, pady=(0, 2))
+        wave_amp_scale.configure(command=lambda val: self._on_wave_scale_move('amplitude', val))
+        wave_amp_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
+
+        # Частота с шагом 0.25 и отображением значения
+        frequency_frame = ttk.Frame(self.wave_settings_frame)
+        frequency_frame.pack(fill="x", padx=3, pady=(2, 0))
+        ttk.Label(frequency_frame, text="Частота (0.1-2.0):").pack(anchor="w", side="left")
+        self.wave_frequency = tk.DoubleVar(value=self._round_to_step(self.wave_params.get('frequency', 0.5), 0.25))
+        self.wave_frequency_label = ttk.Label(frequency_frame, text=f"{self.wave_frequency.get():.2f}")
+        self.wave_frequency_label.pack(anchor="e", side="right", padx=5)
+        wave_freq_scale = ttk.Scale(frequency_frame, from_=0.1, to=2.0, 
+                                   variable=self.wave_frequency, orient="horizontal", length=150)
+        wave_freq_scale.pack(fill="x", padx=3, pady=(0, 2))
+        wave_freq_scale.configure(command=lambda val: self._on_wave_scale_move('frequency', val))
+        wave_freq_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
+
+        # Скорость с шагом 0.25 и отображением значения
+        speed_frame = ttk.Frame(self.wave_settings_frame)
+        speed_frame.pack(fill="x", padx=3, pady=(2, 0))
+        ttk.Label(speed_frame, text="Скорость (0.1-3.0):").pack(anchor="w", side="left")
+        self.wave_speed = tk.DoubleVar(value=self._round_to_step(self.wave_params.get('speed', 1.0), 0.25))
+        self.wave_speed_label = ttk.Label(speed_frame, text=f"{self.wave_speed.get():.2f}")
+        self.wave_speed_label.pack(anchor="e", side="right", padx=5)
+        wave_speed_scale = ttk.Scale(speed_frame, from_=0.1, to=3.0, 
+                                    variable=self.wave_speed, orient="horizontal", length=150)
+        wave_speed_scale.pack(fill="x", padx=3, pady=(0, 2))
+        wave_speed_scale.configure(command=lambda val: self._on_wave_scale_move('speed', val))
+        wave_speed_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
+
+        # Показываем/скрываем настройки в зависимости от состояния чекбокса
+        self._update_wave_ui()
+        self.wave.trace('w', lambda *args: self._update_wave_ui())
 
         # Настройки idle-режима (сворачиваемые)
         idle_frame = ttk.Frame(self.expand_content)
@@ -698,6 +713,21 @@ class App:
         self.noise_gate_threshold.set(rounded_value)
         self.noise_gate_value_label.config(text=f"{rounded_value:.3f}")
 
+    def _on_wave_scale_move(self, param, value):
+        """Обработка движения шкалы эффекта 'Волна'"""
+        # Округляем до шага 0.25
+        rounded_value = self._round_to_step(float(value), 0.25)
+        
+        if param == 'amplitude':
+            self.wave_amplitude.set(rounded_value)
+            self.wave_amplitude_label.config(text=f"{rounded_value:.2f}")
+        elif param == 'frequency':
+            self.wave_frequency.set(rounded_value)
+            self.wave_frequency_label.config(text=f"{rounded_value:.2f}")
+        elif param == 'speed':
+            self.wave_speed.set(rounded_value)
+            self.wave_speed_label.config(text=f"{rounded_value:.2f}")
+
     def get_audio_devices(self):
         """Получение списка аудиоустройств"""
         try:
@@ -753,27 +783,27 @@ class App:
             logger.info(f"Noise gate threshold updated to: {threshold}")
         self.save_settings()  # Автоматическое сохранение
 
-    def _update_distortion_ui(self):
-        """Показывает/скрывает настройки эффекта искажения"""
-        if self.distortion.get():
-            self.distortion_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
+    def _update_wave_ui(self):
+        """Показывает/скрывает настройки эффекта 'Волна'"""
+        if self.wave.get():
+            self.wave_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
         else:
-            self.distortion_settings_frame.pack_forget()
+            self.wave_settings_frame.pack_forget()
 
-    def update_distortion_params(self):
-        """Обновляет параметры эффекта искажения"""
-        self.distortion_params = {
-            'amplitude': self.distortion_amplitude.get(),
-            'frequency': self.distortion_frequency.get(),
-            'speed': self.distortion_speed.get()
+    def update_wave_params(self):
+        """Обновляет параметры эффекта 'Волна'"""
+        self.wave_params = {
+            'amplitude': self.wave_amplitude.get(),
+            'frequency': self.wave_frequency.get(),
+            'speed': self.wave_speed.get()
         }
         
-        if self.distortion.get():
-            self.renderer.set_distortion(
+        if self.wave.get():
+            self.renderer.set_wave(
                 True,
-                self.distortion_params['amplitude'],
-                self.distortion_params['frequency'],
-                self.distortion_params['speed']
+                self.wave_params['amplitude'],
+                self.wave_params['frequency'],
+                self.wave_params['speed']
             )
         
         self.save_settings()
@@ -786,13 +816,13 @@ class App:
             'pulse': self.pulse.get(),
             'blink': self.blink.get(),
             'random_effect': self.random_effect.get(),
-            'distortion': self.distortion.get()  # Добавляем
+            'wave': self.wave.get()  # Переименовано
         }
         self.renderer.set_effects(effects)
         
-        # Обновляем параметры искажения если эффект включен
-        if self.distortion.get():
-            self.update_distortion_params()
+        # Обновляем параметры эффекта 'Волна' если он включен
+        if self.wave.get():
+            self.update_wave_params()
         
         logger.info(f"Effects updated: {effects}")
         self.save_settings()  # Автоматическое сохранение
@@ -829,9 +859,9 @@ class App:
                 'pulse': self.pulse.get(),
                 'blink': self.blink.get(),
                 'random_effect': self.random_effect.get(),
-                'distortion': self.distortion.get()  # Добавляем
+                'wave': self.wave.get()  # Переименовано
             },
-            'distortion_params': self.distortion_params,  # Добавляем параметры
+            'wave_params': self.wave_params,  # Переименовано
             'sensitivity': self.sensitivity.get(),
             'noise_gate_enabled': self.noise_gate_enabled.get(),
             'noise_gate_threshold': self.noise_gate_threshold.get(),
@@ -1124,13 +1154,13 @@ class App:
                     self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
                     self.renderer.set_effects(self.effects)
                     
-                    # Обновляем эффект искажения
-                    if self.distortion.get():
-                        self.renderer.set_distortion(
+                    # Обновляем эффект "Волна"
+                    if self.wave.get():
+                        self.renderer.set_wave(
                             True,
-                            self.distortion_params['amplitude'],
-                            self.distortion_params['frequency'],
-                            self.distortion_params['speed']
+                            self.wave_params['amplitude'],
+                            self.wave_params['frequency'],
+                            self.wave_params['speed']
                         )
                     
                     # Обновляем активные состояния

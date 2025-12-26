@@ -17,9 +17,9 @@
     "pulse": false,
     "blink": true,
     "random_effect": true,
-    "distortion": false
+    "wave": false
   },
-  "distortion_params": {
+  "wave_params": {
     "amplitude": 10.0,
     "frequency": 2.0,
     "speed": 3.0
@@ -32,7 +32,7 @@
   "idle_timeout": 5.0,
   "current_slot": 2,
   "sections_state": {
-    "thresh": true,
+    "thresh": false,
     "states": true,
     "effects": true,
     "idle": true
