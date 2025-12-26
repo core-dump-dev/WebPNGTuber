@@ -21,10 +21,10 @@
   },
   "wave_params": {
     "amplitude": 3.0,
-    "frequency": 2.0,
+    "frequency": 1.0,
     "speed": 3.0
   },
-  "sensitivity": 1.5,
+  "sensitivity": 2.0500000000000003,
   "noise_gate_enabled": true,
   "noise_gate_threshold": 0.01,
   "mic_device": "",

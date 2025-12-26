@@ -127,13 +127,14 @@ class App:
         })
         
         self.renderer.set_effects(self.effects)
-        # Устанавливаем параметры эффекта "Волна"
-        self.renderer.set_wave(
-            self.effects.get('wave', False),
-            self.wave_params.get('amplitude', 3.0),
-            self.wave_params.get('frequency', 0.5),
-            self.wave_params.get('speed', 1.0)
-        )
+        # Устанавливаем параметры эффекта "Волна" (только если он включен в effects)
+        if self.effects.get('wave', False):
+            self.renderer.set_wave(
+                True,
+                self.wave_params.get('amplitude', 3.0),
+                self.wave_params.get('frequency', 0.5),
+                self.wave_params.get('speed', 1.0)
+            )
 
         # Состояние раскрытия секций (по умолчанию все открыты)
         self.sections_state = self.settings.get('sections_state', {
@@ -803,14 +804,18 @@ class App:
             'speed': self.wave_speed.get()
         }
         
-        # Обновляем эффект в рендерере, если он включен
-        if self.wave_effect.get():
+        # Обновляем эффект в рендерере только если он включен в интерфейсе
+        wave_enabled = self.wave_effect.get()
+        if wave_enabled:
             self.renderer.set_wave(
                 True,
                 self.wave_params['amplitude'],
                 self.wave_params['frequency'],
                 self.wave_params['speed']
             )
+        else:
+            # Если волна выключена в интерфейсе, выключаем ее и в рендерере
+            self.renderer.set_wave(False, 0, 0, 0)
         
         self.save_settings()
 
@@ -826,9 +831,8 @@ class App:
         }
         self.renderer.set_effects(effects)
         
-        # Обновляем параметры эффекта 'Волна' если он включен
-        if self.wave_effect.get():
-            self.update_wave_params()
+        # Обновляем параметры эффекта 'Волна' в зависимости от состояния чекбокса
+        self.update_wave_params()
         
         logger.info(f"Effects updated: {effects}")
         self.save_settings()  # Автоматическое сохранение
@@ -1170,7 +1174,7 @@ class App:
                     self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
                     self.renderer.set_effects(self.effects)
                     
-                    # Обновляем эффект "Волна"
+                    # Обновляем эффект "Волна" только если он включен
                     if self.wave_effect.get():
                         self.renderer.set_wave(
                             True,
@@ -1178,6 +1182,9 @@ class App:
                             self.wave_params['frequency'],
                             self.wave_params['speed']
                         )
+                    else:
+                        # Гарантируем, что волна выключена
+                        self.renderer.set_wave(False, 0, 0, 0)
                     
                     # Обновляем активные состояния
                     active_states = {state: var.get() for state, var in self.state_vars.items()}

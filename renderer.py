@@ -625,7 +625,7 @@ class Renderer:
         visible_layers = self._get_visible_layers()
         frame_image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         
-        # Обновляем таймер смены кадров эффекта "Волна"
+        # Обновляем таймер смены кадров эффекта "Волна" только если эффект включен
         if self.wave_enabled:
             now = time.time()
             self._wave_last_update = now
@@ -644,6 +644,7 @@ class Renderer:
                     # Если нет в кэше, используем оригинальное
                     image = self._get_layer_image(unique_name)
             else:
+                # Когда волна выключена, всегда используем оригинальное изображение
                 image = self._get_layer_image(unique_name)
                 
             if not image:
@@ -755,16 +756,24 @@ class Renderer:
     
     def set_wave(self, enabled, amplitude=3.0, frequency=0.5, speed=1.0):
         """Включает/выключает эффект 'Волна' и устанавливает параметры"""
+        old_enabled = self.wave_enabled
         self.wave_enabled = enabled
         self.wave_amplitude = amplitude
         self.wave_frequency = frequency
         self.wave_speed = speed
         
-        if enabled and self.model:
-            # Пересчитываем кадры эффекта
-            self._precalculate_wave_frames()
+        if enabled:
+            # Пересчитываем кадры эффекта только если он был выключен
+            if not old_enabled and self.model:
+                self._precalculate_wave_frames()
         else:
-            # Очищаем кэш
+            # Очищаем кэш и сбрасываем текущий кадр
             self._wave_frames_cache.clear()
+            self._current_wave_frame = 0
+            self._wave_frame_timer = 0
+            
+            # Сбрасываем кэш рендера, чтобы следующий кадр был перерисован без эффектов
+            self._render_cache = None
+            self._visible_layers_cache_time = 0  # Сбрасываем кэш видимых слоев
         
         logger.info(f"Wave effect: enabled={enabled}, amplitude={amplitude}")
