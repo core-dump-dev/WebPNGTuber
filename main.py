@@ -109,15 +109,31 @@ class App:
             'shout': 0.8
         })
 
-        # Глобальные эффекты
+        # Глобальные эффекты (добавляем distortion)
         self.effects = self.settings.get('effects', {
             'shake': False,
             'bounce': False,
             'pulse': False,
             'blink': True,
-            'random_effect': False
+            'random_effect': False,
+            'distortion': False  # Новый эффект
         })
+        
+        # Параметры искажения
+        self.distortion_params = self.settings.get('distortion_params', {
+            'amplitude': 3.0,
+            'frequency': 0.5,
+            'speed': 1.0
+        })
+        
         self.renderer.set_effects(self.effects)
+        # Устанавливаем параметры искажения
+        self.renderer.set_distortion(
+            self.effects.get('distortion', False),
+            self.distortion_params.get('amplitude', 3.0),
+            self.distortion_params.get('frequency', 0.5),
+            self.distortion_params.get('speed', 1.0)
+        )
 
         # Состояние раскрытия секций (по умолчанию все открыты)
         self.sections_state = self.settings.get('sections_state', {
@@ -431,6 +447,43 @@ class App:
         ttk.Checkbutton(effects_grid, text="Пульсация", variable=self.pulse,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
         
+        # Эффект искажения/волны
+        self.distortion = tk.BooleanVar(value=self.effects.get('distortion', False))
+        ttk.Checkbutton(effects_grid, text="Волна", variable=self.distortion,
+                       command=self.update_effects).pack(anchor="w", padx=3, pady=1)
+
+        # Настройки эффекта искажения (появляются только при включении)
+        self.distortion_settings_frame = ttk.Frame(effects_grid)
+        self.distortion_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
+
+        # Амплитуда
+        ttk.Label(self.distortion_settings_frame, text="Сила:").pack(anchor="w", padx=3, pady=(2, 0))
+        self.distortion_amplitude = tk.DoubleVar(value=self.distortion_params.get('amplitude', 3.0))
+        dist_amp_scale = ttk.Scale(self.distortion_settings_frame, from_=0.5, to=10.0, 
+                                  variable=self.distortion_amplitude, orient="horizontal", length=150)
+        dist_amp_scale.pack(fill="x", padx=3, pady=(0, 2))
+        dist_amp_scale.bind("<ButtonRelease-1>", lambda e: self.update_distortion_params())
+
+        # Частота
+        ttk.Label(self.distortion_settings_frame, text="Частота:").pack(anchor="w", padx=3, pady=(2, 0))
+        self.distortion_frequency = tk.DoubleVar(value=self.distortion_params.get('frequency', 0.5))
+        dist_freq_scale = ttk.Scale(self.distortion_settings_frame, from_=0.1, to=2.0, 
+                                   variable=self.distortion_frequency, orient="horizontal", length=150)
+        dist_freq_scale.pack(fill="x", padx=3, pady=(0, 2))
+        dist_freq_scale.bind("<ButtonRelease-1>", lambda e: self.update_distortion_params())
+
+        # Скорость
+        ttk.Label(self.distortion_settings_frame, text="Скорость:").pack(anchor="w", padx=3, pady=(2, 0))
+        self.distortion_speed = tk.DoubleVar(value=self.distortion_params.get('speed', 1.0))
+        dist_speed_scale = ttk.Scale(self.distortion_settings_frame, from_=0.1, to=3.0, 
+                                    variable=self.distortion_speed, orient="horizontal", length=150)
+        dist_speed_scale.pack(fill="x", padx=3, pady=(0, 2))
+        dist_speed_scale.bind("<ButtonRelease-1>", lambda e: self.update_distortion_params())
+
+        # Показываем/скрываем настройки в зависимости от состояния чекбокса
+        self._update_distortion_ui()
+        self.distortion.trace('w', lambda *args: self._update_distortion_ui())
+
         self.blink = tk.BooleanVar(value=self.effects.get('blink', True))
         ttk.Checkbutton(effects_grid, text="Моргание", variable=self.blink,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
@@ -700,6 +753,31 @@ class App:
             logger.info(f"Noise gate threshold updated to: {threshold}")
         self.save_settings()  # Автоматическое сохранение
 
+    def _update_distortion_ui(self):
+        """Показывает/скрывает настройки эффекта искажения"""
+        if self.distortion.get():
+            self.distortion_settings_frame.pack(fill="x", padx=10, pady=(0, 3))
+        else:
+            self.distortion_settings_frame.pack_forget()
+
+    def update_distortion_params(self):
+        """Обновляет параметры эффекта искажения"""
+        self.distortion_params = {
+            'amplitude': self.distortion_amplitude.get(),
+            'frequency': self.distortion_frequency.get(),
+            'speed': self.distortion_speed.get()
+        }
+        
+        if self.distortion.get():
+            self.renderer.set_distortion(
+                True,
+                self.distortion_params['amplitude'],
+                self.distortion_params['frequency'],
+                self.distortion_params['speed']
+            )
+        
+        self.save_settings()
+
     def update_effects(self):
         """Обновление эффектов"""
         effects = {
@@ -707,9 +785,15 @@ class App:
             'bounce': self.bounce.get(),
             'pulse': self.pulse.get(),
             'blink': self.blink.get(),
-            'random_effect': self.random_effect.get()
+            'random_effect': self.random_effect.get(),
+            'distortion': self.distortion.get()  # Добавляем
         }
         self.renderer.set_effects(effects)
+        
+        # Обновляем параметры искажения если эффект включен
+        if self.distortion.get():
+            self.update_distortion_params()
+        
         logger.info(f"Effects updated: {effects}")
         self.save_settings()  # Автоматическое сохранение
 
@@ -744,8 +828,10 @@ class App:
                 'bounce': self.bounce.get(),
                 'pulse': self.pulse.get(),
                 'blink': self.blink.get(),
-                'random_effect': self.random_effect.get()
+                'random_effect': self.random_effect.get(),
+                'distortion': self.distortion.get()  # Добавляем
             },
+            'distortion_params': self.distortion_params,  # Добавляем параметры
             'sensitivity': self.sensitivity.get(),
             'noise_gate_enabled': self.noise_gate_enabled.get(),
             'noise_gate_threshold': self.noise_gate_threshold.get(),
@@ -1037,6 +1123,15 @@ class App:
                     self.renderer.set_noise_gate(self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
                     self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
                     self.renderer.set_effects(self.effects)
+                    
+                    # Обновляем эффект искажения
+                    if self.distortion.get():
+                        self.renderer.set_distortion(
+                            True,
+                            self.distortion_params['amplitude'],
+                            self.distortion_params['frequency'],
+                            self.distortion_params['speed']
+                        )
                     
                     # Обновляем активные состояния
                     active_states = {state: var.get() for state, var in self.state_vars.items()}

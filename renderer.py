@@ -94,6 +94,19 @@ class Renderer:
         self._render_cache_time = 0
         self._render_cache_duration = 0.05  # 50ms кэш
         
+        # Эффект водной ряби/искажения
+        self.distortion_enabled = False
+        self.distortion_amplitude = 3.0  # Амплитуда искажения
+        self.distortion_frequency = 0.5  # Частота волн
+        self.distortion_speed = 1.0  # Скорость анимации
+        
+        # Предрассчитанные кадры искажения (4 варианта)
+        self._distortion_frames_cache = {}  # Ключ: (layer_name, frame_index)
+        self._current_distortion_frame = 0
+        self._distortion_frame_timer = 0
+        self._distortion_frame_interval = 1.0  # Смена кадра раз в секунду
+        self._distortion_last_update = 0
+        
         logger.info(f"Renderer initialized (CPU only) with optimizations")
     
     def set_idle(self, enabled, timeout):
@@ -302,6 +315,10 @@ class Renderer:
             if g.get("blink_freq", 0.0) > 0.0:
                 self.group_blink_timers[name] = time.time() + random.uniform(0.5, 2.0)
                 self.group_blink_until[name] = 0.0
+        
+        # Предрассчитываем кадры искажения для каждого слоя (4 кадра)
+        if self.distortion_enabled:
+            self._precalculate_distortion_frames()
         
         logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with size {self.width}x{self.height}")
     
@@ -536,13 +553,99 @@ class Renderer:
             
         return None
     
+    def _create_distortion_effect(self, image, frame_index):
+        """Создает эффект водной ряби/искажения"""
+        if not image or image.width == 0 or image.height == 0:
+            return image
+        
+        try:
+            import numpy as np
+            
+            # Конвертируем в numpy array
+            img_array = np.array(image)
+            height, width = img_array.shape[:2]
+            
+            # Создаем сетку координат
+            x, y = np.meshgrid(np.arange(width), np.arange(height))
+            
+            # Параметры искажения для этого кадра
+            phase = (frame_index / 4.0) * 2 * np.pi
+            time_offset = self._distortion_last_update * self.distortion_speed
+            
+            # Волновые искажения (несколько частот для более естественного вида)
+            wave1 = np.sin(x * self.distortion_frequency * 0.01 + time_offset + phase) * self.distortion_amplitude
+            wave2 = np.cos(y * self.distortion_frequency * 0.008 + time_offset * 1.3 + phase) * self.distortion_amplitude * 0.7
+            wave3 = np.sin((x + y) * self.distortion_frequency * 0.005 + time_offset * 0.7 + phase) * self.distortion_amplitude * 0.5
+            
+            # Общее смещение
+            dx = wave1 + wave3
+            dy = wave2 + wave3 * 0.8
+            
+            # Нормализуем смещения
+            dx = np.clip(dx, -self.distortion_amplitude, self.distortion_amplitude)
+            dy = np.clip(dy, -self.distortion_amplitude, self.distortion_amplitude)
+            
+            # Создаем новые координаты
+            new_x = np.clip(x + dx, 0, width - 1).astype(np.int32)
+            new_y = np.clip(y + dy, 0, height - 1).astype(np.int32)
+            
+            # Применяем искажение
+            distorted_array = img_array[new_y, new_x]
+            
+            # Конвертируем обратно в изображение
+            distorted_img = Image.fromarray(distorted_array)
+            
+            return distorted_img
+            
+        except Exception as e:
+            logger.error(f"Error creating distortion effect: {e}")
+            return image
+    
+    def _precalculate_distortion_frames(self):
+        """Предрассчитывает 4 кадра искажения для каждого слоя"""
+        self._distortion_frames_cache.clear()
+        now = time.time()
+        self._distortion_last_update = now
+        
+        for unique_name, original_image in self._image_cache.items():
+            if original_image is None:
+                continue
+                
+            # Создаем 4 варианта искажения
+            for frame_idx in range(4):
+                cache_key = (unique_name, frame_idx)
+                distorted_img = self._create_distortion_effect(original_image.copy(), frame_idx)
+                if distorted_img:
+                    self._distortion_frames_cache[cache_key] = distorted_img
+        
+        logger.info(f"Precalculated {len(self._distortion_frames_cache)} distortion frames")
+    
     def _render_frame_cpu(self):
         """Рендеринг кадра на CPU"""
         visible_layers = self._get_visible_layers()
         frame_image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         
+        # Обновляем таймер смены кадров искажения
+        if self.distortion_enabled:
+            now = time.time()
+            self._distortion_last_update = now
+            
+            if now - self._distortion_frame_timer > self._distortion_frame_interval:
+                self._current_distortion_frame = (self._current_distortion_frame + 1) % 4
+                self._distortion_frame_timer = now
+        
         for unique_name in visible_layers:
-            image = self._get_layer_image(unique_name)
+            # Получаем изображение с учетом искажения
+            if self.distortion_enabled:
+                cache_key = (unique_name, self._current_distortion_frame)
+                if cache_key in self._distortion_frames_cache:
+                    image = self._distortion_frames_cache[cache_key]
+                else:
+                    # Если нет в кэше, используем оригинальное
+                    image = self._get_layer_image(unique_name)
+            else:
+                image = self._get_layer_image(unique_name)
+                
             if not image:
                 continue
             
@@ -649,3 +752,19 @@ class Renderer:
                 time.sleep(sleep_time)
             elif elapsed > self._frame_interval * 1.5:
                 logger.warning(f"Frame render took {elapsed*1000:.2f}ms, target: {self._frame_interval*1000:.2f}ms")
+    
+    def set_distortion(self, enabled, amplitude=3.0, frequency=0.5, speed=1.0):
+        """Включает/выключает эффект искажения и устанавливает параметры"""
+        self.distortion_enabled = enabled
+        self.distortion_amplitude = amplitude
+        self.distortion_frequency = frequency
+        self.distortion_speed = speed
+        
+        if enabled and self.model:
+            # Пересчитываем кадры искажения
+            self._precalculate_distortion_frames()
+        else:
+            # Очищаем кэш
+            self._distortion_frames_cache.clear()
+        
+        logger.info(f"Distortion effect: enabled={enabled}, amplitude={amplitude}")

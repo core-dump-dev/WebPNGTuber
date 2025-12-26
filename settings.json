@@ -16,7 +16,13 @@
     "bounce": false,
     "pulse": false,
     "blink": true,
-    "random_effect": true
+    "random_effect": true,
+    "distortion": false
+  },
+  "distortion_params": {
+    "amplitude": 10.0,
+    "frequency": 2.0,
+    "speed": 3.0
   },
   "sensitivity": 1.5,
   "noise_gate_enabled": true,
