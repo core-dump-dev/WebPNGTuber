@@ -100,7 +100,7 @@ class Renderer:
         self.wave_frequency = 0.5  # Частота волн
         self.wave_speed = 1.0  # Скорость анимации
         
-        # Предрассчитанные кадры искажения (4 варианта)
+        # Предрассчитанные кадры искажения (4 варианта) - только для статичных изображений
         self._wave_frames_cache = {}  # Ключ: (layer_name, frame_index)
         self._current_wave_frame = 0
         self._wave_frame_timer = 0
@@ -159,6 +159,7 @@ class Renderer:
         self._gif_frame_times.clear()
         self._gif_current_frame.clear()
         self._gif_last_update.clear()
+        self._wave_frames_cache.clear()
         
         # Загружаем слои с уникальными именами
         self.layers_by_name = {}
@@ -316,7 +317,7 @@ class Renderer:
                 self.group_blink_timers[name] = time.time() + random.uniform(0.5, 2.0)
                 self.group_blink_until[name] = 0.0
         
-        # Предрассчитываем кадры эффекта "Волна" для каждого слоя (4 кадра)
+        # Предрассчитываем кадры эффекта "Волна" только для статичных изображений
         if self.wave_enabled:
             self._precalculate_wave_frames()
         
@@ -602,7 +603,7 @@ class Renderer:
             return image
     
     def _precalculate_wave_frames(self):
-        """Предрассчитывает 4 кадра эффекта 'Волна' для каждого слоя"""
+        """Предрассчитывает 4 кадра эффекта 'Волна' для статичных слоев"""
         self._wave_frames_cache.clear()
         now = time.time()
         self._wave_last_update = now
@@ -611,14 +612,18 @@ class Renderer:
             if original_image is None:
                 continue
                 
-            # Создаем 4 варианта искажения
+            # Пропускаем GIF-изображения, они будут обрабатываться в реальном времени
+            if unique_name in self._gif_frames:
+                continue
+                
+            # Создаем 4 варианта искажения для статичных изображений
             for frame_idx in range(4):
                 cache_key = (unique_name, frame_idx)
                 distorted_img = self._create_wave_effect(original_image.copy(), frame_idx)
                 if distorted_img:
                     self._wave_frames_cache[cache_key] = distorted_img
         
-        logger.info(f"Precalculated {len(self._wave_frames_cache)} wave frames")
+        logger.info(f"Precalculated {len(self._wave_frames_cache)} wave frames for static images")
     
     def _render_frame_cpu(self):
         """Рендеринг кадра на CPU"""
@@ -635,23 +640,37 @@ class Renderer:
                 self._wave_frame_timer = now
         
         for unique_name in visible_layers:
-            # Получаем изображение с учетом эффекта "Волна"
-            if self.wave_enabled:
-                cache_key = (unique_name, self._current_wave_frame)
-                if cache_key in self._wave_frames_cache:
-                    image = self._wave_frames_cache[cache_key]
-                else:
-                    # Если нет в кэше, используем оригинальное
-                    image = self._get_layer_image(unique_name)
-            else:
-                # Когда волна выключена, всегда используем оригинальное изображение
-                image = self._get_layer_image(unique_name)
-                
-            if not image:
+            # Получаем оригинальное изображение (для GIF - текущий кадр)
+            original_image = self._get_layer_image(unique_name)
+            if not original_image:
                 continue
             
             layer_data = self.layers_by_name.get(unique_name)
             if not layer_data:
+                continue
+            
+            # Применяем эффект волны если он включен
+            if self.wave_enabled:
+                # Проверяем, является ли изображение GIF
+                is_gif = unique_name in self._gif_frames
+                
+                if is_gif:
+                    # Для GIF применяем эффект волны к текущему кадру в реальном времени
+                    image = self._create_wave_effect(original_image.copy(), self._current_wave_frame)
+                else:
+                    # Для статичных изображений используем кэш
+                    cache_key = (unique_name, self._current_wave_frame)
+                    if cache_key in self._wave_frames_cache:
+                        image = self._wave_frames_cache[cache_key]
+                    else:
+                        # Если нет в кэше, создаем новый
+                        image = self._create_wave_effect(original_image.copy(), self._current_wave_frame)
+                        self._wave_frames_cache[cache_key] = image
+            else:
+                # Когда волна выключена, используем оригинальное изображение
+                image = original_image
+            
+            if not image:
                 continue
             
             # Применяем прозрачность слоя
@@ -776,4 +795,4 @@ class Renderer:
             self._render_cache = None
             self._visible_layers_cache_time = 0  # Сбрасываем кэш видимых слоев
         
-        logger.info(f"Wave effect: enabled={enabled}, amplitude={amplitude}")
+        logger.info(f"Wave effect: enabled={enabled}, amplitude={amplitude}, frequency={frequency}, speed={speed}")
