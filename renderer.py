@@ -4,7 +4,6 @@ import logging
 import logging.handlers
 import cv2
 import numpy as np
-import imageio
 from PIL import Image as PILImage
 from PIL import ImageSequence
 
