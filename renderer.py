@@ -92,8 +92,8 @@ class Renderer:
         self.idle_brightness = 0.5
         
         # Кэширование
-        self._layer_cache = {}
-        self._gif_cache = {}
+        self._layer_cache = {}  # Ключ: unique_name -> layer_info
+        self._gif_cache = {}    # Ключ: unique_name -> gif_info
         self._visible_layers_cache = []
         self._visible_layers_cache_time = 0
         self._cache_ttl = 0.033  # 33ms
@@ -215,20 +215,57 @@ class Renderer:
             placeholder[:, :, 3] = 128  # Полупрозрачность
             return placeholder
     
-    def _load_gif_frames_pil(self, file_path, layer_name):
+    def _load_gif_frames_pil(self, file_path, layer_name, layer_data):
         """Загружает GIF с использованием PIL для правильной обработки анимации"""
         try:
             pil_img = PILImage.open(file_path)
             if not pil_img.is_animated:
                 # Это статичное изображение, конвертируем в OpenCV формат
                 cv_img = cv2.cvtColor(np.array(pil_img.convert('RGBA')), cv2.COLOR_RGBA2BGRA)
+                
+                # Применяем трансформации к статичному GIF
+                scale = float(layer_data.get('scale', 1.0))
+                rotation = int(layer_data.get('rotation', 0))
+                flip_h = bool(layer_data.get('flip_horizontal', False))
+                flip_v = bool(layer_data.get('flip_vertical', False))
+                
+                if scale != 1.0 and scale > 0:
+                    new_width = max(1, int(cv_img.shape[1] * scale))
+                    new_height = max(1, int(cv_img.shape[0] * scale))
+                    cv_img = cv2.resize(cv_img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                
+                if rotation != 0:
+                    center = (cv_img.shape[1] // 2, cv_img.shape[0] // 2)
+                    matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+                    cos_val = np.abs(matrix[0, 0])
+                    sin_val = np.abs(matrix[0, 1])
+                    new_width = int((cv_img.shape[1] * cos_val) + (cv_img.shape[0] * sin_val))
+                    new_height = int((cv_img.shape[1] * sin_val) + (cv_img.shape[0] * cos_val))
+                    matrix[0, 2] += (new_width / 2) - center[0]
+                    matrix[1, 2] += (new_height / 2) - center[1]
+                    cv_img = cv2.warpAffine(cv_img, matrix, (new_width, new_height), 
+                                          flags=cv2.INTER_LINEAR,
+                                          borderMode=cv2.BORDER_CONSTANT,
+                                          borderValue=(0, 0, 0, 0))
+                
+                if flip_h:
+                    cv_img = cv2.flip(cv_img, 1)
+                if flip_v:
+                    cv_img = cv2.flip(cv_img, 0)
+                
+                # Добавляем в layer_cache как обычное изображение
                 self._layer_cache[layer_name] = {
                     'name': layer_name,
+                    'original_name': layer_data.get('name', layer_name),
                     'image': cv_img,
                     'is_gif': False,
-                    'x': 0, 'y': 0,
-                    'alpha': 1.0,
-                    'index': 999
+                    'is_static_gif': True,
+                    'x': int(layer_data.get('x', 0)),
+                    'y': int(layer_data.get('y', 0)),
+                    'alpha': float(layer_data.get('alpha', 1.0)),
+                    'group': layer_data.get('group'),
+                    'visible': layer_data.get('visible', True),
+                    'index': layer_data.get('index', 999)
                 }
                 return
             
@@ -255,6 +292,36 @@ class Renderer:
                 bgr_frame = cv2.cvtColor(frame_array[:, :, :3], cv2.COLOR_RGB2BGR)
                 rgba_frame = np.dstack([bgr_frame, frame_array[:, :, 3]])
                 
+                # Применяем трансформации к каждому кадру
+                scale = float(layer_data.get('scale', 1.0))
+                rotation = int(layer_data.get('rotation', 0))
+                flip_h = bool(layer_data.get('flip_horizontal', False))
+                flip_v = bool(layer_data.get('flip_vertical', False))
+                
+                if scale != 1.0 and scale > 0:
+                    new_width = max(1, int(rgba_frame.shape[1] * scale))
+                    new_height = max(1, int(rgba_frame.shape[0] * scale))
+                    rgba_frame = cv2.resize(rgba_frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                
+                if rotation != 0:
+                    center = (rgba_frame.shape[1] // 2, rgba_frame.shape[0] // 2)
+                    matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+                    cos_val = np.abs(matrix[0, 0])
+                    sin_val = np.abs(matrix[0, 1])
+                    new_width = int((rgba_frame.shape[1] * cos_val) + (rgba_frame.shape[0] * sin_val))
+                    new_height = int((rgba_frame.shape[1] * sin_val) + (rgba_frame.shape[0] * cos_val))
+                    matrix[0, 2] += (new_width / 2) - center[0]
+                    matrix[1, 2] += (new_height / 2) - center[1]
+                    rgba_frame = cv2.warpAffine(rgba_frame, matrix, (new_width, new_height), 
+                                              flags=cv2.INTER_LINEAR,
+                                              borderMode=cv2.BORDER_CONSTANT,
+                                              borderValue=(0, 0, 0, 0))
+                
+                if flip_h:
+                    rgba_frame = cv2.flip(rgba_frame, 1)
+                if flip_v:
+                    rgba_frame = cv2.flip(rgba_frame, 0)
+                
                 frames.append(rgba_frame)
                 frame_times.append(duration)
             
@@ -262,10 +329,32 @@ class Renderer:
                 'frames': frames,
                 'frame_times': frame_times,
                 'current_frame': 0,
-                'last_update': time.time()
+                'last_update': time.time(),
+                'x': int(layer_data.get('x', 0)),
+                'y': int(layer_data.get('y', 0)),
+                'alpha': float(layer_data.get('alpha', 1.0)),
+                'group': layer_data.get('group'),
+                'visible': layer_data.get('visible', True),
+                'index': layer_data.get('index', 999),
+                'original_name': layer_data.get('name', layer_name)
             }
             
-            logger.info(f"Loaded GIF {layer_name} with {len(frames)} frames using PIL")
+            # Также добавляем запись в layer_cache чтобы слой учитывался при рендеринге
+            self._layer_cache[layer_name] = {
+                'name': layer_name,
+                'original_name': layer_data.get('name', layer_name),
+                'image': None,  # Будет получаться из _gif_cache
+                'is_gif': True,
+                'is_static_gif': False,
+                'x': int(layer_data.get('x', 0)),
+                'y': int(layer_data.get('y', 0)),
+                'alpha': float(layer_data.get('alpha', 1.0)),
+                'group': layer_data.get('group'),
+                'visible': layer_data.get('visible', True),
+                'index': layer_data.get('index', 999)
+            }
+            
+            logger.info(f"Loaded animated GIF {layer_name} with {len(frames)} frames using PIL")
             
         except Exception as e:
             logger.error(f"Error loading GIF {file_path} with PIL: {e}")
@@ -273,11 +362,33 @@ class Renderer:
             placeholder = np.zeros((100, 100, 4), dtype=np.uint8)
             placeholder[:, :, 0] = 255  # Красный
             placeholder[:, :, 3] = 128  # Полупрозрачность
+            
             self._gif_cache[layer_name] = {
                 'frames': [placeholder],
                 'frame_times': [0.1],
                 'current_frame': 0,
-                'last_update': time.time()
+                'last_update': time.time(),
+                'x': int(layer_data.get('x', 0)),
+                'y': int(layer_data.get('y', 0)),
+                'alpha': float(layer_data.get('alpha', 1.0)),
+                'group': layer_data.get('group'),
+                'visible': layer_data.get('visible', True),
+                'index': layer_data.get('index', 999),
+                'original_name': layer_data.get('name', layer_name)
+            }
+            
+            self._layer_cache[layer_name] = {
+                'name': layer_name,
+                'original_name': layer_data.get('name', layer_name),
+                'image': None,
+                'is_gif': True,
+                'is_static_gif': False,
+                'x': int(layer_data.get('x', 0)),
+                'y': int(layer_data.get('y', 0)),
+                'alpha': float(layer_data.get('alpha', 1.0)),
+                'group': layer_data.get('group'),
+                'visible': layer_data.get('visible', True),
+                'index': layer_data.get('index', 999)
             }
     
     def load_model(self, model_json, model_dir):
@@ -331,10 +442,24 @@ class Renderer:
                     unique_name = f"{layer_name}_{counter}"
                     counter += 1
                 
+                # Собираем данные слоя
+                layer_data = {
+                    'name': layer.get('name', f'layer_{idx}'),
+                    'x': int(layer.get('x', 0)),
+                    'y': int(layer.get('y', 0)),
+                    'alpha': float(layer.get('alpha', 1.0)),
+                    'scale': scale,
+                    'rotation': rotation,
+                    'flip_horizontal': flip_h,
+                    'flip_vertical': flip_v,
+                    'group': layer.get('group'),
+                    'visible': layer.get('visible', True),
+                    'index': idx
+                }
+                
                 if is_gif:
                     # Используем PIL для загрузки GIF - это самый надежный способ
-                    self._load_gif_frames_pil(file_path, unique_name)
-                    is_gif_success = unique_name in self._gif_cache
+                    self._load_gif_frames_pil(file_path, unique_name, layer_data)
                 else:
                     image = self._load_image_cv2(file_path, scale, rotation, flip_h, flip_v)
                     if image is not None:
@@ -343,6 +468,7 @@ class Renderer:
                             'original_name': layer_name,
                             'image': image,
                             'is_gif': False,
+                            'is_static_gif': False,
                             'x': int(layer.get('x', 0)),
                             'y': int(layer.get('y', 0)),
                             'alpha': float(layer.get('alpha', 1.0)),
@@ -384,6 +510,7 @@ class Renderer:
             self._precalculate_wave_frames()
         
         logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with fixed timers and GIF support")
+        logger.info(f"Layers: {len(self._layer_cache)} total, GIFs: {len([k for k, v in self._layer_cache.items() if v.get('is_gif')])}")
     
     def _precalculate_wave_frames(self):
         """Предрассчитывает 4 кадра эффекта 'Волна' для статичных слоев (оригинальная версия)"""
@@ -392,13 +519,11 @@ class Renderer:
         self._wave_last_update = now
         
         for unique_name, layer_info in self._layer_cache.items():
-            original_image = layer_info.get('image')
-            if original_image is None:
+            # Пропускаем GIF-изображения и слои без изображения
+            if layer_info.get('is_gif', False) or layer_info.get('image') is None:
                 continue
             
-            # Пропускаем GIF-изображения, они будут обрабатываться в реальном времени
-            if layer_info.get('is_gif', False):
-                continue
+            original_image = layer_info.get('image')
             
             # Создаем 4 варианта искажения для статичных изображений
             for frame_idx in range(4):
@@ -666,47 +791,52 @@ class Renderer:
         
         # Рендерим каждый слой
         for layer_name in visible_layers:
-            # Получаем информацию о слое
-            layer_info = None
-            is_gif = False
+            # Получаем информацию о слое из layer_cache
+            if layer_name not in self._layer_cache:
+                continue
             
-            if layer_name in self._layer_cache:
-                layer_info = self._layer_cache[layer_name]
-            elif layer_name in self._gif_cache:
-                layer_info = {'is_gif': True, 'name': layer_name, 'x': 0, 'y': 0, 'alpha': 1.0}
-                is_gif = True
+            layer_info = self._layer_cache[layer_name]
             
-            if not layer_info:
+            if not layer_info.get('visible', True):
                 continue
             
             x = layer_info.get('x', 0)
             y = layer_info.get('y', 0)
             alpha = layer_info.get('alpha', 1.0)
+            is_gif = layer_info.get('is_gif', False)
             
-            # Получаем изображение (для GIF - текущий кадр)
+            # Получаем изображение (для GIF - текущий кадр из gif_cache)
+            image = None
             if is_gif:
-                image = self._get_current_gif_frame(layer_name)
-                if image is None:
-                    continue
+                # Для анимированных GIF получаем текущий кадр
+                if layer_name in self._gif_cache:
+                    image = self._get_current_gif_frame(layer_name)
+                    # Также получаем параметры из gif_cache (они могут быть более актуальными)
+                    gif_info = self._gif_cache[layer_name]
+                    x = gif_info.get('x', x)
+                    y = gif_info.get('y', y)
+                    alpha = gif_info.get('alpha', alpha)
             else:
-                image = layer_info['image']
-                if image is None:
-                    continue
+                # Для обычных изображений
+                image = layer_info.get('image')
+            
+            if image is None:
+                continue
             
             # Применяем эффект волны если он включен
             if self.wave_enabled:
                 # Проверяем, является ли изображение GIF
-                is_current_gif = layer_name in self._gif_cache
+                is_current_gif = is_gif and not layer_info.get('is_static_gif', True)
                 
                 if is_current_gif:
-                    # Для GIF применяем эффект волны к текущему кадру в реальном времени
+                    # Для анимированных GIF применяем эффект волны к текущему кадру в реальном времени
                     image = self._create_wave_effect(image.copy(), self._current_wave_frame)
                 else:
                     # Для статичных изображений используем кэш
                     cache_key = (layer_name, self._current_wave_frame)
                     if cache_key in self._wave_frames_cache:
                         image = self._wave_frames_cache[cache_key]
-                    else:
+                    elif image is not None:
                         # Если нет в кэше, создаем новый
                         image = self._create_wave_effect(image.copy(), self._current_wave_frame)
                         self._wave_frames_cache[cache_key] = image

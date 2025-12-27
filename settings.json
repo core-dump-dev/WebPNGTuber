@@ -17,7 +17,7 @@
     "pulse": false,
     "blink": true,
     "random_effect": true,
-    "wave": false
+    "wave": true
   },
   "wave_params": {
     "amplitude": 3.0,
@@ -30,7 +30,7 @@
   "mic_device": "",
   "idle_enabled": true,
   "idle_timeout": 5.0,
-  "current_slot": 1,
+  "current_slot": 3,
   "sections_state": {
     "thresh": true,
     "states": true,
