@@ -72,17 +72,19 @@ class Renderer:
             'wave': False
         }
         
-        # Параметры эффекта волны (оригинальные)
+        # Параметры эффекта волны (ИЗМЕНЕНО: теперь дискретные кадры)
         self.wave_enabled = False
         self.wave_amplitude = 3.0  # Амплитуда искажения
         self.wave_frequency = 0.5  # Частота волн
-        self.wave_speed = 1.0  # Скорость анимации
+        self.wave_speed = 1.0  # Скорость анимации (кадров в секунду)
+        self.wave_num_frames = 5  # Количество различных искажений (1-5)
         
-        # Предрассчитанные кадры искажения (4 варианта) - только для статичных изображений
+        # Предрассчитанные кадры искажения для статичных изображений
         self._wave_frames_cache = {}  # Ключ: (layer_name, frame_index)
+        # Предрассчитанные кадры для GIF (кэшируем все кадры GIF с искажениями)
+        self._gif_wave_frames_cache = {}  # Ключ: (layer_name, gif_frame_index, wave_frame_index)
         self._current_wave_frame = 0
         self._wave_frame_timer = 0
-        self._wave_frame_interval = 1.0  # Смена кадра раз в секунду
         self._wave_last_update = 0
         
         # Idle режим
@@ -98,7 +100,7 @@ class Renderer:
         self._visible_layers_cache_time = 0
         self._cache_ttl = 0.033  # 33ms
         
-        # Таймеры для анимаций - ИСПРАВЛЕНО: правильная инициализация
+        # Таймеры для анимаций
         self._blink_timers = {}  # Когда следующее моргание
         self._blink_until = {}   # До какого времени показывать моргание
         self._random_timers = {} # Когда следующая случайная смена
@@ -119,7 +121,7 @@ class Renderer:
         except:
             logger.warning("OpenCL initialization failed, using CPU rendering")
         
-        logger.info(f"Renderer initialized with fixed timers and GIF support")
+        logger.info(f"Renderer initialized with GIF wave effect support")
     
     def set_idle(self, enabled, timeout):
         self.idle_enabled = enabled
@@ -141,7 +143,7 @@ class Renderer:
     
     def set_active_states(self, active_states):
         self.active_states.update(active_states)
-        logger.info(f"Active states updated: {self.active_states}")
+        logger.info(f"Active states updated: {active_states}")
     
     def start(self):
         if self._running:
@@ -403,6 +405,7 @@ class Renderer:
         self._layer_cache.clear()
         self._gif_cache.clear()
         self._wave_frames_cache.clear()
+        self._gif_wave_frames_cache.clear()
         self._visible_layers_cache = []
         self._visible_layers_cache_time = 0
         
@@ -483,7 +486,7 @@ class Renderer:
         # Организуем группы
         self.groups = {g.get('name'): g for g in self.model.get('groups', [])}
         
-        # ИНИЦИАЛИЗАЦИЯ ТАЙМЕРОВ - ИСПРАВЛЕНО
+        # ИНИЦИАЛИЗАЦИЯ ТАЙМЕРОВ
         current_time = time.time()
         
         for group_name, group in self.groups.items():
@@ -505,19 +508,19 @@ class Renderer:
                 self._random_timers[group_name] = current_time + random.uniform(random_min, random_max)
                 self._random_current[group_name] = None
         
-        # Предрассчитываем кадры эффекта "Волна" только для статичных изображений
+        # Предрассчитываем кадры эффекта "Волна" для статичных изображений и GIF
         if self.wave_enabled:
             self._precalculate_wave_frames()
         
-        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with fixed timers and GIF support")
+        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with GIF wave effect support")
         logger.info(f"Layers: {len(self._layer_cache)} total, GIFs: {len([k for k, v in self._layer_cache.items() if v.get('is_gif')])}")
     
     def _precalculate_wave_frames(self):
-        """Предрассчитывает 4 кадра эффекта 'Волна' для статичных слоев (оригинальная версия)"""
+        """Предрассчитывает кадры эффекта 'Волна' для всех слоев"""
         self._wave_frames_cache.clear()
-        now = time.time()
-        self._wave_last_update = now
+        self._gif_wave_frames_cache.clear()
         
+        # Предрассчитываем для статичных изображений
         for unique_name, layer_info in self._layer_cache.items():
             # Пропускаем GIF-изображения и слои без изображения
             if layer_info.get('is_gif', False) or layer_info.get('image') is None:
@@ -525,17 +528,35 @@ class Renderer:
             
             original_image = layer_info.get('image')
             
-            # Создаем 4 варианта искажения для статичных изображений
-            for frame_idx in range(4):
+            # Создаем wave_num_frames вариантов искажения для статичных изображений
+            for frame_idx in range(self.wave_num_frames):
                 cache_key = (unique_name, frame_idx)
-                distorted_img = self._create_wave_effect(original_image.copy(), frame_idx)
+                distorted_img = self._create_discrete_wave_effect(original_image.copy(), frame_idx)
                 if distorted_img is not None:
                     self._wave_frames_cache[cache_key] = distorted_img
         
-        logger.info(f"Precalculated {len(self._wave_frames_cache)} wave frames for static images")
+        # Предрассчитываем для GIF-изображений
+        for gif_name, gif_info in self._gif_cache.items():
+            frames = gif_info.get('frames', [])
+            if not frames:
+                continue
+            
+            logger.info(f"Precalculating wave frames for GIF {gif_name} ({len(frames)} frames)")
+            
+            # Для каждого кадра GIF создаем wave_num_frames искажений
+            for gif_frame_idx, original_frame in enumerate(frames):
+                for wave_frame_idx in range(self.wave_num_frames):
+                    cache_key = (gif_name, gif_frame_idx, wave_frame_idx)
+                    
+                    # Создаем искаженную версию кадра
+                    distorted_frame = self._create_discrete_wave_effect(original_frame.copy(), wave_frame_idx)
+                    if distorted_frame is not None:
+                        self._gif_wave_frames_cache[cache_key] = distorted_frame
+        
+        logger.info(f"Precalculated wave frames: {len(self._wave_frames_cache)} static, {len(self._gif_wave_frames_cache)} GIF")
     
-    def _create_wave_effect(self, image, frame_index):
-        """Создает эффект волны/искажения (оригинальная версия из PIL кода)"""
+    def _create_discrete_wave_effect(self, image, frame_index):
+        """Создает дискретный эффект волны - разные искажения для разных frame_index"""
         if image is None or image.shape[0] == 0 or image.shape[1] == 0:
             return image
         
@@ -544,23 +565,46 @@ class Renderer:
             img_array = image.copy()
             height, width = img_array.shape[:2]
             
+            if self.wave_num_frames <= 1 or frame_index == 0:
+                return img_array  # Нет искажения для первого кадра или если только 1 кадр
+            
             # Создаем сетку координат
             x_coords = np.arange(width)
             y_coords = np.arange(height)
             xx, yy = np.meshgrid(x_coords, y_coords)
             
-            # Параметры искажения для этого кадра
-            phase = (frame_index / 4.0) * 2 * math.pi
-            time_offset = self._wave_last_update * self.wave_speed
+            # Каждый frame_index дает разное искажение
+            # Разные комбинации синусов и косинусов для разных frame_index
+            phase = (frame_index / self.wave_num_frames) * 2 * math.pi
             
-            # Волновые искажения (несколько частот для более естественного вида)
-            wave1 = np.sin(xx * self.wave_frequency * 0.01 + time_offset + phase) * self.wave_amplitude
-            wave2 = np.cos(yy * self.wave_frequency * 0.008 + time_offset * 1.3 + phase) * self.wave_amplitude * 0.7
-            wave3 = np.sin((xx + yy) * self.wave_frequency * 0.005 + time_offset * 0.7 + phase) * self.wave_amplitude * 0.5
-            
-            # Общее смещение
-            dx = wave1 + wave3
-            dy = wave2 + wave3 * 0.8
+            # Для каждого индекса - свой тип искажения
+            if frame_index == 1:
+                # Легкое волнообразное искажение по X
+                dx = np.sin(xx * self.wave_frequency * 0.02 + phase) * self.wave_amplitude * 0.5
+                dy = np.zeros_like(dx)
+            elif frame_index == 2:
+                # Легкое волнообразное искажение по Y
+                dx = np.zeros_like(xx, dtype=np.float32)
+                dy = np.cos(yy * self.wave_frequency * 0.015 + phase) * self.wave_amplitude * 0.5
+            elif frame_index == 3:
+                # Диагональное искажение
+                dx = np.sin((xx + yy) * self.wave_frequency * 0.01 + phase) * self.wave_amplitude * 0.7
+                dy = np.cos((xx + yy) * self.wave_frequency * 0.01 + phase) * self.wave_amplitude * 0.7
+            elif frame_index == 4:
+                # Спиральное искажение
+                center_x = width / 2
+                center_y = height / 2
+                dist_x = xx - center_x
+                dist_y = yy - center_y
+                angle = np.arctan2(dist_y, dist_x)
+                distance = np.sqrt(dist_x**2 + dist_y**2)
+                
+                dx = np.sin(angle + distance * 0.01 + phase) * self.wave_amplitude * 0.3
+                dy = np.cos(angle + distance * 0.01 + phase) * self.wave_amplitude * 0.3
+            else:
+                # Для других индексов - комбинированный эффект
+                dx = np.sin(xx * self.wave_frequency * 0.01 + phase) * self.wave_amplitude
+                dy = np.cos(yy * self.wave_frequency * 0.008 + phase) * self.wave_amplitude * 0.7
             
             # Нормализуем смещения
             dx = np.clip(dx, -self.wave_amplitude, self.wave_amplitude)
@@ -578,7 +622,7 @@ class Renderer:
             return distorted_array
             
         except Exception as e:
-            logger.error(f"Error creating wave effect: {e}")
+            logger.error(f"Error creating discrete wave effect: {e}")
             return image
     
     def set_audio_level(self, level):
@@ -624,7 +668,7 @@ class Renderer:
         group_name = group.get("name")
         logic = group.get("logic", {})
         
-        # Эффект моргания - ИСПРАВЛЕНО: правильная логика
+        # Эффект моргания
         if self.effects.get('blink', True) and group.get("blink_freq", 0.0) > 0.001:
             blink_freq = float(group.get("blink_freq", 0.0))
             
@@ -646,7 +690,7 @@ class Renderer:
                 if blink_target:
                     return blink_target
         
-        # Рандомный эффект - ИСПРАВЛЕНО: правильные интервалы
+        # Рандомный эффект
         if (self.effects.get('random_effect', True) and 
             group.get("random_effect", False) and 
             current_time > self._random_timers.get(group_name, 0)):
@@ -781,12 +825,12 @@ class Renderer:
         visible_layers = self._get_visible_layers()
         
         # Обновляем таймер смены кадров эффекта "Волна" только если эффект включен
-        if self.wave_enabled:
+        if self.wave_enabled and self.wave_speed > 0:
             now = time.time()
-            self._wave_last_update = now
+            interval = 1.0 / self.wave_speed  # Интервал между сменой кадров
             
-            if now - self._wave_frame_timer > self._wave_frame_interval:
-                self._current_wave_frame = (self._current_wave_frame + 1) % 4
+            if now - self._wave_frame_timer > interval:
+                self._current_wave_frame = (self._current_wave_frame + 1) % self.wave_num_frames
                 self._wave_frame_timer = now
         
         # Рендерим каждый слой
@@ -810,36 +854,43 @@ class Renderer:
             if is_gif:
                 # Для анимированных GIF получаем текущий кадр
                 if layer_name in self._gif_cache:
-                    image = self._get_current_gif_frame(layer_name)
-                    # Также получаем параметры из gif_cache (они могут быть более актуальными)
                     gif_info = self._gif_cache[layer_name]
+                    current_gif_frame = gif_info['current_frame']
+                    
+                    # Применяем эффект волны если он включен
+                    if self.wave_enabled:
+                        # Берем предрасчитанный кадр из кэша
+                        cache_key = (layer_name, current_gif_frame, self._current_wave_frame)
+                        if cache_key in self._gif_wave_frames_cache:
+                            image = self._gif_wave_frames_cache[cache_key]
+                        else:
+                            # Если нет в кэше, получаем оригинальный кадр и создаем эффект на лету
+                            original_frame = self._get_current_gif_frame(layer_name)
+                            if original_frame is not None:
+                                image = self._create_discrete_wave_effect(original_frame.copy(), self._current_wave_frame)
+                                # Сохраняем в кэш для будущего использования
+                                self._gif_wave_frames_cache[cache_key] = image
+                    else:
+                        image = self._get_current_gif_frame(layer_name)
+                    
+                    # Также получаем параметры из gif_cache
                     x = gif_info.get('x', x)
                     y = gif_info.get('y', y)
                     alpha = gif_info.get('alpha', alpha)
             else:
                 # Для обычных изображений
-                image = layer_info.get('image')
-            
-            if image is None:
-                continue
-            
-            # Применяем эффект волны если он включен
-            if self.wave_enabled:
-                # Проверяем, является ли изображение GIF
-                is_current_gif = is_gif and not layer_info.get('is_static_gif', True)
-                
-                if is_current_gif:
-                    # Для анимированных GIF применяем эффект волны к текущему кадру в реальном времени
-                    image = self._create_wave_effect(image.copy(), self._current_wave_frame)
-                else:
-                    # Для статичных изображений используем кэш
+                if self.wave_enabled:
+                    # Берем предрасчитанный кадр из кэша
                     cache_key = (layer_name, self._current_wave_frame)
                     if cache_key in self._wave_frames_cache:
                         image = self._wave_frames_cache[cache_key]
-                    elif image is not None:
-                        # Если нет в кэше, создаем новый
-                        image = self._create_wave_effect(image.copy(), self._current_wave_frame)
-                        self._wave_frames_cache[cache_key] = image
+                    else:
+                        # Если нет в кэше, создаем на лету
+                        original_image = layer_info.get('image')
+                        if original_image is not None:
+                            image = self._create_discrete_wave_effect(original_image.copy(), self._current_wave_frame)
+                else:
+                    image = layer_info.get('image')
             
             if image is None:
                 continue
@@ -992,20 +1043,26 @@ class Renderer:
                 logger.warning(f"Frame render took {frame_time*1000:.2f}ms, target: {target_frame_time*1000:.2f}ms")
     
     def set_wave(self, enabled, amplitude=3.0, frequency=0.5, speed=1.0):
-        """Включает/выключает эффект 'Волна' и устанавливает параметры (оригинальная логика)"""
+        """Включает/выключает эффект 'Волна' и устанавливает параметры"""
         old_enabled = self.wave_enabled
         self.wave_enabled = enabled
         self.wave_amplitude = amplitude
         self.wave_frequency = frequency
-        self.wave_speed = speed
+        self.wave_speed = max(0, min(5, speed))  # Ограничиваем скорость от 0 до 5
         
         if enabled:
-            # Пересчитываем кадры эффекта только если он был выключен
-            if not old_enabled and self.model:
-                self._precalculate_wave_frames()
+            # Если скорость = 0, отключаем эффект
+            if self.wave_speed == 0:
+                self.wave_enabled = False
+                logger.info("Wave effect disabled because speed is 0")
+            else:
+                # Пересчитываем кадры эффекта только если он был выключен или параметры изменились
+                if not old_enabled or speed != self.wave_speed:
+                    self._precalculate_wave_frames()
         else:
             # Очищаем кэш и сбрасываем текущий кадр
             self._wave_frames_cache.clear()
+            self._gif_wave_frames_cache.clear()
             self._current_wave_frame = 0
             self._wave_frame_timer = 0
             

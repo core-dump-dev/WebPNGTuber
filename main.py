@@ -123,7 +123,7 @@ class App:
         self.wave_params = self.settings.get('wave_params', {
             'amplitude': 3.0,
             'frequency': 0.5,
-            'speed': 1.0
+            'speed': 1
         })
         
         self.renderer.set_effects(self.effects)
@@ -507,14 +507,14 @@ class App:
         wave_freq_scale.configure(command=lambda val: self._on_wave_scale_move('frequency', val))
         wave_freq_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
 
-        # Скорость с шагом 0.25 и отображением значения
+        # Скорость с шагом 1 и отображением значения (0-5)
         speed_frame = ttk.Frame(wave_settings_grid)
         speed_frame.pack(fill="x", padx=3, pady=(2, 0))
-        ttk.Label(speed_frame, text="Скорость (0.1-3.0):").pack(anchor="w", side="left")
-        self.wave_speed = tk.DoubleVar(value=self._round_to_step(self.wave_params.get('speed', 1.0), 0.25))
-        self.wave_speed_label = ttk.Label(speed_frame, text=f"{self.wave_speed.get():.2f}")
+        ttk.Label(speed_frame, text="Скорость (0-5):").pack(anchor="w", side="left")
+        self.wave_speed = tk.IntVar(value=int(self.wave_params.get('speed', 1)))
+        self.wave_speed_label = ttk.Label(speed_frame, text=f"{self.wave_speed.get()}")
         self.wave_speed_label.pack(anchor="e", side="right", padx=5)
-        wave_speed_scale = ttk.Scale(speed_frame, from_=0.1, to=3.0, 
+        wave_speed_scale = ttk.Scale(speed_frame, from_=0, to=5, 
                                     variable=self.wave_speed, orient="horizontal", length=150)
         wave_speed_scale.pack(fill="x", padx=3, pady=(0, 2))
         wave_speed_scale.configure(command=lambda val: self._on_wave_scale_move('speed', val))
@@ -728,8 +728,7 @@ class App:
 
     def _on_wave_scale_move(self, param, value):
         """Обработка движения шкалы эффекта 'Волна'"""
-        # Округляем до шага 0.25
-        rounded_value = self._round_to_step(float(value), 0.25)
+        rounded_value = round(float(value))
         
         if param == 'amplitude':
             self.wave_amplitude.set(rounded_value)
@@ -739,7 +738,7 @@ class App:
             self.wave_frequency_label.config(text=f"{rounded_value:.2f}")
         elif param == 'speed':
             self.wave_speed.set(rounded_value)
-            self.wave_speed_label.config(text=f"{rounded_value:.2f}")
+            self.wave_speed_label.config(text=f"{rounded_value}")
 
     def get_audio_devices(self):
         """Получение списка аудиоустройств"""
@@ -801,7 +800,7 @@ class App:
         self.wave_params = {
             'amplitude': self.wave_amplitude.get(),
             'frequency': self.wave_frequency.get(),
-            'speed': self.wave_speed.get()
+            'speed': self.wave_speed.get()  # Теперь целое число 0-5
         }
         
         # Обновляем эффект в рендерере только если он включен в интерфейсе
@@ -811,7 +810,7 @@ class App:
                 True,
                 self.wave_params['amplitude'],
                 self.wave_params['frequency'],
-                self.wave_params['speed']
+                self.wave_params['speed']  # Скорость как целое число
             )
         else:
             # Если волна выключена в интерфейсе, выключаем ее и в рендерере
