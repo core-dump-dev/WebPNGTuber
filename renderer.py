@@ -792,26 +792,15 @@ class Renderer:
         return visible_layers
     
     def _get_current_gif_frame(self, layer_name):
-        """Получает текущий кадр GIF"""
+        """Получает текущий кадр GIF без обновления таймера"""
         if layer_name not in self._gif_cache:
             return None
         
         gif_info = self._gif_cache[layer_name]
         frames = gif_info['frames']
-        frame_times = gif_info['frame_times']
         
         if not frames:
             return None
-        
-        current_time = time.time()
-        current_frame = gif_info['current_frame']
-        last_update = gif_info['last_update']
-        
-        # Проверяем, нужно ли переключить кадр
-        if current_time - last_update > frame_times[current_frame]:
-            # Переходим к следующему кадру
-            gif_info['current_frame'] = (current_frame + 1) % len(frames)
-            gif_info['last_update'] = current_time
         
         return frames[gif_info['current_frame']]
     
@@ -854,23 +843,40 @@ class Renderer:
                 # Для анимированных GIF получаем текущий кадр
                 if layer_name in self._gif_cache:
                     gif_info = self._gif_cache[layer_name]
+                    
+                    # ВАЖНО: Обновляем текущий кадр GIF ДО применения эффектов
                     current_gif_frame = gif_info['current_frame']
+                    last_update = gif_info['last_update']
+                    frames = gif_info['frames']
+                    frame_times = gif_info['frame_times']
+                    
+                    current_time = time.time()
+                    
+                    # Проверяем, нужно ли переключить кадр GIF
+                    if frames and frame_times:
+                        if current_time - last_update > frame_times[current_gif_frame]:
+                            # Переходим к следующему кадру
+                            new_frame = (current_gif_frame + 1) % len(frames)
+                            gif_info['current_frame'] = new_frame
+                            gif_info['last_update'] = current_time
+                            current_gif_frame = new_frame  # Обновляем локальную переменную
                     
                     # Применяем эффект волны если он включен
-                    if self.wave_enabled:
+                    if self.wave_enabled and frames:
                         # Берем предрасчитанный кадр из кэша
                         cache_key = (layer_name, current_gif_frame, self._current_wave_frame)
                         if cache_key in self._gif_wave_frames_cache:
                             image = self._gif_wave_frames_cache[cache_key]
                         else:
                             # Если нет в кэше, получаем оригинальный кадр и создаем эффект на лету
-                            original_frame = self._get_current_gif_frame(layer_name)
+                            original_frame = frames[current_gif_frame]
                             if original_frame is not None:
                                 image = self._create_discrete_wave_effect(original_frame.copy(), self._current_wave_frame)
                                 # Сохраняем в кэш для будущего использования
                                 self._gif_wave_frames_cache[cache_key] = image
                     else:
-                        image = self._get_current_gif_frame(layer_name)
+                        if frames:
+                            image = frames[current_gif_frame]
                     
                     # Также получаем параметры из gif_cache
                     x = gif_info.get('x', x)
