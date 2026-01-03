@@ -14,6 +14,7 @@ import logging
 import logging.handlers
 from datetime import datetime
 import psutil
+import socket
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -93,12 +94,15 @@ class App:
         # Загрузка настроек
         self.settings = self.load_settings()
 
+        # Порт веб-сервера из настроек
+        self.webserver_port = self.settings.get('webserver_port', 6969)
+
         # Инициализация компонентов
         self.renderer = Renderer(width=700, height=700, fps=60)
         self.audio = AudioProcessor(callback=self.on_audio_level,
                                    device=self.settings.get('mic_device'))
         self.audio.noise_gate_threshold = self.settings.get('noise_gate_threshold', 0.01)
-        self.webserver = None
+        self.webserver = None  # Инициализируем позже
         self.renderer_was_started = False  # Флаг для отслеживания запуска рендерера
 
         # Настройки по умолчанию
@@ -223,6 +227,14 @@ class App:
             state="disabled"  # Изначально отключена
         )
         self.link_btn.pack(fill="x", padx=2, pady=2)
+
+        # Кнопка для изменения порта веб-сервера
+        self.port_btn = ttk.Button(
+            control_frame, 
+            text=f"Порт: {self.webserver_port}",
+            command=self.change_port
+        )
+        self.port_btn.pack(fill="x", padx=2, pady=2)
 
         # Настройки микрофона
         mic_frame = ttk.LabelFrame(settings_frame, text="🎤 Микрофон")
@@ -573,6 +585,9 @@ class App:
         if self.current_slot:
             self.load_slot(self.current_slot - 1, silent=True)  # -1 потому что индексация с 0
             
+        # Создаем веб-сервер с текущим портом (но не запускаем)
+        self.webserver = WebServer(self.renderer, port=self.webserver_port)
+        
         # Завершаем инициализацию
         self.initializing = False
 
@@ -701,12 +716,144 @@ class App:
         """Открытие ссылки веб-сервера в браузере"""
         import webbrowser
         try:
-            url = "http://localhost:6969/"
+            url = f"http://localhost:{self.webserver_port}/"
             webbrowser.open(url)
             logger.info(f"Opened web link: {url}")
         except Exception as e:
             logger.error(f"Error opening web link: {e}")
             messagebox.showerror("Ошибка", f"Не удалось открыть ссылку: {e}")
+
+    def change_port(self):
+        """Изменение порта веб-сервера"""
+        # Если веб-сервер запущен, нельзя менять порт
+        if self.webserver and getattr(self.webserver, "is_running", False):
+            messagebox.showwarning("Веб-сервер запущен", 
+                                 "Пожалуйста, остановите веб-сервер перед изменением порта.")
+            return
+            
+        # Создаем диалоговое окно для изменения порта
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Изменить порт веб-сервера")
+        dialog.geometry("300x150")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Центрируем диалог относительно главного окна
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (300 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (150 // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        # Содержимое диалога
+        ttk.Label(dialog, text="Введите новый порт (1-65535):", 
+                  font=("Arial", 10)).pack(pady=(15, 5))
+        
+        port_frame = ttk.Frame(dialog)
+        port_frame.pack(pady=10)
+        
+        port_var = tk.StringVar(value=str(self.webserver_port))
+        port_entry = ttk.Entry(port_frame, textvariable=port_var, width=10, 
+                              font=("Arial", 12), justify="center")
+        port_entry.pack(side="left", padx=5)
+        port_entry.select_range(0, tk.END)
+        port_entry.focus_set()
+        
+        # Функция проверки доступности порта с учетом повторного использования порта
+        def is_port_available(port):
+            try:
+                # Проверяем, не пытаемся ли мы использовать текущий порт
+                # Если это текущий порт и сервер не запущен, считаем его доступным
+                if port == self.webserver_port and not (self.webserver and self.webserver.is_running):
+                    return True
+                
+                # Проверяем, занят ли порт другим процессом
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.5)
+                result = sock.connect_ex(('localhost', port))
+                sock.close()
+                return result != 0  # 0 означает порт занят
+            except:
+                return False
+        
+        # Функция применения порта
+        def apply_port():
+            try:
+                new_port = int(port_var.get())
+                if new_port < 1 or new_port > 65535:
+                    messagebox.showerror("Ошибка", 
+                        "Порт должен быть в диапазоне 1-65535", parent=dialog)
+                    return
+                
+                # Если порт не изменился, просто закрываем диалог
+                if new_port == self.webserver_port:
+                    dialog.destroy()
+                    return
+                
+                # Проверяем доступность порта
+                if not is_port_available(new_port):
+                    # Если порт занят, пробуем остановить старый сервер (если он на этом же порту)
+                    if self.webserver and hasattr(self.webserver, 'stop'):
+                        try:
+                            # Если это тот же порт, который мы только что использовали,
+                            # даем системе время освободить порт
+                            for attempt in range(3):
+                                if is_port_available(new_port):
+                                    break
+                                time.sleep(0.5)
+                        except:
+                            pass
+                    
+                    # Проверяем снова после ожидания
+                    if not is_port_available(new_port):
+                        messagebox.showerror("Порт занят",
+                            f"Порт {new_port} уже занят другим процессом.\nПопробуйте другой порт.",
+                            parent=dialog)
+                        return
+                
+                # Сохраняем новый порт
+                old_port = self.webserver_port
+                self.webserver_port = new_port
+                
+                # Обновляем кнопку
+                self.port_btn.config(text=f"Порт: {self.webserver_port}")
+                
+                # Пересоздаем веб-сервер с новым портом
+                self.webserver = WebServer(self.renderer, port=self.webserver_port)
+                
+                # Сохраняем настройки
+                self.save_settings()
+                
+                # Показываем сообщение об успехе
+                self.show_temporary_message(
+                    "Порт изменен", 
+                    f"Порт веб-сервера изменен: {old_port} → {self.webserver_port}"
+                )
+                
+                dialog.destroy()
+                
+            except ValueError:
+                messagebox.showerror("Ошибка", 
+                    "Порт должен быть целым числом", parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Ошибка", 
+                    f"Не удалось изменить порт: {e}", parent=dialog)
+                logger.error(f"Error changing port: {e}")
+        
+        # Кнопки диалога
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=15)
+        
+        ttk.Button(btn_frame, text="Применить", 
+                   command=apply_port).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Отмена", 
+                   command=dialog.destroy).pack(side="left", padx=5)
+        
+        # Обработка нажатия Enter
+        dialog.bind("<Return>", lambda e: apply_port())
+        
+        # Ожидание закрытия диалога
+        self.root.wait_window(dialog)
 
     def _round_to_step(self, value, step):
         """Округление значения до ближайшего шага"""
@@ -878,11 +1025,12 @@ class App:
             'idle_enabled': self.idle_enabled.get(),
             'idle_timeout': self.idle_timeout.get(),
             'current_slot': self.current_slot,
-            'sections_state': {  # Сохраняем состояние раскрытия секций
+            'webserver_port': self.webserver_port,
+            'sections_state': {
                 'thresh': self.thresh_expanded,
                 'states': self.states_expanded,
                 'effects': self.effects_expanded,
-                'wave': self.wave_expanded,  # Добавляем состояние секции "Волна"
+                'wave': self.wave_expanded,
                 'idle': self.idle_expanded
             }
         }
@@ -1148,6 +1296,7 @@ class App:
             self.webserver.stop()
             self.server_btn.config(text="🌐 Запустить веб-сервер")
             self.link_btn.config(state="disabled")
+            self.port_btn.config(state="normal")  # Разблокируем кнопку порта
             logger.info("Web server stopped")
             
             # Останавливаем рендерер только если он был запущен для веб-сервера
@@ -1160,7 +1309,7 @@ class App:
                     logger.error(f"Error stopping renderer: {e}")
         else:
             if not self.webserver:
-                self.webserver = WebServer(self.renderer)
+                self.webserver = WebServer(self.renderer, port=self.webserver_port)
             elif not self.webserver.is_running:
                 self.webserver.renderer = self.renderer
             
@@ -1200,7 +1349,8 @@ class App:
                 self.webserver.start()
                 self.server_btn.config(text="⏹️ Остановить веб-сервер")
                 self.link_btn.config(state="normal")
-                logger.info("Web server started")
+                self.port_btn.config(state="disabled")  # Блокируем кнопку порта
+                logger.info(f"Web server started on port {self.webserver_port}")
             except Exception as e:
                 logger.error(f"Error starting web server: {e}")
                 messagebox.showerror("Ошибка", f"Не удалось запустить веб-сервер: {e}")

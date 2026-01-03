@@ -1,11 +1,11 @@
 from threading import Thread
+from werkzeug.serving import make_server
 from flask import Flask, Response, send_from_directory
 import time
 import logging
 import os
 import sys
 import logging.handlers
-from datetime import datetime
 import threading
 
 # Определение базовой директории
@@ -55,27 +55,26 @@ class WebServer:
         self.host = host
         self.port = port
         self._thread = None
-        self.app = Flask("WebPNGTuberStream")
+        self._server = None
         self.is_running = False
-        
-        # Оптимизации Flask
-        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Отключение кэширования
-        self.app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
-        
-        # Кэш для сжатых кадров
-        self._frame_cache = None
-        self._frame_cache_time = 0
-        self._cache_lock = threading.Lock()
         
         # Определение базовой директории
         if getattr(sys, 'frozen', False):
             self.base_dir = os.path.dirname(sys.executable)
         else:
             self.base_dir = os.path.dirname(os.path.abspath(__file__))
-
+        
+        # Создаем Flask приложение
+        self.app = Flask("WebPNGTuberStream")
+        
+        # Оптимизации Flask
+        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+        self.app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+        
+        # Настраиваем маршруты
         @self.app.route("/stream")
         def stream():
-            logger.info("Stream connection established")
+            logger.info(f"Stream connection established on port {self.port}")
             return Response(
                 self.mjpeg_generator(),
                 mimetype="multipart/x-mixed-replace; boundary=frame"
@@ -83,7 +82,7 @@ class WebServer:
 
         @self.app.route("/")
         def index():
-            logger.info("Index page requested")
+            logger.info(f"Index page requested on port {self.port}")
             return """<html>
 <head>
     <title>WebPNGTuber</title>
@@ -138,27 +137,46 @@ class WebServer:
         """Запуск веб-сервера"""
         if self.is_running:
             return
+            
         def run():
-            self.is_running = True
             try:
-                logger.info(f"Web server starting on {self.host}:{self.port}")
-                self.app.run(
-                    host=self.host, 
-                    port=self.port, 
-                    threaded=True, 
-                    debug=False, 
-                    use_reloader=False
+                # Создаем сервер с помощью werkzeug
+                self._server = make_server(
+                    self.host, 
+                    self.port, 
+                    self.app,
+                    threaded=True
                 )
+                self.is_running = True
+                logger.info(f"Web server starting on {self.host}:{self.port}")
+                self._server.serve_forever()
             except Exception as e:
-                logger.error(f"Web server error: {e}")
-            finally:
+                logger.error(f"Web server error on port {self.port}: {e}")
                 self.is_running = False
-                logger.info("Web server stopped")
+            finally:
+                if self._server:
+                    self._server.server_close()
+                logger.info(f"Web server on port {self.port} stopped completely")
                 
         self._thread = Thread(target=run, daemon=True)
         self._thread.start()
+        
+        # Даем серверу время на запуск
+        time.sleep(0.5)
 
     def stop(self):
         """Остановка веб-сервера"""
+        if not self.is_running or not self._server:
+            return
+            
+        logger.info(f"Web server stop requested for port {self.port}")
         self.is_running = False
-        logger.info("Web server stop requested")
+        
+        # Останавливаем сервер
+        try:
+            if self._server:
+                self._server.shutdown()
+                # Даем время на корректную остановку
+                time.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Error stopping server: {e}")

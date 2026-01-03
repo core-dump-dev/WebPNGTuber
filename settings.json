@@ -31,6 +31,7 @@
   "idle_enabled": true,
   "idle_timeout": 5.0,
   "current_slot": 1,
+  "webserver_port": 6969,
   "sections_state": {
     "thresh": true,
     "states": true,
