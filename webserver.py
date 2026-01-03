@@ -1,12 +1,10 @@
+# webserver.py
 from threading import Thread
 from werkzeug.serving import make_server
 from flask import Flask, Response, send_from_directory
 import time
-import logging
 import os
 import sys
-import logging.handlers
-import threading
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -14,38 +12,12 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Создание папки для логов
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
-
-# Настройка логирования для webserver
-def setup_webserver_logging():
-    logger = logging.getLogger('webserver')
-    logger.setLevel(logging.DEBUG)
-    
-    # Форматирование
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    # Файловый обработчик с ротацией
-    log_file = os.path.join(LOGS_DIR, 'webserver.log')
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5  # 1MB
-    )
-    file_handler.setFormatter(formatter)
-    
-    # Консольный обработчик
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
-
-# Инициализация логгера
-logger = setup_webserver_logging()
+# Импортируем логирование из utils
+from utils import setup_logging
+logger = setup_logging('webserver')
 
 # Отключение логирования Flask
+import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
@@ -58,20 +30,16 @@ class WebServer:
         self._server = None
         self.is_running = False
         
-        # Определение базовой директории
         if getattr(sys, 'frozen', False):
             self.base_dir = os.path.dirname(sys.executable)
         else:
             self.base_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Создаем Flask приложение
         self.app = Flask("WebPNGTuberStream")
         
-        # Оптимизации Flask
         self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
         self.app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
         
-        # Настраиваем маршруты
         @self.app.route("/stream")
         def stream():
             logger.info(f"Stream connection established on port {self.port}")
@@ -108,19 +76,16 @@ class WebServer:
         last_frame_hash = None
         
         while self.is_running:
-            # Если рендерер не готов (нет модели), ждем
             if not self.renderer or not self.renderer.model:
                 time.sleep(0.1)
                 continue
                 
             frame = self.renderer.get_frame_bytes()
             if frame:
-                # Простая дедупликация кадров
                 frame_hash = hash(frame)
                 if frame_hash == last_frame_hash and last_frame:
                     yield last_frame
                 else:
-                    # Минимальная обработка
                     frame_data = (
                         b"--frame\r\n"
                         b"Content-Type: image/png\r\n"
@@ -140,7 +105,6 @@ class WebServer:
             
         def run():
             try:
-                # Создаем сервер с помощью werkzeug
                 self._server = make_server(
                     self.host, 
                     self.port, 
@@ -161,7 +125,6 @@ class WebServer:
         self._thread = Thread(target=run, daemon=True)
         self._thread.start()
         
-        # Даем серверу время на запуск
         time.sleep(0.5)
 
     def stop(self):
@@ -172,11 +135,9 @@ class WebServer:
         logger.info(f"Web server stop requested for port {self.port}")
         self.is_running = False
         
-        # Останавливаем сервер
         try:
             if self._server:
                 self._server.shutdown()
-                # Даем время на корректную остановку
                 time.sleep(0.5)
         except Exception as e:
             logger.error(f"Error stopping server: {e}")

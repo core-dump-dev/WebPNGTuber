@@ -1,3 +1,4 @@
+# main.py
 import threading, time
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -10,9 +11,6 @@ import json
 from PIL import Image, ImageTk
 import sounddevice as sd
 import sys
-import logging
-import logging.handlers
-from datetime import datetime
 import psutil
 import socket
 
@@ -22,49 +20,20 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Создание папки для логов
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
-
-# Настройка логирования для main
-def setup_main_logging():
-    logger = logging.getLogger('main')
-    logger.setLevel(logging.DEBUG)
-    
-    # Форматирование
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    # Файловый обработчик с ротацией
-    log_file = os.path.join(LOGS_DIR, 'main.log')
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5  # 1MB
-    )
-    file_handler.setFormatter(formatter)
-    
-    # Консольный обработчик
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
-
-# Инициализация логгера
-logger = setup_main_logging()
+# Импортируем логирование из utils
+from utils import setup_logging
+logger = setup_logging('main')
 
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 
-# Повышение приоритета процесса для лучшей производительности
 try:
     p = psutil.Process()
     if sys.platform == 'win32':
         p.nice(psutil.HIGH_PRIORITY_CLASS)
     else:
         p.nice(-10)
-    logger.info("Process priority increased")
 except Exception as e:
     logger.warning(f"Could not increase process priority: {e}")
 
@@ -74,38 +43,28 @@ class App:
         root.title("WebPNGTuber TG: @memory_not_found")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
-        # Установка размера окна: компактное
         root.geometry("800x450")
         root.minsize(800, 450)
         
-        logger.info("Application started")
-
-        # Флаг инициализации для предотвращения сохранения при начальной загрузке
         self.initializing = True
         
-        # Оптимизации Tkinter
-        root.update_idletasks()  # Обновление всех отложенных задач
+        root.update_idletasks()
         root.option_add('*tearOff', False)
         
-        # Оптимизация частоты обновления UI
-        self._ui_update_interval = 50  # 20 FPS для UI
+        self._ui_update_interval = 50
         self._last_ui_update = 0
         
-        # Загрузка настроек
         self.settings = self.load_settings()
 
-        # Порт веб-сервера из настроек
         self.webserver_port = self.settings.get('webserver_port', 6969)
 
-        # Инициализация компонентов
         self.renderer = Renderer(width=700, height=700, fps=60)
         self.audio = AudioProcessor(callback=self.on_audio_level,
                                    device=self.settings.get('mic_device'))
         self.audio.noise_gate_threshold = self.settings.get('noise_gate_threshold', 0.01)
-        self.webserver = None  # Инициализируем позже
-        self.renderer_was_started = False  # Флаг для отслеживания запуска рендерера
+        self.webserver = None
+        self.renderer_was_started = False
 
-        # Настройки по умолчанию
         self.thresholds = self.settings.get('thresholds', {
             'silent': 0.05,
             'whisper': 0.25,
@@ -113,7 +72,6 @@ class App:
             'shout': 0.8
         })
 
-        # Глобальные эффекты
         self.effects = self.settings.get('effects', {
             'shake': False,
             'bounce': False,
@@ -123,7 +81,6 @@ class App:
             'wave': False
         })
         
-        # Параметры эффекта "Волна"
         self.wave_params = self.settings.get('wave_params', {
             'amplitude': 3.0,
             'frequency': 0.5,
@@ -131,7 +88,6 @@ class App:
         })
         
         self.renderer.set_effects(self.effects)
-        # Устанавливаем параметры эффекта "Волна" (только если он включен в effects)
         if self.effects.get('wave', False):
             self.renderer.set_wave(
                 True,
@@ -140,38 +96,33 @@ class App:
                 self.wave_params.get('speed', 1.0)
             )
 
-        # Состояние раскрытия секций (по умолчанию все открыты)
         self.sections_state = self.settings.get('sections_state', {
             'thresh': True,
             'states': True,
             'effects': True,
-            'wave': True,  # Добавляем состояние секции "Волна"
+            'wave': True,
             'idle': True
         })
 
-        # UI layout - три колонки в ряд
         main_frame = ttk.Frame(root, padding=3)
         main_frame.pack(fill="both", expand=True)
         
-        # Настройка весов колонок
-        main_frame.columnconfigure(0, weight=0)  # Модели - фиксированная ширина
-        main_frame.columnconfigure(1, weight=1)  # Основные настройки
-        main_frame.columnconfigure(2, weight=2)  # Расширенные настройки
+        main_frame.columnconfigure(0, weight=0)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.columnconfigure(2, weight=2)
 
         try:
             root.iconbitmap(os.path.join(BASE_DIR, 'favicon.ico'))
         except Exception:
             pass
 
-        # ---- КОЛОНКА 1: Модели ----
         models_frame = ttk.LabelFrame(main_frame, text="Модели (6 слотов)")
         models_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 3), pady=0)
         
         self.model_slots = []
         self.slot_previews = [None] * 6
-        self.current_slot = self.settings.get('current_slot')  # Загружаем текущий слот из настроек
+        self.current_slot = self.settings.get('current_slot')
 
-        # Создаем сетку 3x2 для слотов
         slots_grid = ttk.Frame(models_frame)
         slots_grid.pack(fill="both", expand=True, padx=2, pady=2)
 
@@ -179,10 +130,8 @@ class App:
             for c in range(2):
                 idx = r*2 + c
                 
-                # Загружаем превью для каждого слота
                 photo = self.load_preview_for_slot(idx)
                 
-                # Создаем фрейм для кнопки с минимумом паддингов
                 btn_frame = ttk.Frame(slots_grid)
                 btn_frame.grid(row=r, column=c, padx=1, pady=1, sticky="nsew")
                 
@@ -191,23 +140,19 @@ class App:
                                 command=lambda i=idx: self.load_slot(i))
                 btn.pack(fill="both", expand=True, padx=0, pady=0)
                 
-                # Сохраняем ссылку на изображение
                 if photo:
                     btn.photo = photo
                     
                 self.model_slots.append(btn)
         
-        # Равномерное распределение кнопок
         slots_grid.columnconfigure(0, weight=1)
         slots_grid.columnconfigure(1, weight=1)
         for r in range(3):
             slots_grid.rowconfigure(r, weight=1)
 
-        # ---- КОЛОНКА 2: Основные настройки (микрофон и управление) ----
         settings_frame = ttk.LabelFrame(main_frame, text="Основные настройки")
         settings_frame.grid(row=0, column=1, sticky="nsew", padx=3, pady=0)
         
-        # Управление
         control_frame = ttk.LabelFrame(settings_frame, text="Управление")
         control_frame.pack(fill="x", pady=(0, 3), padx=3)
 
@@ -219,16 +164,14 @@ class App:
                                      command=self.toggle_server)
         self.server_btn.pack(fill="x", padx=2, pady=2)
 
-        # Кнопка для открытия ссылки веб-сервера
         self.link_btn = ttk.Button(
             control_frame, 
             text="🔗 Открыть ссылку",
             command=self.open_web_link,
-            state="disabled"  # Изначально отключена
+            state="disabled"
         )
         self.link_btn.pack(fill="x", padx=2, pady=2)
 
-        # Кнопка для изменения порта веб-сервера
         self.port_btn = ttk.Button(
             control_frame, 
             text=f"Порт: {self.webserver_port}",
@@ -236,17 +179,14 @@ class App:
         )
         self.port_btn.pack(fill="x", padx=2, pady=2)
 
-        # Настройки микрофона
         mic_frame = ttk.LabelFrame(settings_frame, text="🎤 Микрофон")
         mic_frame.pack(fill="x", pady=(0, 3), padx=3)
 
-        # Выбор устройства
         ttk.Label(mic_frame, text="Устройство:").pack(anchor='w', padx=2, pady=(2, 0))
         self.device_var = tk.StringVar(value=self.settings.get('mic_device', 'По умолчанию'))
         self.device_combo = ttk.Combobox(mic_frame, textvariable=self.device_var, width=18)
         self.device_combo.pack(fill='x', padx=2, pady=(0, 2))
 
-        # Заполнение устройств
         self.devices = self.get_audio_devices()
         self.device_combo['values'] = self.devices
         self.device_combo.bind('<<ComboboxSelected>>', self.on_device_change)
@@ -255,7 +195,6 @@ class App:
         self.vol_label = ttk.Label(mic_frame, text="0.00")
         self.vol_label.pack(anchor="w", padx=2, pady=(0, 2))
 
-        # Чувствительность с шагом 5%
         sens_frame = ttk.Frame(mic_frame)
         sens_frame.pack(fill="x", padx=2, pady=0)
         
@@ -264,13 +203,11 @@ class App:
         self.sens_percent_label = ttk.Label(sens_frame, text=f"{self.sensitivity.get()*100:.0f}%")
         self.sens_percent_label.pack(anchor="e", side="right")
         
-        # Шкала чувствительности с шагом 5% (0.05)
         sens_scale = ttk.Scale(mic_frame, from_=0.1, to=5.0, variable=self.sensitivity, orient="horizontal", length=180)
         sens_scale.pack(fill="x", padx=2, pady=1)
         sens_scale.configure(command=self._on_sensitivity_scale_move)
         sens_scale.bind("<ButtonRelease-1>", lambda e: self.on_sensitivity_change())
 
-        # Подавление шума с настройкой мощности и шагом 0.005
         noise_gate_frame = ttk.Frame(mic_frame)
         noise_gate_frame.pack(fill="x", padx=2, pady=0)
         
@@ -278,25 +215,21 @@ class App:
         ttk.Checkbutton(noise_gate_frame, text="Подавление шума", variable=self.noise_gate_enabled,
                        command=self.toggle_noise_gate).pack(side="left")
         
-        # Текущее значение подавления шума
         self.noise_gate_value_label = ttk.Label(noise_gate_frame, text="0.010")
         self.noise_gate_value_label.pack(side="right", padx=2)
         
         self.noise_gate_threshold = tk.DoubleVar(value=self._round_to_step(self.settings.get('noise_gate_threshold', 0.01), 0.005))
         
-        # Шкала подавления шума с шагом 0.005
         noise_gate_scale = ttk.Scale(mic_frame, from_=0.001, to=0.05, variable=self.noise_gate_threshold, 
                                    orient="horizontal", length=180)
         noise_gate_scale.pack(fill="x", padx=2, pady=1)
         noise_gate_scale.configure(command=self._on_noise_gate_scale_move)
         noise_gate_scale.bind("<ButtonRelease-1>", lambda e: self.update_noise_gate_threshold())
 
-        # Индикатор уровня
         ttk.Label(mic_frame, text="Индикатор:").pack(anchor="w", padx=2, pady=(3, 0))
         self.level_canvas = tk.Canvas(mic_frame, width=180, height=25, bg="#f0f0f0")
         self.level_canvas.pack(fill="x", padx=2, pady=(0, 3))
 
-        # Пороговые линии
         self.threshold_lines = {
             'silent': self.level_canvas.create_line(0, 0, 0, 25, dash=(2,2), width=1, fill="#888888"),
             'whisper': self.level_canvas.create_line(0, 0, 0, 25, dash=(2,2), width=1, fill="#2196F3"),
@@ -304,17 +237,13 @@ class App:
             'shout': self.level_canvas.create_line(0, 0, 0, 25, dash=(2,2), width=1, fill="#f44336")
         }
 
-        # Индикатор уровня
         self.level_indicator = self.level_canvas.create_rectangle(0, 0, 0, 25, outline="", fill="#4CAF50", tags="level_bar")
 
-        # Обработка изменения размера
         self.level_canvas.bind("<Configure>", self.on_canvas_resize)
 
-        # ---- КОЛОНКА 3: Расширенные настройки ----
         expandable_frame = ttk.LabelFrame(main_frame, text="Расширенные настройки")
         expandable_frame.grid(row=0, column=2, sticky="nsew", padx=(3, 0), pady=0)
         
-        # Создаем Canvas с прокруткой для третьей колонки
         self.expand_canvas = tk.Canvas(expandable_frame, bg="#f0f0f0")
         expand_scrollbar = ttk.Scrollbar(expandable_frame, orient="vertical", command=self.expand_canvas.yview)
         self.expand_canvas.configure(yscrollcommand=expand_scrollbar.set)
@@ -322,23 +251,19 @@ class App:
         expand_scrollbar.pack(side="right", fill="y")
         self.expand_canvas.pack(side="left", fill="both", expand=True)
         
-        # Фрейм для содержимого внутри canvas
         self.expand_content = ttk.Frame(self.expand_canvas)
         self.expand_canvas.create_window((0, 0), window=self.expand_content, anchor="nw", width=350)
         
-        # Функция обновления прокрутки
         def configure_scrollregion(event):
             self.expand_canvas.configure(scrollregion=self.expand_canvas.bbox("all"))
         
         self.expand_content.bind("<Configure>", configure_scrollregion)
 
-        # Пороги голоса (сворачиваемые)
         thresh_frame = ttk.Frame(self.expand_content)
         thresh_frame.pack(fill="x", pady=(0, 3))
         thresh_header = ttk.Frame(thresh_frame)
         thresh_header.pack(fill="x")
         
-        # Устанавливаем начальное состояние на основе настроек
         self.thresh_expanded = self.sections_state.get('thresh', True)
         thresh_text = "▼ Пороги голоса" if self.thresh_expanded else "▶ Пороги голоса"
         self.thresh_header_label = ttk.Label(thresh_header, text=thresh_text, font=("Arial", 9, "bold"), cursor="hand2")
@@ -347,11 +272,9 @@ class App:
         self.thresh_header_label.bind("<Button-1>", lambda e: self.toggle_section("thresh"))
         self.thresh_content = ttk.Frame(thresh_frame)
         
-        # Показываем или скрываем контент в зависимости от состояния
         if self.thresh_expanded:
             self.thresh_content.pack(fill="x", padx=3, pady=(0, 2))
 
-        # Сетка для порогов
         thresholds_grid = ttk.Frame(self.thresh_content)
         thresholds_grid.pack(fill="x", padx=2, pady=2)
         
@@ -393,7 +316,6 @@ class App:
         )
         help_label.grid(row=3, column=0, columnspan=4, pady=(0, 1))
 
-        # Активные состояния голоса (сворачиваемые)
         states_frame = ttk.Frame(self.expand_content)
         states_frame.pack(fill="x", pady=(0, 3))
         states_header = ttk.Frame(states_frame)
@@ -429,7 +351,6 @@ class App:
         ttk.Checkbutton(states_grid, text="Крик", variable=self.state_vars['shout'],
                        command=self.update_active_states).grid(row=1, column=1, sticky="w", padx=3, pady=1)
 
-        # Глобальные эффекты (сворачиваемые)
         effects_frame = ttk.Frame(self.expand_content)
         effects_frame.pack(fill="x", pady=(0, 3))
         effects_header = ttk.Frame(effects_frame)
@@ -473,7 +394,6 @@ class App:
         ttk.Checkbutton(effects_grid, text="Волна", variable=self.wave_effect,
                        command=self.update_effects).pack(anchor="w", padx=3, pady=1)
 
-        # Настройки эффекта "Волна" (отдельная сворачиваемая секция)
         wave_frame = ttk.Frame(self.expand_content)
         wave_frame.pack(fill="x", pady=(0, 3))
         wave_header = ttk.Frame(wave_frame)
@@ -493,7 +413,6 @@ class App:
         wave_settings_grid = ttk.Frame(self.wave_content)
         wave_settings_grid.pack(fill="x", padx=2, pady=2)
 
-        # Амплитуда с шагом 0.25 и отображением значения
         amplitude_frame = ttk.Frame(wave_settings_grid)
         amplitude_frame.pack(fill="x", padx=3, pady=(2, 0))
         ttk.Label(amplitude_frame, text="Сила (0.5-10.0):").pack(anchor="w", side="left")
@@ -506,7 +425,6 @@ class App:
         wave_amp_scale.configure(command=lambda val: self._on_wave_scale_move('amplitude', val))
         wave_amp_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
 
-        # Частота с шагом 0.25 и отображением значения
         frequency_frame = ttk.Frame(wave_settings_grid)
         frequency_frame.pack(fill="x", padx=3, pady=(2, 0))
         ttk.Label(frequency_frame, text="Частота (0.1-2.0):").pack(anchor="w", side="left")
@@ -519,7 +437,6 @@ class App:
         wave_freq_scale.configure(command=lambda val: self._on_wave_scale_move('frequency', val))
         wave_freq_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
 
-        # Скорость с шагом 1 и отображением значения (0-5)
         speed_frame = ttk.Frame(wave_settings_grid)
         speed_frame.pack(fill="x", padx=3, pady=(2, 0))
         ttk.Label(speed_frame, text="Скорость (0-5):").pack(anchor="w", side="left")
@@ -532,7 +449,6 @@ class App:
         wave_speed_scale.configure(command=lambda val: self._on_wave_scale_move('speed', val))
         wave_speed_scale.bind("<ButtonRelease-1>", lambda e: self.update_wave_params())
 
-        # Настройки idle-режима (сворачиваемые)
         idle_frame = ttk.Frame(self.expand_content)
         idle_frame.pack(fill="x", pady=(0, 3))
         idle_header = ttk.Frame(idle_frame)
@@ -563,32 +479,24 @@ class App:
         idle_entry.bind("<Return>", lambda e: self.update_idle_setting())
         idle_entry.bind("<FocusOut>", lambda e: self.update_idle_setting())
 
-        # Запуск обработки аудио
         self.audio.start()
         self.toggle_noise_gate()
 
-        # Настраиваем рендерер, но НЕ запускаем его
         self.renderer.set_thresholds(self.thresholds)
         self.renderer.set_noise_gate(self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
         self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
 
-        # Применение начальных состояний
         self.update_active_states()
 
-        # Обновление визуализации порогов
         self.update_threshold_visuals()
 
-        # Обновление слотов
         self.refresh_slot_buttons()
 
-        # Если в настройках есть текущий слот, загружаем его
         if self.current_slot:
-            self.load_slot(self.current_slot - 1, silent=True)  # -1 потому что индексация с 0
+            self.load_slot(self.current_slot - 1, silent=True)
             
-        # Создаем веб-сервер с текущим портом (но не запускаем)
         self.webserver = WebServer(self.renderer, port=self.webserver_port)
         
-        # Завершаем инициализацию
         self.initializing = False
 
     def load_preview_for_slot(self, slot_idx):
@@ -604,49 +512,40 @@ class App:
                 return photo
             except Exception as e:
                 logger.error(f"Error loading preview for slot {slot_idx+1}: {e}")
-                # В случае ошибки возвращаем пустое изображение
                 img = Image.new("RGBA", (85, 85), (0, 0, 0, 0))
                 photo = ImageTk.PhotoImage(img)
                 self.slot_previews[slot_idx] = photo
                 return photo
         
-        # Если превью нет, возвращаем пустое изображение
         img = Image.new("RGBA", (85, 85), (0, 0, 0, 0))
         photo = ImageTk.PhotoImage(img)
         self.slot_previews[slot_idx] = photo
         return photo
 
     def show_temporary_message(self, title, message, duration_ms=3000):
-        """Показать временное сообщение, которое исчезнет через указанное время"""
-        # Создаем всплывающее окно
+        """Показать временное сообщение"""
         popup = tk.Toplevel(self.root)
         popup.title(title)
-        popup.transient(self.root)  # Делаем окно зависимым от главного
+        popup.transient(self.root)
         popup.resizable(False, False)
         
-        # Центрируем окно
         popup.geometry("+%d+%d" % (
             self.root.winfo_rootx() + self.root.winfo_width() // 2 - 150,
             self.root.winfo_rooty() + self.root.winfo_height() // 2 - 50
         ))
         
-        # Добавляем текст сообщения
         message_label = ttk.Label(popup, text=message, padding=10)
         message_label.pack()
         
-        # Автоматическое закрытие через указанное время
         popup.after(duration_ms, popup.destroy)
         
-        # Даем фокус главному окну
         self.root.focus_set()
 
     def on_audio_level(self, level):
         """Оптимизированная обработка уровня аудио"""
         now = time.time()
         
-        # Троттлинг обновления UI (максимум 20 FPS)
-        if now - self._last_ui_update < 0.05:  # 50ms
-            # Только передаем в рендерер если он запущен
+        if now - self._last_ui_update < 0.05:
             if self.renderer_was_started:
                 self.renderer.set_audio_level(level * self.sensitivity.get())
             return
@@ -654,10 +553,8 @@ class App:
         try:
             self.audio_level_scaled = level * self.sensitivity.get()
             
-            # Пакетное обновление UI
             self.root.after_idle(self._batch_ui_update, self.audio_level_scaled)
             
-            # Передаем в рендерер только если он запущен
             if self.renderer_was_started:
                 self.renderer.set_audio_level(self.audio_level_scaled)
             
@@ -671,7 +568,7 @@ class App:
             self.vol_label.config(text=f"{level:.2f}")
             self.update_level_indicator(level)
         except:
-            pass  # Игнорируем ошибки в UI обновлении
+            pass
 
     def refresh_slot_buttons(self):
         """Оптимизированное обновление кнопок слотов"""
@@ -701,15 +598,13 @@ class App:
                 else:
                     btn.config(text=f"{prefix}Слот {idx+1}\n(пустой)")
                 
-                # Обновляем превью - всегда загружаем заново
                 photo = self.load_preview_for_slot(idx)
                 btn.config(image=photo)
-                btn.photo = photo  # Сохраняем ссылку
+                btn.photo = photo
                 
             except Exception as e:
                 logger.debug(f"Slot update error: {e}")
         
-        # Отложенное обновление
         self.root.after(idx * 50, update)
 
     def open_web_link(self):
@@ -718,20 +613,17 @@ class App:
         try:
             url = f"http://localhost:{self.webserver_port}/"
             webbrowser.open(url)
-            logger.info(f"Opened web link: {url}")
         except Exception as e:
             logger.error(f"Error opening web link: {e}")
             messagebox.showerror("Ошибка", f"Не удалось открыть ссылку: {e}")
 
     def change_port(self):
         """Изменение порта веб-сервера"""
-        # Если веб-сервер запущен, нельзя менять порт
         if self.webserver and getattr(self.webserver, "is_running", False):
             messagebox.showwarning("Веб-сервер запущен", 
                                  "Пожалуйста, остановите веб-сервер перед изменением порта.")
             return
             
-        # Создаем диалоговое окно для изменения порта
         dialog = tk.Toplevel(self.root)
         dialog.title("Изменить порт веб-сервера")
         dialog.geometry("300x150")
@@ -739,13 +631,11 @@ class App:
         dialog.transient(self.root)
         dialog.grab_set()
         
-        # Центрируем диалог относительно главного окна
         dialog.update_idletasks()
         x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (300 // 2)
         y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (150 // 2)
         dialog.geometry(f"+{x}+{y}")
         
-        # Содержимое диалога
         ttk.Label(dialog, text="Введите новый порт (1-65535):", 
                   font=("Arial", 10)).pack(pady=(15, 5))
         
@@ -759,24 +649,19 @@ class App:
         port_entry.select_range(0, tk.END)
         port_entry.focus_set()
         
-        # Функция проверки доступности порта с учетом повторного использования порта
         def is_port_available(port):
             try:
-                # Проверяем, не пытаемся ли мы использовать текущий порт
-                # Если это текущий порт и сервер не запущен, считаем его доступным
                 if port == self.webserver_port and not (self.webserver and self.webserver.is_running):
                     return True
                 
-                # Проверяем, занят ли порт другим процессом
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(0.5)
                 result = sock.connect_ex(('localhost', port))
                 sock.close()
-                return result != 0  # 0 означает порт занят
+                return result != 0
             except:
                 return False
         
-        # Функция применения порта
         def apply_port():
             try:
                 new_port = int(port_var.get())
@@ -785,18 +670,13 @@ class App:
                         "Порт должен быть в диапазоне 1-65535", parent=dialog)
                     return
                 
-                # Если порт не изменился, просто закрываем диалог
                 if new_port == self.webserver_port:
                     dialog.destroy()
                     return
                 
-                # Проверяем доступность порта
                 if not is_port_available(new_port):
-                    # Если порт занят, пробуем остановить старый сервер (если он на этом же порту)
                     if self.webserver and hasattr(self.webserver, 'stop'):
                         try:
-                            # Если это тот же порт, который мы только что использовали,
-                            # даем системе время освободить порт
                             for attempt in range(3):
                                 if is_port_available(new_port):
                                     break
@@ -804,27 +684,21 @@ class App:
                         except:
                             pass
                     
-                    # Проверяем снова после ожидания
                     if not is_port_available(new_port):
                         messagebox.showerror("Порт занят",
                             f"Порт {new_port} уже занят другим процессом.\nПопробуйте другой порт.",
                             parent=dialog)
                         return
                 
-                # Сохраняем новый порт
                 old_port = self.webserver_port
                 self.webserver_port = new_port
                 
-                # Обновляем кнопку
                 self.port_btn.config(text=f"Порт: {self.webserver_port}")
                 
-                # Пересоздаем веб-сервер с новым портом
                 self.webserver = WebServer(self.renderer, port=self.webserver_port)
                 
-                # Сохраняем настройки
                 self.save_settings()
                 
-                # Показываем сообщение об успехе
                 self.show_temporary_message(
                     "Порт изменен", 
                     f"Порт веб-сервера изменен: {old_port} → {self.webserver_port}"
@@ -840,7 +714,6 @@ class App:
                     f"Не удалось изменить порт: {e}", parent=dialog)
                 logger.error(f"Error changing port: {e}")
         
-        # Кнопки диалога
         btn_frame = ttk.Frame(dialog)
         btn_frame.pack(pady=15)
         
@@ -849,10 +722,8 @@ class App:
         ttk.Button(btn_frame, text="Отмена", 
                    command=dialog.destroy).pack(side="left", padx=5)
         
-        # Обработка нажатия Enter
         dialog.bind("<Return>", lambda e: apply_port())
         
-        # Ожидание закрытия диалога
         self.root.wait_window(dialog)
 
     def _round_to_step(self, value, step):
@@ -861,14 +732,12 @@ class App:
 
     def _on_sensitivity_scale_move(self, value):
         """Обработка движения шкалы чувствительности"""
-        # Округляем до шага 5%
         rounded_value = self._round_to_step(float(value), 0.05)
         self.sensitivity.set(rounded_value)
         self.sens_percent_label.config(text=f"{rounded_value*100:.0f}%")
 
     def _on_noise_gate_scale_move(self, value):
         """Обработка движения шкалы подавления шума"""
-        # Округляем до шага 0.005
         rounded_value = self._round_to_step(float(value), 0.005)
         self.noise_gate_threshold.set(rounded_value)
         self.noise_gate_value_label.config(text=f"{rounded_value:.3f}")
@@ -915,14 +784,12 @@ class App:
         self.audio = AudioProcessor(callback=self.on_audio_level, device=device_name)
         self.audio.noise_gate_threshold = self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0
         self.audio.start()
-        logger.info(f"Audio device changed to: {device_name}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
     def on_sensitivity_change(self):
         """Изменение чувствительности"""
         self.audio.set_sensitivity(self.sensitivity.get())
-        logger.info(f"Sensitivity changed to: {self.sensitivity.get()}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
     def toggle_noise_gate(self):
         """Переключение подавления шума"""
@@ -930,8 +797,7 @@ class App:
         threshold = self.noise_gate_threshold.get() if enabled else 0.0
         self.audio.noise_gate_threshold = threshold
         self.renderer.set_noise_gate(threshold)
-        logger.info(f"Noise gate {'enabled' if enabled else 'disabled'} with threshold: {threshold}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
     def update_noise_gate_threshold(self):
         """Обновление порога подавления шума"""
@@ -939,28 +805,25 @@ class App:
             threshold = self.noise_gate_threshold.get()
             self.audio.noise_gate_threshold = threshold
             self.renderer.set_noise_gate(threshold)
-            logger.info(f"Noise gate threshold updated to: {threshold}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
     def update_wave_params(self):
         """Обновляет параметры эффекта 'Волна'"""
         self.wave_params = {
             'amplitude': self.wave_amplitude.get(),
             'frequency': self.wave_frequency.get(),
-            'speed': self.wave_speed.get()  # Теперь целое число 0-5
+            'speed': self.wave_speed.get()
         }
         
-        # Обновляем эффект в рендерере только если он включен в интерфейсе
         wave_enabled = self.wave_effect.get()
         if wave_enabled:
             self.renderer.set_wave(
                 True,
                 self.wave_params['amplitude'],
                 self.wave_params['frequency'],
-                self.wave_params['speed']  # Скорость как целое число
+                self.wave_params['speed']
             )
         else:
-            # Если волна выключена в интерфейсе, выключаем ее и в рендерере
             self.renderer.set_wave(False, 0, 0, 0)
         
         self.save_settings()
@@ -977,19 +840,16 @@ class App:
         }
         self.renderer.set_effects(effects)
         
-        # Обновляем параметры эффекта 'Волна' в зависимости от состояния чекбокса
         self.update_wave_params()
         
-        logger.info(f"Effects updated: {effects}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
     def update_idle_setting(self):
         """Обновление настройки idle-режима"""
         enabled = self.idle_enabled.get()
         timeout = self.idle_timeout.get()
         self.renderer.set_idle(enabled, timeout)
-        logger.info(f"Idle mode updated: enabled={enabled}, timeout={timeout}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
     def load_settings(self):
         """Загрузка настроек"""
@@ -1002,9 +862,9 @@ class App:
         return {}
     
     def save_settings(self):
-        """Сохранение настроек (автоматическое, без сообщения)"""
+        """Сохранение настроек"""
         if self.initializing:
-            return  # Не сохраняем во время инициализации
+            return
             
         settings = {
             'thresholds': self.thresholds,
@@ -1037,7 +897,6 @@ class App:
         try:
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(settings, f, indent=2)
-            logger.info("Settings saved automatically")
         except Exception as e:
             logger.error(f"Error saving settings: {e}")
     
@@ -1089,7 +948,6 @@ class App:
                 self.idle_expanded = True
                 self.idle_header_label.config(text="▼ Idle-режим")
         
-        # Автоматическое сохранение состояния секций
         self.save_settings()
 
     def update_active_states(self):
@@ -1098,9 +956,8 @@ class App:
         for state, var in self.state_vars.items():
             active_states[state] = var.get()
         self.renderer.set_active_states(active_states)
-        self.update_threshold_visuals()  # Обновляем визуализацию порогов
-        logger.info(f"Active states updated: {active_states}")
-        self.save_settings()  # Автоматическое сохранение
+        self.update_threshold_visuals()
+        self.save_settings()
 
     def update_thresholds(self):
         """Обновление порогов голоса"""
@@ -1112,8 +969,7 @@ class App:
         }
         self.renderer.set_thresholds(self.thresholds)
         self.update_threshold_visuals()
-        logger.info(f"Thresholds updated: {self.thresholds}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
     def update_threshold_visuals(self):
         """Обновление визуализации порогов - только активные состояния"""
@@ -1121,13 +977,10 @@ class App:
         if canvas_width < 10:
             return
 
-        # Удаляем старые метки
         self.level_canvas.delete("threshold_label")
 
         for key in self.thresholds:
-            # Показываем только активные состояния
             if not self.state_vars.get(key, tk.BooleanVar(value=True)).get():
-                # Скрываем линию неактивного состояния
                 self.level_canvas.coords(self.threshold_lines[key], -10, 0, -10, 25)
                 continue
                 
@@ -1209,27 +1062,21 @@ class App:
             if self.webserver:
                 self.webserver.renderer = self.renderer
 
-        # Устанавливаем текущий слот
         self.current_slot = idx + 1
         
-        # Обновляем кнопки слотов и превью
         self.refresh_slot_buttons()
         
-        # Сохраняем настройки
         self.save_settings()
 
         model_name = self.renderer.model.get('name','модель')
         
         if not silent:
-            logger.info(f"Model loaded from slot {idx+1}: {model_name}")
-            # Используем временное сообщение вместо стандартного messagebox
             self.show_temporary_message("Загружено", f"Модель загружена из слота {idx+1}")
 
     def open_editor(self):
         """Открытие редактора моделей"""
         try:
             main_window = self.root
-            # ВАЖНО: Устанавливаем атрибут app для главного окна
             main_window.app = self
             main_window.attributes('-disabled', True)
             
@@ -1240,7 +1087,7 @@ class App:
                 noise_gate_threshold=self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0,
                 sensitivity=self.sensitivity.get(),
                 thresholds=self.thresholds,
-                current_slot=self.current_slot  # Передаем текущий слот в редактор
+                current_slot=self.current_slot
             )
             
             def on_editor_close():
@@ -1280,31 +1127,23 @@ class App:
 
     def on_model_saved(self, model_data, model_dir, slot_num=None):
         """Обработка сохранения модели"""
-        # Обновляем кнопки слотов
         self.refresh_slot_buttons()
-        logger.info(f"Model saved to directory: {model_dir}")
         
-        # Если сохранено в текущий слот, перезагружаем модель
         if slot_num == self.current_slot:
-            logger.info(f"Model saved to current slot {slot_num}, reloading")
-            self.load_slot(slot_num - 1, silent=True)  # -1 потому что индексация с 0
+            self.load_slot(slot_num - 1, silent=True)
 
     def toggle_server(self):
         """Переключение веб-сервера"""
         if self.webserver and getattr(self.webserver, "is_running", False):
-            # Останавливаем веб-сервер
             self.webserver.stop()
             self.server_btn.config(text="🌐 Запустить веб-сервер")
             self.link_btn.config(state="disabled")
-            self.port_btn.config(state="normal")  # Разблокируем кнопку порта
-            logger.info("Web server stopped")
+            self.port_btn.config(state="normal")
             
-            # Останавливаем рендерер только если он был запущен для веб-сервера
             if self.renderer_was_started:
                 try:
                     self.renderer.stop()
                     self.renderer_was_started = False
-                    logger.info("Renderer stopped")
                 except Exception as e:
                     logger.error(f"Error stopping renderer: {e}")
         else:
@@ -1313,16 +1152,13 @@ class App:
             elif not self.webserver.is_running:
                 self.webserver.renderer = self.renderer
             
-            # Запускаем рендерер перед запуском веб-сервера
             if not self.renderer_was_started:
                 try:
-                    # Настраиваем параметры рендерера перед запуском
                     self.renderer.set_thresholds(self.thresholds)
                     self.renderer.set_noise_gate(self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
                     self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
                     self.renderer.set_effects(self.effects)
                     
-                    # Обновляем эффект "Волна" только если он включен
                     if self.wave_effect.get():
                         self.renderer.set_wave(
                             True,
@@ -1331,17 +1167,13 @@ class App:
                             self.wave_params['speed']
                         )
                     else:
-                        # Гарантируем, что волна выключена
                         self.renderer.set_wave(False, 0, 0, 0)
                     
-                    # Обновляем активные состояния
                     active_states = {state: var.get() for state, var in self.state_vars.items()}
                     self.renderer.set_active_states(active_states)
                     
-                    # Запускаем рендерер
                     self.renderer.start()
                     self.renderer_was_started = True
-                    logger.info("Renderer started for web server")
                 except Exception as e:
                     logger.error(f"Error starting renderer: {e}")
             
@@ -1349,8 +1181,7 @@ class App:
                 self.webserver.start()
                 self.server_btn.config(text="⏹️ Остановить веб-сервер")
                 self.link_btn.config(state="normal")
-                self.port_btn.config(state="disabled")  # Блокируем кнопку порта
-                logger.info(f"Web server started on port {self.webserver_port}")
+                self.port_btn.config(state="disabled")
             except Exception as e:
                 logger.error(f"Error starting web server: {e}")
                 messagebox.showerror("Ошибка", f"Не удалось запустить веб-сервер: {e}")
@@ -1362,7 +1193,6 @@ class App:
         except Exception as e:
             logger.error(f"Error stopping audio: {e}")
         
-        # Останавливаем рендерер только если он был запущен
         if self.renderer_was_started:
             try:
                 self.renderer.stop()
@@ -1375,11 +1205,9 @@ class App:
             except Exception as e:
                 logger.error(f"Error stopping web server: {e}")
         
-        # Отключаем кнопку ссылки при закрытии
         self.link_btn.config(state="disabled")
         
-        self.save_settings()  # Сохраняем настройки при закрытии
-        logger.info("Application closed")
+        self.save_settings()
         self.root.destroy()
 
 if __name__ == "__main__":

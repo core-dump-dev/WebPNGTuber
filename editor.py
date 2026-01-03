@@ -1,3 +1,4 @@
+# editor.py
 import os
 import json
 import time
@@ -12,8 +13,6 @@ import sys
 import glob
 import re
 from audio import AudioProcessor
-import logging
-import logging.handlers
 from datetime import datetime
 import zipfile
 import tempfile
@@ -27,31 +26,9 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Создание папки для логов
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
-
-# Настройка логирования для editor
-def setup_editor_logging():
-    logger = logging.getLogger('editor')
-    logger.setLevel(logging.DEBUG)
-    # Форматирование
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    # Файловый обработчик с ротацией
-    log_file = os.path.join(LOGS_DIR, 'editor.log')
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5  # 1MB
-    )
-    file_handler.setFormatter(formatter)
-    # Консольный обработчик
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    return logger
-
-# Инициализация логгера
-logger = setup_editor_logging()
+# Импортируем логирование из utils
+from utils import setup_logging
+logger = setup_logging('editor')
 
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -68,20 +45,17 @@ class CanvasItem:
         self.flip_horizontal = bool(layer.get("flip_horizontal", False))
         self.flip_vertical = bool(layer.get("flip_vertical", False))
         self.visible = bool(layer.get("visible", True))
-        self.alpha = float(layer.get("alpha", 1.0))  # <--- ДОБАВЛЕНО: Прозрачность
+        self.alpha = float(layer.get("alpha", 1.0))
         
-        # Кэширование изображений для разных уровней зума
         self._zoom_cache = {}
         self._max_zoom_cache = 3
         self._preview_size = (1024, 1024)
         
-        # Атрибуты для GIF
         self.gif_frames = []
         self.current_frame = 0
         self.last_frame_time = 0
         self.frame_durations = []
         
-        # Загружаем оригинальное изображение (уменьшенное для производительности)
         self._original_image = None
         self._load_original_image()
     
@@ -92,12 +66,10 @@ class CanvasItem:
                 with Image.open(self.image_path) as gif:
                     gif.seek(0)
                     img = gif.copy().convert("RGBA")
-                    # Уменьшаем только если изображение очень большое
                     if img.width > 1024 or img.height > 1024:
                         img.thumbnail((1024, 1024), Image.LANCZOS)
                     self._original_image = img
                     
-                    # Загружаем кадры GIF для анимации
                     self._load_gif_frames()
             else:
                 img = Image.open(self.image_path).convert("RGBA")
@@ -124,12 +96,11 @@ class CanvasItem:
                         try:
                             duration = gif.info.get('duration', 100)
                             if duration == 0:
-                                duration = 100  # Защита от нулевой длительности
-                            self.frame_durations.append(duration / 1000.0)  # Конвертируем в секунды
+                                duration = 100
+                            self.frame_durations.append(duration / 1000.0)
                         except:
                             self.frame_durations.append(0.1)
                     
-                    # Инициализируем таймер
                     self.current_frame = 0
                     self.last_frame_time = time.time()
         except Exception as e:
@@ -149,7 +120,6 @@ class CanvasItem:
     @lru_cache(maxsize=10)
     def _get_transformed_image_cached(self, zoom_level, scale, rotation, flip_h, flip_v, frame_idx=0, alpha=1.0):
         """Кэшированное получение трансформированного изображения"""
-        # Получаем текущее изображение
         if self.is_gif and self.gif_frames:
             img = self.gif_frames[frame_idx % len(self.gif_frames)].copy()
         elif self._original_image:
@@ -157,31 +127,25 @@ class CanvasItem:
         else:
             return Image.new("RGBA", (10, 10), (255, 0, 0, 128))
         
-        # ПРАВИЛЬНЫЙ ПОРЯДОК ТРАНСФОРМАЦИЙ:
-        # 1. Масштаб элемента
         if scale != 1.0:
             new_width = max(1, int(img.width * scale))
             new_height = max(1, int(img.height * scale))
             img = img.resize((new_width, new_height), Image.LANCZOS)
         
-        # 2. Отражение
         if flip_h:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
         if flip_v:
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
         
-        # 3. Поворот
         if rotation != 0:
             img = img.rotate(rotation, expand=True, resample=Image.BICUBIC)
         
-        # 4. Применяем прозрачность (если не 1.0)
         if alpha < 1.0:
             if img.mode == 'RGBA':
                 r, g, b, a = img.split()
                 a = a.point(lambda x: int(x * alpha))
                 img = Image.merge('RGBA', (r, g, b, a))
         
-        # 5. Зум для отображения (только для редактора)
         if zoom_level != 1.0:
             final_width = max(1, int(img.width * zoom_level))
             final_height = max(1, int(img.height * zoom_level))
@@ -191,18 +155,12 @@ class CanvasItem:
 
     def _get_transformed_image(self, zoom_level=1.0):
         """Получает трансформированное изображение для заданного уровня зума"""
-        logger.debug(f"Getting transformed image: scale={self.scale}, rotation={self.rotation}, "
-                     f"flip_h={self.flip_horizontal}, flip_v={self.flip_vertical}, zoom={zoom_level}, alpha={self.alpha}")
-        
-        # Для GIF сначала обновляем текущий кадр
         if self.is_gif and self.gif_frames:
             self._update_gif_frame()
         
-        # Проверяем кэш
         cache_key = f"{zoom_level:.2f}_{self.scale}_{self.rotation}_{self.flip_horizontal}_{self.flip_vertical}_{self.alpha}"
         
         if self.is_gif:
-            # Для GIF добавляем номер кадра в ключ кэша
             cache_key += f"_{self.current_frame}"
         
         if cache_key in self._zoom_cache:
@@ -211,49 +169,38 @@ class CanvasItem:
         if not self._original_image and not self.gif_frames:
             return Image.new("RGBA", (10, 10), (255, 0, 0, 128))
         
-        # Очищаем старый кэш если слишком много записей
         if len(self._zoom_cache) > self._max_zoom_cache:
             self._zoom_cache.clear()
         
-        # Получаем текущее изображение
         if self.is_gif and self.gif_frames:
-            # Для GIF используем текущий кадр
             img = self.gif_frames[self.current_frame].copy()
         else:
             img = self._original_image.copy()
         
-        # ПРАВИЛЬНЫЙ ПОРЯДОК ТРАНСФОРМАЦИЙ:
-        # 1. Масштаб элемента
         if self.scale != 1.0:
             new_width = max(1, int(img.width * self.scale))
             new_height = max(1, int(img.height * self.scale))
             img = img.resize((new_width, new_height), Image.LANCZOS)
         
-        # 2. Отражение
         if self.flip_horizontal:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
         if self.flip_vertical:
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
         
-        # 3. Поворот
         if self.rotation != 0:
             img = img.rotate(self.rotation, expand=True, resample=Image.BICUBIC)
         
-        # 4. Применяем прозрачность (если не 1.0)
         if self.alpha < 1.0:
             if img.mode == 'RGBA':
-                # Создаем новое изображение с измененной прозрачностью
                 r, g, b, a = img.split()
                 a = a.point(lambda x: int(x * self.alpha))
                 img = Image.merge('RGBA', (r, g, b, a))
         
-        # 5. Зум для отображения (только для редактора)
         if zoom_level != 1.0:
             final_width = max(1, int(img.width * zoom_level))
             final_height = max(1, int(img.height * zoom_level))
             img = img.resize((final_width, final_height), Image.LANCZOS)
         
-        # Сохраняем в кэш
         self._zoom_cache[cache_key] = img
         return img
     
@@ -278,7 +225,6 @@ class CanvasItem:
         self._get_transformed_image_cached.cache_clear()
         self._zoom_cache.clear()
         
-        # Также очищаем Tkinter PhotoImage кэш
         if hasattr(self, '_tk_images'):
             self._tk_images.clear()
 
@@ -290,9 +236,7 @@ class ModelEditor(tk.Toplevel):
         self.on_save = on_save
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.current_slot = current_slot
-        logger.info(f"Model editor opened, current slot: {current_slot}")
         
-        # Сохраняем настройки микрофона
         self.mic_device = device
         self.mic_noise_gate_threshold = noise_gate_threshold
         self.mic_sensitivity = sensitivity
@@ -303,7 +247,6 @@ class ModelEditor(tk.Toplevel):
             'shout': 0.8
         }
         
-        # Данные модели
         self.model = {"name": "Без названия", "layers": [], "groups": [], "width": 700, "height": 700}
         self.model_dir = None
         self.original_slot = None
@@ -318,64 +261,52 @@ class ModelEditor(tk.Toplevel):
         self.audio_level = 0.0
         self.blink_preview_running = False
         
-        # ОПТИМИЗАЦИИ
         self._redraw_scheduled = False
-        self._redraw_delay = 33  # ~30 FPS для редактора
+        self._redraw_delay = 33
         self._canvas_cache_valid = False
         self._last_redraw_time = 0
-        self._photo_images = {}  # Кэш PhotoImage
+        self._photo_images = {}
         self._photo_cache_limit = 20
         
-        # Кэширование изображений для дерева
         self._tree_image_cache = {}
         
-        # Оптимизация событий мыши
         self._last_mouse_event = 0
-        self._mouse_event_throttle = 0.016  # ~60 FPS для событий мыши
+        self._mouse_event_throttle = 0.016
         
-        # Система отмены/повтора
         self.history = []
         self.history_index = -1
         self.max_history_size = 50
         
-        # Настройки холста
         self.canvas_width = 700
         self.canvas_height = 700
         
-        # Настройки зума и просмотра
         self.zoom_level = 1.0
         self.zoom_step = 0.1
         self.min_zoom = 0.1
-        self.max_zoom = 3.0  # Уменьшаем максимальный зум
+        self.max_zoom = 3.0
         self.offset_x = 0
         self.offset_y = 0
         self.is_panning = False
         self.last_pan_x = 0
         self.last_pan_y = 0
         
-        # Таймеры для анимаций
         self.group_blink_timers = {}
         self.group_blink_until = {}
         self.group_random_timers = {}
         self.group_random_current = {}
         
-        # Состояние дерева для сохранения
         self.tree_state = {
             "expanded_groups": set(),
             "selected_items": set(),
             "preserve_selection": False
         }
         
-        # Очищаем старые временные папки при запуске
         self.cleanup_old_temp_folders()
         
-        # Создаем UI
         self._create_ui()
         
-        # Сохраняем начальное состояние в историю
         self.save_to_history()
         
-        # Запуск превью
         self.after(100, self._preview_loop)
     
     def _create_ui(self):
@@ -385,22 +316,17 @@ class ModelEditor(tk.Toplevel):
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=1)
         
-        # Левая панель
         left_width = 300
         left = ttk.Frame(main_frame, width=left_width)
         left.grid(row=0, column=0, sticky="ns", padx=(0, 6), pady=0)
         left.grid_propagate(False)
         
-        # Центральная панель
         center = ttk.Frame(main_frame)
         center.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
         
-        # Правая панель
         right = ttk.Frame(main_frame, width=350)
         right.grid(row=0, column=2, sticky="ns", padx=(6, 0), pady=0)
         
-        # ---- Левая панель ----
-        # Имя модели
         name_frame = ttk.LabelFrame(left, text="Имя модели")
         name_frame.pack(fill="x", pady=2)
         
@@ -409,7 +335,6 @@ class ModelEditor(tk.Toplevel):
         name_entry.pack(fill="x", padx=5, pady=5)
         name_entry.bind("<Return>", self.update_model_name)
         
-        # Панель с кнопками управления моделью
         button_row1 = ttk.Frame(left)
         button_row1.pack(fill="x", pady=2)
         ttk.Button(button_row1, text="Новая", command=self.new_model, width=10).pack(side="left", padx=1, fill="x", expand=True)
@@ -425,10 +350,8 @@ class ModelEditor(tk.Toplevel):
         ttk.Button(button_row3, text="Экспорт ZIP", command=self.export_zip, width=10).pack(side="left", padx=1, fill="x", expand=True)
         ttk.Button(button_row3, text="Импорт ZIP", command=self.import_zip, width=10).pack(side="left", padx=1, fill="x", expand=True)
         
-        # Кнопка удаления модели
         ttk.Button(left, text="Удалить модель", command=self.delete_model).pack(fill="x", pady=2)
         
-        # Настройки холста
         canvas_frame = ttk.LabelFrame(left, text="Настройки холста")
         canvas_frame.pack(fill="x", pady=10)
         
@@ -446,14 +369,12 @@ class ModelEditor(tk.Toplevel):
         
         ttk.Button(canvas_frame, text="Применить", command=self.update_canvas_size).grid(row=2, column=0, columnspan=2, pady=5)
         
-        # Управление зумом
         zoom_frame = ttk.Frame(canvas_frame)
         zoom_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
         ttk.Button(zoom_frame, text="+", width=3, command=self.zoom_in).pack(side="left", padx=2)
         ttk.Button(zoom_frame, text="-", width=3, command=self.zoom_out).pack(side="left", padx=2)
         ttk.Button(zoom_frame, text="Сброс", width=6, command=self.zoom_reset).pack(side="left", padx=2)
         
-        # Режим тестирования
         test_frame = ttk.LabelFrame(left, text="Режим тестирования")
         test_frame.pack(fill="x", pady=10)
         
@@ -463,14 +384,12 @@ class ModelEditor(tk.Toplevel):
         ttk.Radiobutton(test_frame, text="Выкл", variable=self.test_mode_var, 
                        value="none", command=self.update_test_mode).pack(anchor="w")
         
-        # Индикатор уровня
         self.level_frame = ttk.Frame(test_frame)
         self.level_frame.pack(fill="x", pady=5)
         ttk.Label(self.level_frame, text="Уровень:").pack(side="left")
         self.level_bar = ttk.Progressbar(self.level_frame, length=200, mode="determinate")
         self.level_bar.pack(side="left", fill="x", expand=True, padx=5)
         
-        # Аудиопроцессор
         self.audio_processor = AudioProcessor(
             callback=self.on_audio_level,
             device=self.mic_device
@@ -480,7 +399,6 @@ class ModelEditor(tk.Toplevel):
         
         ttk.Label(left, text="Импортированные изображения:").pack(anchor="w", pady=(8, 0))
         
-        # Список импортированных изображений
         import_frame = ttk.Frame(left)
         import_frame.pack(fill="both", expand=True)
         self.import_canvas = tk.Canvas(import_frame, width=280, height=250)
@@ -493,14 +411,11 @@ class ModelEditor(tk.Toplevel):
         self.import_canvas.create_window((0, 0), window=self.import_inner, anchor="nw")
         self.import_inner.bind("<Configure>", lambda e: self.import_canvas.configure(scrollregion=self.import_canvas.bbox("all")))
         
-        # ---- Центральная панель ----
-        # Заголовок предпросмотра с кнопками отмены/повтора
         preview_header = ttk.Frame(center)
         preview_header.pack(fill="x", padx=5, pady=(0, 5))
         
         ttk.Label(preview_header, text="Предпросмотр", font=("Arial", 10, "bold")).pack(side="left", padx=(0, 10))
         
-        # Кнопки отмены/повтора
         undo_btn = ttk.Button(preview_header, text="←", width=2, command=self.undo)
         undo_btn.pack(side="left", padx=2)
         redo_btn = ttk.Button(preview_header, text="→", width=2, command=self.redo)
@@ -509,11 +424,9 @@ class ModelEditor(tk.Toplevel):
         preview_frame = ttk.Frame(center)
         preview_frame.pack(fill="both", expand=True)
         
-        # Создаем основной canvas для отображения
         self.canvas = tk.Canvas(preview_frame, bg="#222", cursor="crosshair")
         self.canvas.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Привязка событий
         self.canvas.bind("<ButtonPress-1>", self.on_canvas_mouse_down)
         self.canvas.bind("<B1-Motion>", self.on_canvas_mouse_move)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_mouse_up)
@@ -524,31 +437,24 @@ class ModelEditor(tk.Toplevel):
         self.canvas.bind("<B2-Motion>", self.on_canvas_pan_move)
         self.bind("<Configure>", self.on_window_resize)
         
-        # Привязка горячих клавиш для отмены/повтора
         self.bind_all("<Control-z>", self.undo)
         self.bind_all("<Control-y>", self.redo)
         
-        # ---- Правая панель ----
         notebook = ttk.Notebook(right)
         notebook.pack(fill="both", expand=True)
         
-        # Вкладка 1: Управление элементами
         items_tab = ttk.Frame(notebook)
         notebook.add(items_tab, text="Элементы")
         
-        # Вкладка 2: Логика групп
         groups_tab = ttk.Frame(notebook)
         notebook.add(groups_tab, text="Логика групп")
         
-        # ---- Вкладка "Элементы" ----
         items_frame = ttk.LabelFrame(items_tab, text="Элементы холста")
         items_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Древовидный список элементов
         items_list_frame = ttk.Frame(items_frame)
         items_list_frame.pack(fill="both", expand=True, pady=(0, 5))
         
-        # Создаем Treeview с вертикальной прокруткой и множественным выбором
         self.tree = ttk.Treeview(items_list_frame, show="tree", height=15, selectmode='extended')
         scrollbar = ttk.Scrollbar(items_list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -556,7 +462,6 @@ class ModelEditor(tk.Toplevel):
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         
-        # Кнопки управления
         btns_frame = ttk.Frame(items_frame)
         btns_frame.pack(fill="x", pady=(0, 10))
         ttk.Button(btns_frame, text="↑", width=3, command=self.bring_forward).pack(side="left", padx=2)
@@ -564,7 +469,6 @@ class ModelEditor(tk.Toplevel):
         ttk.Button(btns_frame, text="Группа", command=self.group_selected).pack(side="left", padx=2, fill="x", expand=True)
         ttk.Button(btns_frame, text="Разгруппировать", command=self.ungroup_selected).pack(side="left", padx=2, fill="x", expand=True)
         
-        # Свойства элемента
         props = ttk.LabelFrame(items_frame, text="Свойства элемента")
         props.pack(fill="x", pady=(0, 5))
         
@@ -600,13 +504,12 @@ class ModelEditor(tk.Toplevel):
         self.rotation_entry.bind("<Return>", self.apply_props_from_entry)
         self.rotation_entry.bind("<FocusIn>", lambda e: "break")
         
-        ttk.Label(grid_frame, text="Прозрачность:").grid(row=5, column=0, sticky="w", padx=2, pady=2)  # <--- ДОБАВЛЕНО: Поле прозрачности
+        ttk.Label(grid_frame, text="Прозрачность:").grid(row=5, column=0, sticky="w", padx=2, pady=2)
         self.alpha_entry = ttk.Entry(grid_frame)
         self.alpha_entry.grid(row=5, column=1, sticky="ew", padx=2, pady=2)
         self.alpha_entry.bind("<Return>", self.apply_props_from_entry)
         self.alpha_entry.bind("<FocusIn>", lambda e: "break")
         
-        # Зеркалирование
         mirror_frame = ttk.Frame(props)
         mirror_frame.pack(fill="x", padx=5, pady=2)
         ttk.Label(mirror_frame, text="Зеркалирование:").pack(side="left")
@@ -619,7 +522,6 @@ class ModelEditor(tk.Toplevel):
                        command=self.on_mirror_change)
         self.flip_v_cb.pack(side="left", padx=5)
         
-        # ВИДИМОСТЬ
         self.visible_var = tk.BooleanVar(value=True)
         self.visible_cb = ttk.Checkbutton(props, text="Видимый", variable=self.visible_var,
                                          command=self.on_visible_change)
@@ -628,18 +530,15 @@ class ModelEditor(tk.Toplevel):
         ttk.Button(props, text="Применить к выбранному", command=self.apply_props).pack(fill="x", padx=5, pady=5)
         ttk.Button(props, text="- Удалить выбранные", command=self.delete_selected_items).pack(fill="x", padx=5, pady=5)
         
-        # ---- Вкладка "Логика групп" ----
         groups_frame = ttk.LabelFrame(groups_tab, text="Логика групп")
         groups_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Выбранная группа
         group_info_frame = ttk.Frame(groups_frame)
         group_info_frame.pack(fill="x", pady=(0, 10))
         ttk.Label(group_info_frame, text="Выбранная группа:").pack(side="left", padx=(0, 5))
         self.group_label = ttk.Label(group_info_frame, text="(нет группы)", font=("Arial", 9, "bold"))
         self.group_label.pack(side="left")
         
-        # Настройки логики
         logic_frame = ttk.LabelFrame(groups_frame, text="Состояния → Слой/Группа")
         logic_frame.pack(fill="x", pady=(0, 10))
         
@@ -652,7 +551,6 @@ class ModelEditor(tk.Toplevel):
             "open": tk.StringVar(value="")
         }
         
-        # Настройки состояний
         states = {
             "silent": "Тишина",
             "whisper": "Шёпот",
@@ -667,13 +565,11 @@ class ModelEditor(tk.Toplevel):
             row.pack(fill="x", padx=5, pady=2)
             ttk.Label(row, text=states[state] + ":", width=10).pack(side="left")
             
-            # Создаем OptionMenu с пустым начальным значением
             initial_value = ""
             om = ttk.OptionMenu(row, self.state_vars[state], initial_value)
             om.pack(side="left", fill="x", expand=True)
             setattr(self, f"{state}_menu", om)
         
-        # Случайный эффект
         random_frame = ttk.LabelFrame(groups_tab, text="Случайный эффект")
         random_frame.pack(fill="x", pady=(0, 10))
         
@@ -691,7 +587,6 @@ class ModelEditor(tk.Toplevel):
         ttk.Entry(interval_frame, textvariable=self.random_max_var, width=5).pack(side="left", padx=2)
         ttk.Label(interval_frame, text="сек").pack(side="left")
         
-        # Настройки моргания
         blink_frame = ttk.LabelFrame(groups_tab, text="Настройки моргания")
         blink_frame.pack(fill="x", pady=(0, 10))
         
@@ -708,7 +603,6 @@ class ModelEditor(tk.Toplevel):
         ttk.Button(btn_frame, text="Превью", width=8, command=self.show_blink_preview).pack(side="left", padx=2)
         ttk.Button(btn_frame, text="Стоп", command=self.stop_blink_preview).pack(side="left", padx=2)
         
-        # Кнопка применения
         ttk.Button(groups_frame, text="Применить логику", command=self.apply_group_logic).pack(fill="x", pady=10)
         
         try:
@@ -717,12 +611,10 @@ class ModelEditor(tk.Toplevel):
             logger.error(f"Error loading icon: {e}")
     
     def _get_groups_recursive(self, parent_name=None):
-        """Получает все группы рекурсивно, начиная с указанной родительской группы"""
+        """Получает все группы рекурсивно"""
         if parent_name is None:
-            # Получаем корневые группы (без родителя)
             return [g for g in self.model.get("groups", []) if not g.get("parent")]
         
-        # Получаем дочерние группы для указанной родительской группы
         return [g for g in self.model.get("groups", []) if g.get("parent") == parent_name]
     
     def _get_current_state_for_group(self, group_name):
@@ -734,7 +626,6 @@ class ModelEditor(tk.Toplevel):
         logic = group.get("logic", {})
         now = time.time()
         
-        # Обработка моргания
         if self.test_mode_var.get() != "none":
             blink_freq = float(group.get("blink_freq", 0.0))
             if group_name not in self.group_blink_timers:
@@ -750,14 +641,12 @@ class ModelEditor(tk.Toplevel):
                     if "blink" in logic and logic["blink"]:
                         return logic["blink"]
                     else:
-                        # Автоматический поиск слоя для моргания
                         for layer in self.model.get("layers", []):
                             if layer.get("group") == group_name:
                                 name = layer.get("name", "").lower()
                                 if any(kw in name for kw in ["close", "closed", "shut", "blink", "морг", "закр"]):
                                     return layer.get("name")
         
-        # Обработка случайного эффекта
         if group.get("random_effect", False):
             min_time = group.get("random_min", 5.0)
             max_time = group.get("random_max", 10.0)
@@ -771,16 +660,12 @@ class ModelEditor(tk.Toplevel):
                 if children:
                     blink_layer = logic.get("blink", "")
                     open_layer = logic.get("open", "")
-                    # Фильтруем доступные слои (только непосредственные дети группы)
                     available = []
                     for child_name in children:
-                        # Проверяем, является ли child_name слоем или группой
                         if child_name in [l.get("name") for l in self.model.get("layers", [])]:
-                            # Это слой
                             if child_name != blink_layer and child_name != open_layer:
                                 available.append(child_name)
                         else:
-                            # Это группа, проверяем есть ли в ней видимые слои
                             child_group = next((g for g in self.model.get("groups", []) if g.get("name") == child_name), None)
                             if child_group and child_group.get("random_effect", False):
                                 available.append(child_name)
@@ -795,7 +680,6 @@ class ModelEditor(tk.Toplevel):
         if self.group_random_current.get(group_name):
             return self.group_random_current.get(group_name)
         
-        # Обработка голосовых состояний
         current_state = "silent"
         if self.audio_level > self.thresholds['shout']:
             current_state = "shout"
@@ -806,7 +690,6 @@ class ModelEditor(tk.Toplevel):
         elif self.audio_level > self.thresholds['silent']:
             current_state = "silent"
             
-        # Fallback: если состояния нет в логике, пробуем другие варианты
         if current_state in logic and logic[current_state]:
             return logic[current_state]
         elif "open" in logic and logic["open"]:
@@ -816,7 +699,6 @@ class ModelEditor(tk.Toplevel):
         elif "silent" in logic and logic["silent"]:
             return logic["silent"]
             
-        # Если ничего не подошло, возвращаем первый доступный слой из группы
         for layer in self.model.get("layers", []):
             if layer.get("group") == group_name and layer.get("visible", True):
                 return layer.get("name")
@@ -827,12 +709,10 @@ class ModelEditor(tk.Toplevel):
         """Получает все элементы из указанной группы и её дочерних групп"""
         items = []
         
-        # Получаем непосредственные элементы группы
         for ci in self.items:
             if ci.layer.get("group") == group_name:
                 items.append(ci)
         
-        # Получаем дочерние группы
         child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
         for child_group in child_groups:
             items.extend(self._get_all_group_items(child_group.get("name")))
@@ -840,48 +720,39 @@ class ModelEditor(tk.Toplevel):
         return items
     
     def _get_visible_items_for_state(self, current_state):
-        """Возвращает список видимых элементов для текущего состояния с учетом иерархии"""
+        """Возвращает список видимых элементов для текущего состояния"""
         visible_items = []
         processed_groups = set()
         
-        # Функция для рекурсивной обработки групп
         def process_group(group_name):
             if group_name in processed_groups:
                 return
             processed_groups.add(group_name)
             
-            # Получаем группу
             group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
             if not group:
                 return
                 
-            # Получаем текущее состояние для группы
             chosen = self._get_current_state_for_group(group_name)
             
             if not chosen:
-                # Если ничего не выбрано, показываем все видимые слои группы
                 for ci in self.items:
                     if ci.layer.get("group") == group_name and ci.visible:
                         visible_items.append(ci)
                 return
                 
-            # Проверяем, является ли chosen группой или слоем
             is_group = any(g.get("name") == chosen for g in self.model.get("groups", []))
             if is_group:
-                # Если это группа - рекурсивно обрабатываем ее
                 process_group(chosen)
             else:
-                # Если это слой - добавляем только его в видимые
                 for ci in self.items:
                     if ci.layer.get("name") == chosen and ci.layer.get("group") == group_name and ci.visible:
                         visible_items.append(ci)
         
-        # Обрабатываем корневые группы (без родителя)
         root_groups = [g.get("name") for g in self.model.get("groups", []) if not g.get("parent")]
         for group_name in root_groups:
             process_group(group_name)
             
-        # Добавляем элементы без групп
         for ci in self.items:
             if not ci.layer.get("group") and ci.visible:
                 visible_items.append(ci)
@@ -889,11 +760,10 @@ class ModelEditor(tk.Toplevel):
         return visible_items
     
     def save_to_history(self, description=""):
-        """Сохраняет ТОЛЬКО изменения в историю, а не полное состояние"""
+        """Сохраняет ТОЛЬКО изменения в историю"""
         if self.history_index < len(self.history) - 1:
             self.history = self.history[:self.history_index + 1]
         
-        # Создаем легковесное состояние с ТОЛЬКО изменениями
         state = {
             'model_snapshot': json.dumps({
                 'name': self.model.get('name', ''),
@@ -902,17 +772,16 @@ class ModelEditor(tk.Toplevel):
                 'layers': [],
                 'groups': self.model.get('groups', [])
             }, ensure_ascii=False),
-            'items_changes': [],  # Только изменения элементов
+            'items_changes': [],
             'description': description,
             'timestamp': time.time()
         }
         
-        # Сохраняем ТОЛЬКО выбранные элементы или все, если описание указывает на глобальное изменение
         items_to_save = self.current_selection if self.current_selection else self.items
         
         for ci in items_to_save:
             item_state = {
-                'layer_id': id(ci),  # Используем ID для отслеживания
+                'layer_id': id(ci),
                 'layer_name': ci.layer.get('name', ''),
                 'x': ci.x,
                 'y': ci.y,
@@ -935,8 +804,6 @@ class ModelEditor(tk.Toplevel):
             if self.history_index > 0:
                 self.history_index -= 1
         
-        logger.info(f"History saved: {description}, index: {self.history_index}, size: {len(self.history)}")
-    
     def get_slot_preview_image(self, slot_num):
         """Получение изображения превью для слота"""
         try:
@@ -967,59 +834,43 @@ class ModelEditor(tk.Toplevel):
         return ImageTk.PhotoImage(img)
     
     def undo(self, event=None):
-        """Отмена последнего действия с проверкой"""
+        """Отмена последнего действия"""
         if self.history_index > 0:
             old_index = self.history_index
             self.history_index -= 1
             
-            # Сохраняем текущее состояние перед отменой
             current_state = self._capture_current_state()
-            
-            # Загружаем предыдущее состояние
             self.load_from_history()
             
-            # Если что-то пошло не так, возвращаемся
             if not self._validate_state():
                 self.history_index = old_index
                 self.load_from_history()
-                logger.warning("Undo validation failed, restored to previous state")
-            else:
-                logger.info(f"Undo successful: {old_index} -> {self.history_index}")
     
     def redo(self, event=None):
-        """Повтор отмененного действия с проверкой"""
+        """Повтор отмененного действия"""
         if self.history_index < len(self.history) - 1:
             old_index = self.history_index
             self.history_index += 1
             
-            # Сохраняем текущее состояние перед повтором
             current_state = self._capture_current_state()
-            
-            # Загружаем следующее состояние
             self.load_from_history()
             
-            # Если что-то пошло не так, возвращаемся
             if not self._validate_state():
                 self.history_index = old_index
                 self.load_from_history()
-                logger.warning("Redo validation failed, restored to previous state")
-            else:
-                logger.info(f"Redo successful: {old_index} -> {self.history_index}")
     
     def load_from_history(self):
-        """Загружает состояние из истории, применяя ТОЛЬКО изменения"""
+        """Загружает состояние из истории"""
         if self.history_index < 0 or self.history_index >= len(self.history):
             return
         
         state = self.history[self.history_index]
         
         try:
-            # Восстанавливаем только изменения элементов
             for item_state in state['items_changes']:
                 layer_id = item_state['layer_id']
                 layer_name = item_state['layer_name']
                 
-                # Ищем элемент по ID или по имени
                 target_item = None
                 for ci in self.items:
                     if id(ci) == layer_id or ci.layer.get('name') == layer_name:
@@ -1027,7 +878,6 @@ class ModelEditor(tk.Toplevel):
                         break
                 
                 if target_item:
-                    # Применяем изменения ТОЛЬКО к найденному элементу
                     target_item.x = item_state['x']
                     target_item.y = item_state['y']
                     target_item.scale = item_state['scale']
@@ -1038,7 +888,6 @@ class ModelEditor(tk.Toplevel):
                     target_item.alpha = item_state.get('alpha', 1.0)
                     target_item.is_gif = item_state['is_gif']
                     
-                    # Обновляем слой в модели
                     if target_item.layer:
                         target_item.layer.update({
                             'x': item_state['x'],
@@ -1051,7 +900,6 @@ class ModelEditor(tk.Toplevel):
                             'flip_vertical': item_state['flip_vertical']
                         })
             
-            # Восстанавливаем основные параметры модели
             if 'model_snapshot' in state:
                 model_snapshot = json.loads(state['model_snapshot'])
                 self.model['name'] = model_snapshot.get('name', self.model.get('name', ''))
@@ -1087,15 +935,11 @@ class ModelEditor(tk.Toplevel):
     def _validate_state(self):
         """Проверяет валидность текущего состояния"""
         try:
-            # Проверяем базовую целостность
             if len(self.items) == 0 and self.model.get('layers'):
-                logger.warning("Validation failed: items list empty but model has layers")
                 return False
             
-            # Проверяем, что все элементы имеют правильные атрибуты
             for ci in self.items:
                 if not hasattr(ci, 'x') or not hasattr(ci, 'y'):
-                    logger.warning(f"Validation failed: item missing coordinates")
                     return False
             
             return True
@@ -1127,7 +971,6 @@ class ModelEditor(tk.Toplevel):
                 slot_dir = os.path.join(MODELS_DIR, f"slot{self.original_slot}")
                 if os.path.exists(slot_dir):
                     shutil.rmtree(slot_dir)
-                    logger.info(f"Deleted model from slot {self.original_slot}")
             
             self.model = {"name": "Без названия", "layers": [], "groups": [], "width": 700, "height": 700}
             self.model_dir = None
@@ -1160,12 +1003,11 @@ class ModelEditor(tk.Toplevel):
             messagebox.showerror("Ошибка", f"Не удалось удалить модель: {e}")
     
     def export_zip(self):
-        """Экспорт модели в ZIP архив с выбором места сохранения"""
+        """Экспорт модели в ZIP архив"""
         try:
             from utils import export_model_zip
         except Exception as e:
             messagebox.showerror("Ошибка экспорта", f"Не удалось импортировать утилиту экспорта: {e}")
-            logger.error(f"Error importing export utility: {e}")
             return
             
         if not self.model:
@@ -1204,7 +1046,7 @@ class ModelEditor(tk.Toplevel):
                         "is_gif": ci.is_gif,
                         "scale": float(ci.scale),
                         "rotation": int(ci.rotation),
-                        "alpha": float(ci.alpha),  # <--- ДОБАВЛЕНО: Экспорт прозрачности
+                        "alpha": float(ci.alpha),
                         "group": layer.get("group", None),
                         "flip_horizontal": bool(ci.flip_horizontal),
                         "flip_vertical": bool(ci.flip_vertical)
@@ -1226,7 +1068,6 @@ class ModelEditor(tk.Toplevel):
                 export_model_zip(model_data, temp_dir, zip_path)
             
             messagebox.showinfo("Экспортировано", f"Модель экспортирована:\n{zip_path}")
-            logger.info(f"Model exported to: {zip_path}")
             
         except Exception as e:
             import traceback
@@ -1240,7 +1081,6 @@ class ModelEditor(tk.Toplevel):
     def _create_preview_for_export(self, temp_dir, preview_path):
         """Создает превью модели для экспорта"""
         try:
-            # Для экспорта используем полные изображения
             base = Image.new("RGBA", (self.canvas_width, self.canvas_height), (0, 0, 0, 0))
             center_x = self.canvas_width // 2
             center_y = self.canvas_height // 2
@@ -1248,11 +1088,9 @@ class ModelEditor(tk.Toplevel):
             visible_items = [ci for ci in self.items if ci.visible]
             
             for ci in visible_items:
-                # Загружаем полное изображение для экспорта
                 try:
                     img = Image.open(ci.image_path).convert("RGBA")
                     
-                    # Применяем трансформации в ПРАВИЛЬНОМ ПОРЯДКЕ (как в редакторе)
                     if ci.scale != 1.0:
                         new_width = max(1, int(img.width * ci.scale))
                         new_height = max(1, int(img.height * ci.scale))
@@ -1266,7 +1104,6 @@ class ModelEditor(tk.Toplevel):
                     if ci.rotation != 0:
                         img = img.rotate(ci.rotation, expand=True, resample=Image.BICUBIC)
                     
-                    # Применяем прозрачность
                     if ci.alpha < 1.0:
                         if img.mode == 'RGBA':
                             r, g, b, a = img.split()
@@ -1328,7 +1165,6 @@ class ModelEditor(tk.Toplevel):
                                 break
                         
                         if not found:
-                            logger.warning(f"File not found: {filename}")
                             continue
                     
                     try:
@@ -1367,7 +1203,6 @@ class ModelEditor(tk.Toplevel):
                 self.cleanup_old_temp_folders()
                 
                 messagebox.showinfo("Импорт завершен", f"Модель успешно импортирована из:\n{os.path.basename(zip_path)}")
-                logger.info(f"Model imported from ZIP: {zip_path}")
                 
             except Exception as e:
                 import traceback
@@ -1381,14 +1216,13 @@ class ModelEditor(tk.Toplevel):
             return
 
     def on_window_resize(self, event):
-        """Обработка изменения размера окна - перерисовываем холст"""
+        """Обработка изменения размера окна"""
         self._canvas_cache_valid = False
         self.redraw_canvas()
 
     def update_model_name(self, event=None):
         """Обновление имени модели"""
         self.model["name"] = self.model_name_var.get()
-        logger.info(f"Model name updated to: {self.model['name']}")
     
     def redraw_canvas(self, level=0.0, mode="none"):
         """Оптимизированная перерисовка холста"""
@@ -1403,10 +1237,7 @@ class ModelEditor(tk.Toplevel):
                 return
                 
             try:
-                # Быстрая очистка
                 self.canvas.delete("all")
-                
-                # Простой рендеринг без сложных вычислений
                 self._fast_render_canvas(level, mode)
             except Exception as e:
                 logger.error(f"Redraw error: {e}")
@@ -1421,11 +1252,9 @@ class ModelEditor(tk.Toplevel):
         if canvas_width < 10 or canvas_height < 10:
             return
         
-        # Рассчитываем размеры с учетом зума
         scaled_width = int(self.canvas_width * self.zoom_level)
         scaled_height = int(self.canvas_height * self.zoom_level)
         
-        # Убедитесь, что scaled_width и scaled_height не отрицательные
         scaled_width = max(10, scaled_width)
         scaled_height = max(10, scaled_height)
         
@@ -1435,21 +1264,17 @@ class ModelEditor(tk.Toplevel):
         canvas_x1 = center_x - scaled_width // 2
         canvas_y1 = center_y - scaled_height // 2
         
-        # Рисуем фон холста с учетом границ
         self.canvas.create_rectangle(
             max(0, canvas_x1), max(0, canvas_y1),
             min(canvas_width, canvas_x1 + scaled_width), min(canvas_height, canvas_y1 + scaled_height),
             outline="#666", width=2, fill="#333"
         )
         
-        # Определяем список элементов для отображения
         items_to_draw = []
         
         if mode == "none":
-            # Режим редактирования - все видимые слои
             items_to_draw = [ci for ci in self.items if ci.visible]
         else:
-            # Режим тестирования - используем логику групп
             current_state = "silent"
             if level > self.thresholds['shout']:
                 current_state = "shout"
@@ -1460,48 +1285,37 @@ class ModelEditor(tk.Toplevel):
             elif level > self.thresholds['silent']:
                 current_state = "silent"
             
-            # Получаем видимые элементы для текущего состояния
             items_to_draw = self._get_visible_items_for_state(current_state)
         
-        # Сортируем элементы для правильного наложения (по порядку в self.items)
         items_to_draw.sort(key=lambda x: self.items.index(x))
         
-        # Отрисовываем все элементы
         for ci in items_to_draw:
             img = ci.get_image_for_display(self.zoom_level)
             if img is None:
                 continue
             
-            # Рассчитываем позицию на холсте
             center_x_scaled = scaled_width // 2
             center_y_scaled = scaled_height // 2
             
-            # Координаты относительно центра с учетом зума
             offset_x = int(ci.x * self.zoom_level)
             offset_y = int(ci.y * self.zoom_level)
             
             pos_x = canvas_x1 + center_x_scaled - img.width // 2 + offset_x
             pos_y = canvas_y1 + center_y_scaled - img.height // 2 + offset_y
             
-            # Используем кэшированные PhotoImage, но для GIF не кэшируем
             if ci.is_gif:
-                # Для GIF создаем новый PhotoImage каждый раз
                 photo = ImageTk.PhotoImage(img)
-                # Сохраняем ссылку, чтобы не удалилась сборщиком мусора
                 if not hasattr(ci, '_tk_images'):
                     ci._tk_images = []
                 ci._tk_images.append(photo)
-                # Ограничиваем количество сохраненных изображений
                 if len(ci._tk_images) > 5:
                     ci._tk_images.pop(0)
             else:
-                # Для статических изображений используем кэш
                 photo_key = f"{id(img)}_{self.zoom_level}"
                 if photo_key not in self._photo_images:
                     photo = ImageTk.PhotoImage(img)
                     self._photo_images[photo_key] = photo
                     
-                    # Ограничиваем размер кэша
                     if len(self._photo_images) > self._photo_cache_limit:
                         oldest = next(iter(self._photo_images))
                         del self._photo_images[oldest]
@@ -1510,7 +1324,6 @@ class ModelEditor(tk.Toplevel):
             
             self.canvas.create_image(pos_x, pos_y, image=photo, anchor="nw")
             
-            # Выделение выбранных элементов (только в режиме редактирования)
             if mode == "none" and ci.layer.get("_selected"):
                 self.canvas.create_rectangle(
                     pos_x, pos_y, pos_x + img.width, pos_y + img.height,
@@ -1529,17 +1342,15 @@ class ModelEditor(tk.Toplevel):
         model_temp_pattern = re.compile(r'^model_temp_(\d+)$')
         
         now = tm.time()
-        max_age = 3600  # 1 час
+        max_age = 3600
         
         for folder in all_folders:
             folder_path = os.path.join(MODELS_DIR, folder)
             try:
                 if temp_pattern.match(folder) or model_temp_pattern.match(folder):
-                    # Проверяем время создания
                     stat = os.stat(folder_path)
                     if now - stat.st_mtime > max_age:
                         shutil.rmtree(folder_path)
-                        logger.info(f"Removed old temp folder: {folder}")
             except Exception as e:
                 logger.error(f"Error checking temp folder {folder}: {e}")
     
@@ -1558,7 +1369,6 @@ class ModelEditor(tk.Toplevel):
             messagebox.showwarning("Группа", "Имя группы уже существует")
             return
         
-        # Определяем родительскую группу (если все выбранные элементы из одной группы)
         parent_group = None
         selected_groups = set()
         for ci in self.current_selection:
@@ -1569,7 +1379,6 @@ class ModelEditor(tk.Toplevel):
         if len(selected_groups) == 1:
             parent_group = list(selected_groups)[0]
         elif self.selected_group:
-            # Если выбрана группа в интерфейсе, используем ее как родительскую
             parent_group = self.selected_group
         
         new_group = {
@@ -1588,15 +1397,12 @@ class ModelEditor(tk.Toplevel):
         for ci in self.current_selection:
             ci.layer["group"] = name
         
-        # Обновляем родительскую группу (если есть)
         if parent_group:
             for g in self.model.get("groups", []):
                 if g.get("name") == parent_group:
-                    # Удаляем элементы из родительской группы
                     for ci in self.current_selection:
                         if ci.layer.get("name") in g.get("children", []):
                             g["children"].remove(ci.layer.get("name"))
-                    # Добавляем новую группу как дочерний элемент
                     g["children"].append(name)
                     break
         
@@ -1611,7 +1417,6 @@ class ModelEditor(tk.Toplevel):
         self._canvas_cache_valid = False
         self.redraw_canvas()
         
-        logger.info(f"Created new group: {name} with parent {parent_group}")
         self.save_to_history("Создание группы")
     
     def _save_tree_state(self):
@@ -1648,7 +1453,6 @@ class ModelEditor(tk.Toplevel):
     def refresh_tree(self):
         """Обновляет дерево элементов"""
         try:
-            # Сохраняем текущее выделение
             selected_ids = []
             for ci in self.current_selection:
                 selected_ids.append(id(ci))
@@ -1661,7 +1465,6 @@ class ModelEditor(tk.Toplevel):
             group_nodes = {}
             items_added = set()
             
-            # Функция для получения пути группы (от корня до текущей группы)
             def get_group_path(group_name):
                 path = []
                 current = group_name
@@ -1671,7 +1474,6 @@ class ModelEditor(tk.Toplevel):
                     current = group.get("parent") if group else None
                 return path
             
-            # Создаем узлы для всех групп (если они еще не созданы)
             def ensure_group_node(group_name):
                 if group_name in group_nodes:
                     return group_nodes[group_name]
@@ -1680,17 +1482,14 @@ class ModelEditor(tk.Toplevel):
                 if not group:
                     return None
                     
-                # Получаем путь группы
                 path = get_group_path(group_name)
                 
-                # Создаем узлы для всех групп в пути
                 parent_node = ""
                 for group_in_path in path:
                     if group_in_path in group_nodes:
                         parent_node = group_nodes[group_in_path]
                         continue
                         
-                    # Создаем узел для этой группы
                     group_node = self.tree.insert(parent_node, "end", text=f"📁 {group_in_path}",
                                                  values=("group", group_in_path))
                     group_nodes[group_in_path] = group_node
@@ -1698,7 +1497,6 @@ class ModelEditor(tk.Toplevel):
                     
                 return group_nodes[group_name]
             
-            # Проходим по элементам в ОБРАТНОМ порядке
             for ci in reversed(self.items):
                 item_id = id(ci)
                 if item_id in items_added:
@@ -1707,34 +1505,28 @@ class ModelEditor(tk.Toplevel):
                 group_name = ci.layer.get("group")
                 
                 if group_name:
-                    # Убеждаемся, что узел группы существует
                     group_node = ensure_group_node(group_name)
                     if group_node:
-                        # Добавляем элемент в группу
                         self.tree.insert(group_node, "end", 
                                         text=self._get_item_display_text(ci),
                                         values=("item", item_id))
                         items_added.add(item_id)
                     else:
-                        # Группа не найдена, добавляем в корень
                         self.tree.insert("", "end", text=self._get_item_display_text(ci),
                                         values=("item", item_id))
                         items_added.add(item_id)
                 else:
-                    # Элемент без группы - добавляем в корень
                     self.tree.insert("", "end", text=self._get_item_display_text(ci),
                                     values=("item", item_id))
                     items_added.add(item_id)
             
             self._restore_tree_state()
             
-            # Восстанавливаем выделение
             self.current_selection = []
             for ci in self.items:
                 if id(ci) in selected_ids:
                     ci.layer["_selected"] = True
                     self.current_selection.append(ci)
-                    # Выделяем в дереве
                     self._select_item_in_tree(ci)
             
         except Exception as e:
@@ -1766,7 +1558,7 @@ class ModelEditor(tk.Toplevel):
         if ci.scale != 1.0:
             flags.append(f"⤢{ci.scale}")
         
-        if ci.alpha < 1.0:  # <--- ДОБАВЛЕНО: Отображение прозрачности
+        if ci.alpha < 1.0:
             flags.append(f"α{ci.alpha:.1f}")
         
         flag_text = f" ({', '.join(flags)})" if flags else ""
@@ -1781,7 +1573,6 @@ class ModelEditor(tk.Toplevel):
     
     def _select_item_in_tree(self, canvas_item):
         """Выделяет элемент в дереве по CanvasItem"""
-        # Находим ID элемента в дереве
         for item_id in self.tree.get_children():
             values = self.tree.item(item_id, "values")
             if values and values[0] == "item":
@@ -1789,11 +1580,9 @@ class ModelEditor(tk.Toplevel):
                 if item_id_int == id(canvas_item):
                     self.tree.selection_set(item_id)
                     self.tree.focus(item_id)
-                    # Прокручиваем к выбранному элементу
                     self.tree.see(item_id)
                     return
         
-        # Проверяем дочерние элементы (для элементов в группах)
         for parent_id in self.tree.get_children():
             for child_id in self.tree.get_children(parent_id):
                 values = self.tree.item(child_id, "values")
@@ -1802,9 +1591,7 @@ class ModelEditor(tk.Toplevel):
                     if item_id_int == id(canvas_item):
                         self.tree.selection_set(child_id)
                         self.tree.focus(child_id)
-                        # Раскрываем родительскую группу
                         self.tree.item(parent_id, open=True)
-                        # Прокручиваем к выбранному элементу
                         self.tree.see(child_id)
                         return
     
@@ -1841,7 +1628,6 @@ class ModelEditor(tk.Toplevel):
                     group_name = item_values[1]
                     selected_groups.add(group_name)
                     
-                    # Выделяем все элементы группы
                     for ci in self.items:
                         if ci.layer.get("group") == group_name:
                             ci.layer["_selected"] = True
@@ -1878,13 +1664,11 @@ class ModelEditor(tk.Toplevel):
         if not self.current_selection:
             return
         
-        # Сортируем по текущей позиции
         sorted_items = sorted(self.current_selection, key=lambda x: self.items.index(x), reverse=True)
         
         for ci in sorted_items:
             idx = self.items.index(ci)
             if idx < len(self.items) - 1:
-                # Меняем местами со следующим элементом
                 self.items[idx], self.items[idx + 1] = self.items[idx + 1], self.items[idx]
         
         self._save_tree_state()
@@ -1894,7 +1678,6 @@ class ModelEditor(tk.Toplevel):
         self._canvas_cache_valid = False
         self.redraw_canvas()
         
-        logger.info("Brought selection forward")
         self.save_to_history("Перемещение вперед")
     
     def send_backward(self):
@@ -1902,13 +1685,11 @@ class ModelEditor(tk.Toplevel):
         if not self.current_selection:
             return
         
-        # Сортируем по текущей позиции
         sorted_items = sorted(self.current_selection, key=lambda x: self.items.index(x))
         
         for ci in sorted_items:
             idx = self.items.index(ci)
             if idx > 0:
-                # Меняем местами с предыдущим элементом
                 self.items[idx], self.items[idx - 1] = self.items[idx - 1], self.items[idx]
         
         self._save_tree_state()
@@ -1918,7 +1699,6 @@ class ModelEditor(tk.Toplevel):
         self._canvas_cache_valid = False
         self.redraw_canvas()
         
-        logger.info("Sent selection backward")
         self.save_to_history("Перемещение назад")
     
     def delete_selected_items(self):
@@ -1935,22 +1715,18 @@ class ModelEditor(tk.Toplevel):
         if not confirm:
             return
         
-        # Удаляем выбранные элементы из списка items
         items_to_remove = set(self.current_selection)
         self.items = [ci for ci in self.items if ci not in items_to_remove]
         
-        # Удаляем соответствующие слои из модели
         layer_names_to_remove = {ci.layer.get("name") for ci in items_to_remove}
         self.model["layers"] = [layer for layer in self.model.get("layers", []) 
                                if layer.get("name") not in layer_names_to_remove]
         
-        # Обновляем группы: удаляем ссылки на удаленные слои
         for group in self.model.get("groups", []):
             if "children" in group:
                 group["children"] = [child for child in group["children"] 
                                    if child not in layer_names_to_remove]
         
-        # Сбрасываем выделение
         for ci in self.current_selection:
             if hasattr(ci, '_tk_images'):
                 ci._tk_images.clear()
@@ -1958,7 +1734,6 @@ class ModelEditor(tk.Toplevel):
         self.current_selection = []
         self.clear_props_fields()
         
-        # Обновляем интерфейс
         self._save_tree_state()
         self.tree_state["preserve_selection"] = False
         
@@ -1966,66 +1741,50 @@ class ModelEditor(tk.Toplevel):
         self._canvas_cache_valid = False
         self.redraw_canvas()
         
-        logger.info(f"Deleted {len(items_to_remove)} selected items")
         self.save_to_history("Удаление выбранных элементов")
     
     def update_group_logic_menus(self, group_name):
-        """Обновляет меню логики группы - ВОССТАНОВЛЕНА ЛОГИКА ВЫБОРА"""
+        """Обновляет меню логики группы"""
         group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
         if not group:
             return
         
-        # Собираем ВСЕ доступные опции:
-        # 1. Слои этой группы
-        # 2. Дочерние группы
-        # 3. Слои из дочерних групп (рекурсивно)
-        options = [""]  # Пустая опция для очистки
+        options = [""]
         
-        # Функция для рекурсивного сбора всех слоев из группы и ее дочерних групп
         def collect_group_items(group_name, indent=""):
             items = []
             
-            # Собираем слои этой группы
             for layer in self.model.get("layers", []):
                 if layer.get("group") == group_name:
                     display_name = f"{indent}📄 {layer.get('name')}"
                     items.append((display_name, layer.get('name'), "layer"))
             
-            # Собираем дочерние группы
             for g in self.model.get("groups", []):
                 if g.get("parent") == group_name:
                     child_name = g.get("name")
                     display_name = f"{indent}📁 {child_name}"
                     items.append((display_name, child_name, "group"))
-                    # Рекурсивно собираем элементы из дочерней группы
                     items.extend(collect_group_items(child_name, indent + "  "))
             
             return items
         
-        # Собираем все элементы
         all_items = collect_group_items(group_name)
         
-        # Очищаем и заполняем меню для каждого состояния
         for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
-            # Получаем виджет меню
             menu_widget = getattr(self, f"{state}_menu")
             menu = menu_widget['menu']
             menu.delete(0, 'end')
             
-            # Добавляем пустую опцию
             menu.add_command(
                 label="(нет)",
                 command=lambda v=self.state_vars[state], val="": v.set(val)
             )
             
-            # Добавляем все собранные элементы
             for display_name, real_name, item_type in all_items:
                 menu.add_command(
                     label=display_name,
                     command=lambda v=self.state_vars[state], val=real_name: v.set(val)
                 )
-        
-        logger.debug(f"Updated group logic menus for {group_name}, items: {len(all_items)}")
     
     def apply_group_logic(self):
         """Применяет логику группы"""
@@ -2045,7 +1804,6 @@ class ModelEditor(tk.Toplevel):
             messagebox.showerror("Ошибка", "Группа не найдена")
             return
         
-        # Сохраняем логику состояний
         logic = {}
         for state, var in self.state_vars.items():
             val = var.get().strip()
@@ -2054,7 +1812,6 @@ class ModelEditor(tk.Toplevel):
         
         group["logic"] = logic
         
-        # Сохраняем настройки моргания
         try:
             blink_freq = self.blink_freq.get()
             if blink_freq == "":
@@ -2064,7 +1821,6 @@ class ModelEditor(tk.Toplevel):
             logger.error(f"Error converting blink_freq: {e}")
             group["blink_freq"] = 0.0
         
-        # Сохраняем настройки случайного эффекта
         group["random_effect"] = self.random_effect_var.get()
         group["random_min"] = self.random_min_var.get()
         group["random_max"] = self.random_max_var.get()
@@ -2073,7 +1829,6 @@ class ModelEditor(tk.Toplevel):
         self.tree_state["preserve_selection"] = True
         
         messagebox.showinfo("Логика группы", f"Логика для группы {group_name} сохранена")
-        logger.info(f"Group logic applied to {group_name}")
     
     def on_mirror_change(self):
         """Обработчик изменения отражения"""
@@ -2083,9 +1838,8 @@ class ModelEditor(tk.Toplevel):
         for ci in self.current_selection:
             ci.flip_horizontal = self.flip_h_var.get()
             ci.flip_vertical = self.flip_v_var.get()
-            ci.clear_cache()  # Очищаем кэш
+            ci.clear_cache()
         
-        # Очищаем кэш редактора
         self._photo_images.clear()
         self._canvas_cache_valid = False
         self.redraw_canvas()
@@ -2098,9 +1852,8 @@ class ModelEditor(tk.Toplevel):
         
         for ci in self.current_selection:
             ci.visible = self.visible_var.get()
-            ci.clear_cache()  # Очищаем кэш
+            ci.clear_cache()
         
-        # Очищаем кэш редактора
         self._photo_images.clear()
         self._canvas_cache_valid = False
         self.redraw_canvas()
@@ -2160,7 +1913,6 @@ class ModelEditor(tk.Toplevel):
     def update_canvas_size(self, event=None):
         """Обновляет размер холста"""
         try:
-            # Сохраняем в историю перед изменением
             self.save_to_history("Изменение размера холста")
 
             new_width = max(100, min(1500, self.canvas_width_var.get()))
@@ -2173,7 +1925,6 @@ class ModelEditor(tk.Toplevel):
             self.model["height"] = new_height
             self.zoom_reset()
             self._canvas_cache_valid = False
-            logger.info(f"Canvas size updated to: {new_width}x{new_height}")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Неверный размер холста: {e}")
             logger.error(f"Error updating canvas size: {e}")
@@ -2186,16 +1937,13 @@ class ModelEditor(tk.Toplevel):
         except Exception as e:
             logger.error(f"Error stopping audio: {e}")
         
-        # Удаляем временную папку
         if self.model_dir and "temp_" in self.model_dir and os.path.exists(self.model_dir):
             try:
                 shutil.rmtree(self.model_dir)
-                logger.info(f"Temporary directory removed: {self.model_dir}")
             except Exception as e:
                 logger.error(f"Error removing temporary directory: {e}")
         
         self.grab_release()
-        logger.info("Model editor closed")
         self.destroy()
     
     def update_test_mode(self):
@@ -2256,8 +2004,6 @@ class ModelEditor(tk.Toplevel):
         self.zoom_reset()
         self._canvas_cache_valid = False
         self.redraw_canvas()
-        
-        logger.info(f"New model created: {name}")
     
     def load_model(self):
         """Загружает модель из слота"""
@@ -2291,7 +2037,6 @@ class ModelEditor(tk.Toplevel):
         
         inner_frame.bind("<Configure>", configure_scrollregion)
         
-        # Превью текущей модели
         current_preview_frame = ttk.LabelFrame(inner_frame, text="Текущая модель")
         current_preview_frame.pack(fill="x", pady=(0, 10), padx=5)
         
@@ -2315,7 +2060,6 @@ class ModelEditor(tk.Toplevel):
         except Exception as e:
             logger.error(f"Error loading current preview: {e}")
         
-        # Слоты
         slots_frame = ttk.Frame(inner_frame)
         slots_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
@@ -2326,7 +2070,6 @@ class ModelEditor(tk.Toplevel):
             content_frame = ttk.Frame(slot_frame)
             content_frame.pack(fill="x", padx=5, pady=5)
             
-            # Превью слота
             try:
                 preview_path = os.path.join(MODELS_DIR, f"slot{i}", "preview.png")
                 if os.path.exists(preview_path):
@@ -2347,7 +2090,6 @@ class ModelEditor(tk.Toplevel):
             except Exception as e:
                 logger.error(f"Error loading preview for slot {i}: {e}")
             
-            # Информация о слоте
             info_frame = ttk.Frame(content_frame)
             info_frame.pack(side="left", fill="both", expand=True, padx=5)
             
@@ -2368,7 +2110,6 @@ class ModelEditor(tk.Toplevel):
             status = ttk.Label(info_frame, text=status_text, font=("Arial", 9))
             status.pack(anchor="w", pady=(5, 0))
             
-            # Кнопка загрузки
             btn = ttk.Button(
                 info_frame, 
                 text="Загрузить",
@@ -2400,11 +2141,9 @@ class ModelEditor(tk.Toplevel):
         self.canvas_width_var.set(self.canvas_width)
         self.canvas_height_var.set(self.canvas_height)
         
-        # Создаем временную папку
         temp_dir = os.path.join(MODELS_DIR, f"temp_{int(time.time())}_slot{slot_num}")
         os.makedirs(temp_dir, exist_ok=True)
         
-        # Копируем файлы
         for f in os.listdir(path):
             src = os.path.join(path, f)
             if os.path.isfile(src):
@@ -2413,7 +2152,6 @@ class ModelEditor(tk.Toplevel):
         self.model_dir = temp_dir
         self.original_slot = slot_num
         
-        # Загружаем элементы
         self.items.clear()
         for layer in self.model.get("layers", []):
             filename = layer.get("file")
@@ -2430,7 +2168,6 @@ class ModelEditor(tk.Toplevel):
             except Exception as e:
                 logger.error(f"Error loading image: {e}")
         
-        # Загружаем список импортированных файлов
         self.imported_files.clear()
         for f in os.listdir(self.model_dir):
             if f.lower().endswith((".png", ".gif")):
@@ -2457,8 +2194,6 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
         
         self.cleanup_old_temp_folders()
-        
-        logger.info(f"Model loaded from slot {slot_num}")
     
     def save_model(self):
         """Сохраняет модель"""
@@ -2473,7 +2208,6 @@ class ModelEditor(tk.Toplevel):
         self.model["width"] = self.canvas_width
         self.model["height"] = self.canvas_height
         
-        # Обновляем данные слоев
         self.model["layers"] = []
         for ci in self.items:
             layer = ci.layer.copy() if ci.layer else {}
@@ -2483,7 +2217,7 @@ class ModelEditor(tk.Toplevel):
             layer["is_gif"] = ci.is_gif
             layer["scale"] = float(ci.scale)
             layer["rotation"] = int(ci.rotation)
-            layer["alpha"] = float(ci.alpha)  # <--- ДОБАВЛЕНО: Сохранение прозрачности
+            layer["alpha"] = float(ci.alpha)
             layer["flip_horizontal"] = bool(ci.flip_horizontal)
             layer["flip_vertical"] = bool(ci.flip_vertical)
             
@@ -2495,7 +2229,6 @@ class ModelEditor(tk.Toplevel):
             
             self.model["layers"].append(layer)
         
-        # Сохраняем JSON
         model_json_path = os.path.join(self.model_dir, "model.json")
         try:
             with open(model_json_path, "w", encoding="utf-8") as f:
@@ -2505,14 +2238,11 @@ class ModelEditor(tk.Toplevel):
             messagebox.showerror("Ошибка", f"Не удалось сохранить модель: {e}")
             return
         
-        # Создаем превью
         self.create_preview()
         
-        # Показываем диалог выбора слота
         self.show_save_slot_dialog()
         
         self.last_autosave = time.time()
-        logger.info("Model saved, showing slot selection dialog with previews")
     
     def show_save_slot_dialog(self):
         """Показывает диалог сохранения в слот"""
@@ -2546,7 +2276,6 @@ class ModelEditor(tk.Toplevel):
         
         inner_frame.bind("<Configure>", configure_scrollregion)
         
-        # Превью текущей модели
         current_preview_frame = ttk.LabelFrame(inner_frame, text="Текущая модель для сохранения")
         current_preview_frame.pack(fill="x", pady=(0, 10), padx=5)
         
@@ -2574,7 +2303,6 @@ class ModelEditor(tk.Toplevel):
                 text=f"Имя: {self.model_name_var.get()}", 
                 font=("Arial", 9)).pack()
         
-        # Слоты
         slots_frame = ttk.Frame(inner_frame)
         slots_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
@@ -2585,7 +2313,6 @@ class ModelEditor(tk.Toplevel):
             content_frame = ttk.Frame(slot_frame)
             content_frame.pack(fill="x", padx=5, pady=5)
             
-            # Превью слота
             try:
                 preview_path = os.path.join(MODELS_DIR, f"slot{i}", "preview.png")
                 if os.path.exists(preview_path):
@@ -2606,7 +2333,6 @@ class ModelEditor(tk.Toplevel):
             except Exception as e:
                 logger.error(f"Error loading preview for slot {i}: {e}")
             
-            # Информация о слоте
             info_frame = ttk.Frame(content_frame)
             info_frame.pack(side="left", fill="both", expand=True, padx=5)
             
@@ -2649,7 +2375,6 @@ class ModelEditor(tk.Toplevel):
         os.makedirs(slot_dir, exist_ok=True)
         
         try:
-            # Очищаем слот
             for f in os.listdir(slot_dir):
                 file_path = os.path.join(slot_dir, f)
                 try:
@@ -2658,7 +2383,6 @@ class ModelEditor(tk.Toplevel):
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
             
-            # Копируем файлы
             for f in os.listdir(self.model_dir):
                 src = os.path.join(self.model_dir, f)
                 if os.path.isfile(src):
@@ -2674,8 +2398,6 @@ class ModelEditor(tk.Toplevel):
             if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
                 self.master.app.refresh_slot_buttons()
                 
-            logger.info(f"Model saved to slot {slot_num}")
-            
         except Exception as e:
             logger.error(f"Error saving to slot {slot_num}: {e}")
             messagebox.showerror("Ошибка", f"Не удалось сохранить модель в слот {slot_num}: {e}")
@@ -2693,35 +2415,28 @@ class ModelEditor(tk.Toplevel):
             visible_items = [ci for ci in self.items if ci.visible]
             
             for ci in visible_items:
-                # Загружаем оригинальное изображение (как в рендерере)
                 try:
                     img = Image.open(ci.image_path).convert("RGBA")
                     
-                    # ПРАВИЛЬНЫЙ ПОРЯДОК ТРАНСФОРМАЦИЙ (такой же как в редакторе):
-                    # 1. Масштаб элемента
                     if ci.scale != 1.0:
                         new_width = max(1, int(img.width * ci.scale))
                         new_height = max(1, int(img.height * ci.scale))
                         img = img.resize((new_width, new_height), Image.LANCZOS)
                     
-                    # 2. Отражение
                     if ci.flip_horizontal:
                         img = img.transpose(Image.FLIP_LEFT_RIGHT)
                     if ci.flip_vertical:
                         img = img.transpose(Image.FLIP_TOP_BOTTOM)
                     
-                    # 3. Поворот
                     if ci.rotation != 0:
                         img = img.rotate(ci.rotation, expand=True, resample=Image.BICUBIC)
                     
-                    # 4. Применяем прозрачность
                     if ci.alpha < 1.0:
                         if img.mode == 'RGBA':
                             r, g, b, a = img.split()
                             a = a.point(lambda x: int(x * ci.alpha))
                             img = Image.merge('RGBA', (r, g, b, a))
                     
-                    # Рассчитываем позицию
                     px = center_x - img.size[0] // 2 + int(ci.x)
                     py = center_y - img.size[1] // 2 + int(ci.y)
                     
@@ -2729,7 +2444,6 @@ class ModelEditor(tk.Toplevel):
                 except Exception as e:
                     logger.error(f"Error creating preview: {e}")
             
-            # Уменьшаем для превью
             base.thumbnail((200, 200), Image.LANCZOS)
             preview_path = os.path.join(self.model_dir, "preview.png")
             base.save(preview_path)
@@ -2758,7 +2472,6 @@ class ModelEditor(tk.Toplevel):
                 base = os.path.basename(file_path)
                 dest = os.path.join(self.model_dir, base)
                 
-                # Если файл уже существует, создаем уникальное имя
                 if os.path.exists(dest):
                     name, ext = os.path.splitext(base)
                     counter = 1
@@ -2774,13 +2487,11 @@ class ModelEditor(tk.Toplevel):
                 if os.path.abspath(file_path) != os.path.abspath(dest):
                     shutil.copy2(file_path, dest)
                 
-                # Определяем тип изображения
                 is_gif = False
                 if base.lower().endswith('.gif'):
                     with Image.open(file_path) as img:
                         is_gif = img.is_animated
                 
-                # Создаем превью для списка
                 with Image.open(file_path) as img:
                     img.seek(0)
                     preview_img = img.copy().convert("RGBA")
@@ -2788,20 +2499,17 @@ class ModelEditor(tk.Toplevel):
                 
                 self.imported_files.append((base, preview_img, is_gif))
                 
-                # Генерируем уникальное имя для слоя
                 base_name = os.path.splitext(base)[0]
                 layer_name = base_name
                 counter = 1
                 
-                # Проверяем, существует ли уже слой с таким именем
                 existing_names = {layer.get("name") for layer in self.model.get("layers", [])}
                 while layer_name in existing_names:
                     layer_name = f"{base_name}({counter})"
                     counter += 1
                 
-                # Создаем слой
                 layer = {
-                    "name": layer_name,  # Используем уникальное имя
+                    "name": layer_name,
                     "file": base, 
                     "visible": True, 
                     "x": 0, 
@@ -2816,7 +2524,6 @@ class ModelEditor(tk.Toplevel):
                 }
                 self.model.setdefault("layers", []).append(layer)
                 
-                # Создаем элемент
                 ci = CanvasItem(layer, dest)
                 self.items.append(ci)
                 
@@ -2833,7 +2540,6 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
         self.last_autosave = time.time()
         
-        logger.info(f"Imported {len(files)} images")
         self.save_to_history("Импорт изображений")
     
     def refresh_import_list(self):
@@ -2845,11 +2551,10 @@ class ModelEditor(tk.Toplevel):
             row = ttk.Frame(self.import_inner)
             row.pack(fill="x", padx=2, pady=2)
             
-            # Показываем превью изображения
             try:
                 photo = ImageTk.PhotoImage(img)
                 preview_label = ttk.Label(row, image=photo)
-                preview_label.image = photo  # Сохраняем ссылку
+                preview_label.image = photo
                 preview_label.pack(side="left", padx=2)
             except:
                 pass
@@ -2857,7 +2562,6 @@ class ModelEditor(tk.Toplevel):
             icon = "GIF" if is_gif else "PNG"
             ttk.Label(row, text=f"{icon}: {fname}", width=20).pack(side="left", padx=2)
             
-            # Кнопка добавления на холст (теперь будет создавать новый слой с уникальным именем)
             ttk.Button(row, text="+", width=2, command=lambda f=fname: self.add_to_canvas(f)).pack(side="left", padx=2)
             ttk.Button(row, text="🗑️", width=2, command=lambda f=fname: self.delete_file(f)).pack(side="left", padx=2)
     
@@ -2868,7 +2572,7 @@ class ModelEditor(tk.Toplevel):
         self.y_entry.delete(0, "end")
         self.scale_entry.delete(0, "end")
         self.rotation_entry.delete(0, "end")
-        self.alpha_entry.delete(0, "end")  # <--- ДОБАВЛЕНО: Очистка поля прозрачности
+        self.alpha_entry.delete(0, "end")
         self.flip_h_var.set(False)
         self.flip_v_var.set(False)
         self.visible_var.set(True)
@@ -2891,7 +2595,7 @@ class ModelEditor(tk.Toplevel):
             self.rotation_entry.delete(0, "end")
             self.rotation_entry.insert(0, str(ci.rotation))
             
-            self.alpha_entry.delete(0, "end")  # <--- ДОБАВЛЕНО: Загрузка прозрачности
+            self.alpha_entry.delete(0, "end")
             self.alpha_entry.insert(0, str(ci.alpha))
             
             self.flip_h_var.set(bool(ci.flip_horizontal))
@@ -2910,16 +2614,13 @@ class ModelEditor(tk.Toplevel):
             messagebox.showwarning("Нет выбора", "Сначала выберите элемент")
             return
         
-        # Сохраняем предыдущее состояние перед изменением
         self.save_to_history("Изменение свойств элемента")
         
         for ci in self.current_selection:
-            # Имя
             name = self.name_entry.get().strip()
             if name:
                 ci.layer["name"] = name
             
-            # Координаты
             try:
                 ci.x = int(self.x_entry.get().strip())
                 ci.y = int(self.y_entry.get().strip())
@@ -2927,7 +2628,6 @@ class ModelEditor(tk.Toplevel):
                 messagebox.showwarning("Ошибка", "X и Y должны быть целыми числами")
                 return
             
-            # Масштаб и поворот
             try:
                 ci.scale = float(self.scale_entry.get().strip())
                 ci.rotation = int(self.rotation_entry.get().strip())
@@ -2935,7 +2635,6 @@ class ModelEditor(tk.Toplevel):
                 messagebox.showwarning("Ошибка", "Масштаб должен быть дробным числом, поворот - целым")
                 return
             
-            # Прозрачность
             try:
                 alpha = float(self.alpha_entry.get().strip())
                 if alpha < 0.0 or alpha > 1.0:
@@ -2946,15 +2645,12 @@ class ModelEditor(tk.Toplevel):
                 messagebox.showwarning("Ошибка", "Прозрачность должна быть числом")
                 return
             
-            # Видимость и отражение
             ci.visible = self.visible_var.get()
             ci.flip_horizontal = self.flip_h_var.get()
             ci.flip_vertical = self.flip_v_var.get()
             
-            # Очищаем кэш изображения
             ci.clear_cache()
         
-        # Очищаем кэш редактора
         self._photo_images.clear()
         self._canvas_cache_valid = False
         
@@ -2968,15 +2664,13 @@ class ModelEditor(tk.Toplevel):
         self.save_to_history("Изменение свойств элемента")
     
     def load_group_settings(self, group_name):
-        """Загружает настройки группы - ВОССТАНОВЛЕНА ЛОГИКА"""
+        """Загружает настройки группы"""
         group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
         if not group:
             return
         
-        # Сначала обновляем меню
         self.update_group_logic_menus(group_name)
         
-        # Затем загружаем значения
         logic = group.get("logic", {})
         for state in ["silent", "whisper", "normal", "shout", "blink", "open"]:
             if state in logic:
@@ -2984,11 +2678,9 @@ class ModelEditor(tk.Toplevel):
             else:
                 self.state_vars[state].set("")
         
-        # Настройки моргания
         blink_freq = group.get("blink_freq", 0.0)
         self.blink_freq.set(blink_freq)
         
-        # Случайный эффект
         self.random_effect_var.set(group.get("random_effect", False))
         self.random_min_var.set(group.get("random_min", 5.0))
         self.random_max_var.set(group.get("random_max", 10.0))
@@ -3001,58 +2693,47 @@ class ModelEditor(tk.Toplevel):
         if self.selected_group:
             group_name = self.selected_group
             
-            # Получаем группу
             group = next((g for g in self.model.get("groups", []) if g.get("name") == group_name), None)
             if not group:
                 return
                 
             parent_group = group.get("parent")
             
-            # Если есть родительская группа, переносим элементы в нее
             if parent_group:
                 parent = next((g for g in self.model.get("groups", []) if g.get("name") == parent_group), None)
                 if parent:
-                    # Переносим элементы в родительскую группу
                     for ci in self.items:
                         if ci.layer.get("group") == group_name:
                             ci.layer["group"] = parent_group
                             if ci.layer.get("name") not in parent.get("children", []):
                                 parent.setdefault("children", []).append(ci.layer.get("name"))
-                    # Удаляем ссылку на группу из родительской группы
                     if group_name in parent.get("children", []):
                         parent["children"].remove(group_name)
             else:
-                # Если нет родительской группы, удаляем группу у элементов
                 for ci in self.items:
                     if ci.layer.get("group") == group_name:
                         ci.layer["group"] = None
             
-            # Удаляем группу
             self.model["groups"] = [g for g in self.model.get("groups", []) if g.get("name") != group_name]
             
-            # Удаляем все дочерние группы этой группы
             child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
             for child_group in child_groups:
-                # Рекурсивно удаляем дочерние группы
                 self._delete_group_and_children(child_group.get("name"))
                 
             self.selected_group = parent_group
             
-            # Сохраняем состояние дерева
             self._save_tree_state()
             self.tree_state["preserve_selection"] = True
             
             self.refresh_tree()
             self._canvas_cache_valid = False
             self.redraw_canvas()
-            logger.info(f"Ungrouped group: {group_name}")
             self.save_to_history("Разгруппирование")
             return
             
         if not self.current_selection:
             return
             
-        # Разгруппирование отдельных элементов
         for ci in self.current_selection:
             grp = ci.layer.get("group")
             if grp:
@@ -3060,33 +2741,27 @@ class ModelEditor(tk.Toplevel):
                     if g.get("name") == grp and ci.layer.get("name") in g.get("children", []):
                         g["children"].remove(ci.layer.get("name"))
                         if not g["children"]:
-                            # Если группа пуста, удаляем ее
                             self.model["groups"].remove(g)
                 ci.layer["group"] = None
                 
-        # Сохраняем состояние дерева
         self._save_tree_state()
         self.tree_state["preserve_selection"] = True
         
         self.refresh_tree()
         self._canvas_cache_valid = False
         self.redraw_canvas()
-        logger.info(f"Ungrouped {len(self.current_selection)} items")
         self.save_to_history("Разгруппирование элементов")
 
     def _delete_group_and_children(self, group_name):
         """Рекурсивно удаляет группу и все ее дочерние группы"""
-        # Удаляем группу у элементов
         for ci in self.items:
             if ci.layer.get("group") == group_name:
                 ci.layer["group"] = None
         
-        # Удаляем дочерние группы
         child_groups = [g for g in self.model.get("groups", []) if g.get("parent") == group_name]
         for child_group in child_groups:
             self._delete_group_and_children(child_group.get("name"))
         
-        # Удаляем саму группу
         self.model["groups"] = [g for g in self.model.get("groups", []) if g.get("name") != group_name]
     
     def on_canvas_mouse_down(self, event):
@@ -3095,7 +2770,6 @@ class ModelEditor(tk.Toplevel):
         if isinstance(focus_widget, (ttk.Entry, tk.Entry, ttk.Combobox)):
             return
         
-        # Преобразуем координаты мыши в координаты холста с учетом зума
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
         scaled_width = int(self.canvas_width * self.zoom_level)
@@ -3107,20 +2781,17 @@ class ModelEditor(tk.Toplevel):
         canvas_x1 = center_x - scaled_width // 2
         canvas_y1 = center_y - scaled_height // 2
         
-        # Координаты относительно холста с учетом зума
         mx = (event.x - canvas_x1) / self.zoom_level if self.zoom_level > 0 else 0
         my = (event.y - canvas_y1) / self.zoom_level if self.zoom_level > 0 else 0
         
-        # Сбрасываем выделение
         for ci in self.items:
             ci.layer["_selected"] = False
         
         self.current_selection = []
         self.drag_data = {"item": None, "x": mx, "y": my, "group_items": []}
         found = None
-        found_items = []  # Собираем все элементы под курсором
+        found_items = []
         
-        # Ищем элемент под курсором (с конца для правильного Z-порядка)
         for ci in reversed(self.items):
             if not ci.visible:
                 continue
@@ -3129,7 +2800,6 @@ class ModelEditor(tk.Toplevel):
             if img is None:
                 continue
             
-            # Позиция элемента
             center_x_scaled = scaled_width // 2
             center_y_scaled = scaled_height // 2
             
@@ -3139,11 +2809,9 @@ class ModelEditor(tk.Toplevel):
             pos_x = canvas_x1 + center_x_scaled - img.width // 2 + offset_x
             pos_y = canvas_y1 + center_y_scaled - img.height // 2 + offset_y
             
-            # Проверяем попадание
             if (pos_x <= event.x <= pos_x + img.width and
                 pos_y <= event.y <= pos_y + img.height):
                 
-                # Проверяем прозрачность пикселя
                 try:
                     is_opaque = False
                     if img.mode == 'RGBA':
@@ -3152,26 +2820,23 @@ class ModelEditor(tk.Toplevel):
                         
                         if 0 <= pixel_x < img.width and 0 <= pixel_y < img.height:
                             pixel = img.getpixel((pixel_x, pixel_y))
-                            if len(pixel) >= 4 and pixel[3] > 10:  # Порог прозрачности
+                            if len(pixel) >= 4 and pixel[3] > 10:
                                 is_opaque = True
                     else:
-                        # Для непрозрачных форматов всегда считаем непрозрачным
                         is_opaque = True
                     
                     if is_opaque:
-                        found_items.append(ci)  # Добавляем в список
+                        found_items.append(ci)
                         
                 except Exception as e:
                     logger.error(f"Error checking pixel: {e}")
-                    found_items.append(ci)  # В случае ошибки тоже добавляем
+                    found_items.append(ci)
         
-        # ВЫБИРАЕМ САМЫЙ ВЕРХНИЙ НЕПРОЗРАЧНЫЙ ЭЛЕМЕНТ
         if found_items:
-            found = found_items[0]  # Берем первый (самый верхний) элемент
+            found = found_items[0]
         
         if found:
-            # Выделяем элемент
-            if event.state & 0x0004:  # Ctrl
+            if event.state & 0x0004:
                 found.layer["_selected"] = not found.layer.get("_selected", False)
                 if found.layer["_selected"]:
                     self.current_selection.append(found)
@@ -3184,19 +2849,15 @@ class ModelEditor(tk.Toplevel):
             self.drag_data["item"] = found
             self.drag_data["group_items"] = self.current_selection.copy()
             
-            # ВЫДЕЛЯЕМ ЭЛЕМЕНТ В ДЕРЕВЕ
             self._select_item_in_tree(found)
             
-            # Загружаем свойства элемента
             if self.current_selection:
                 self.load_item_props(self.current_selection[0])
         else:
-            # Сбрасываем выделение
             self.selected_group = None
             self.group_label.config(text="(нет группы)")
             self.clear_props_fields()
             
-            # СНИМАЕМ ВЫДЕЛЕНИЕ В ДЕРЕВЕ
             self.tree.selection_remove(self.tree.selection())
         
         self._canvas_cache_valid = False
@@ -3207,7 +2868,6 @@ class ModelEditor(tk.Toplevel):
         if not self.drag_data.get("item") or not self.drag_data.get("group_items"):
             return
         
-        # Преобразуем координаты
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
         scaled_width = int(self.canvas_width * self.zoom_level)
@@ -3228,12 +2888,10 @@ class ModelEditor(tk.Toplevel):
         self.drag_data["x"] = mx
         self.drag_data["y"] = my
         
-        # Перемещаем элементы
         for ci in self.drag_data["group_items"]:
             ci.x += int(dx)
             ci.y += int(dy)
         
-        # Обновляем поля ввода
         if len(self.current_selection) == 1:
             self.x_entry.delete(0, "end")
             self.x_entry.insert(0, str(self.current_selection[0].x))
@@ -3246,7 +2904,6 @@ class ModelEditor(tk.Toplevel):
     def on_canvas_mouse_up(self, event):
         """Обработчик отпускания кнопки мыши"""
         if self.drag_data.get("item"):
-            # Сохраняем в историю только если было перемещение
             if (self.drag_data.get("x", 0) != 0 or 
                 self.drag_data.get("y", 0) != 0):
                 self.save_to_history("Перемещение элемента")
@@ -3258,20 +2915,17 @@ class ModelEditor(tk.Toplevel):
         """Добавляет файл на холст с уникальным именем"""
         for fname, img, is_gif in self.imported_files:
             if fname == filename:
-                # Генерируем уникальное имя для нового слоя
                 base_name = os.path.splitext(fname)[0]
                 layer_name = base_name
                 counter = 1
                 
-                # Проверяем существующие имена слоев
                 existing_names = {layer.get("name") for layer in self.model.get("layers", [])}
                 while layer_name in existing_names:
                     layer_name = f"{base_name}({counter})"
                     counter += 1
                 
-                # Создаем новый слой с уникальным именем
                 layer = {
-                    "name": layer_name,  # Уникальное имя
+                    "name": layer_name,
                     "file": fname, 
                     "visible": True, 
                     "x": 0, 
@@ -3286,7 +2940,6 @@ class ModelEditor(tk.Toplevel):
                 }
                 self.model.setdefault("layers", []).append(layer)
                 
-                # Создаем элемент
                 image_path = os.path.join(self.model_dir, fname)
                 ci = CanvasItem(layer, image_path)
                 self.items.append(ci)
@@ -3305,7 +2958,6 @@ class ModelEditor(tk.Toplevel):
         if len(new_items) != len(self.items):
             self.items = new_items
             
-            # Удаляем выделение
             for l in self.model.get("layers", []):
                 if l.get("file") == filename:
                     l["_selected"] = False
@@ -3338,7 +2990,6 @@ class ModelEditor(tk.Toplevel):
             self._canvas_cache_valid = False
             self.redraw_canvas()
             
-            logger.info(f"File deleted: {filename}")
             self.save_to_history("Удаление файла")
     
     def show_blink_preview(self):
@@ -3348,12 +2999,10 @@ class ModelEditor(tk.Toplevel):
         
         self.blink_preview_running = True
         self._blink_preview_loop()
-        logger.info("Blink preview started")
     
     def stop_blink_preview(self):
         """Останавливает превью моргания"""
         self.blink_preview_running = False
-        logger.info("Blink preview stopped")
     
     def _blink_preview_loop(self):
         if not self.blink_preview_running:
@@ -3371,10 +3020,8 @@ class ModelEditor(tk.Toplevel):
         logic = group.get("logic", {})
         blink_layer = logic.get("blink", "")
         
-        # Скрываем все элементы в группе
         for ci in self.items:
             if ci.layer.get("group") == gname:
-                # Показываем только слой для моргания
                 ci.visible = (ci.layer.get("name") == blink_layer)
                 
         self.redraw_canvas(0, "none")
@@ -3392,10 +3039,8 @@ class ModelEditor(tk.Toplevel):
         logic = group.get("logic", {})
         open_layer = logic.get("open") or logic.get("normal") or logic.get("whisper") or logic.get("silent")
         
-        # Скрываем все элементы в группе
         for ci in self.items:
             if ci.layer.get("group") == gname:
-                # Показываем только основной слой
                 ci.visible = (ci.layer.get("name") == open_layer)
                 
         self.redraw_canvas(0, "none")
@@ -3407,7 +3052,6 @@ class ModelEditor(tk.Toplevel):
     def _preview_loop(self):
         """Основной цикл предпросмотра"""
         try:
-            # Автосохранение
             now = time.time()
             if now - self.last_autosave > self.autosave_interval:
                 try:
@@ -3429,7 +3073,7 @@ class ModelEditor(tk.Toplevel):
                                 "is_gif": ci.is_gif,
                                 "scale": float(ci.scale),
                                 "rotation": int(ci.rotation),
-                                "alpha": float(ci.alpha),  # <--- ДОБАВЛЕНО: Сохранение прозрачности в автосохранении
+                                "alpha": float(ci.alpha),
                                 "group": ci.layer.get("group", None),
                                 "flip_horizontal": bool(ci.flip_horizontal),
                                 "flip_vertical": bool(ci.flip_vertical)
@@ -3440,7 +3084,6 @@ class ModelEditor(tk.Toplevel):
                     logger.error(f"Error autosaving: {e}")
                 self.last_autosave = now
             
-            # Обновляем отображение в зависимости от режима
             mode = self.test_mode_var.get()
             level = self.audio_level if mode == "microphone" else 0.0
             
