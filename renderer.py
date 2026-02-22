@@ -59,6 +59,8 @@ class Renderer:
         self.last_activity_time = time.time()
         self.idle_brightness = 0.5
 
+        self.groups = {}
+
         # Кэширование
         self._layer_cache = {}
         self._gif_cache = {}
@@ -125,62 +127,65 @@ class Renderer:
         logger.info("Renderer stopped")
 
     def _load_image_cv2(self, file_path, scale=1.0, rotation=0, flip_h=False, flip_v=False):
-        """Загружает и преобразует изображение с использованием OpenCV"""
+        """Загружает изображение с использованием PIL (поддержка Unicode) и преобразует в OpenCV."""
         try:
-            # Загружаем изображение
+            # Загружаем через PIL с явным преобразованием в RGBA
+            pil_img = PILImage.open(file_path).convert('RGBA')
+            # Конвертируем в numpy array (формат PIL: RGBA)
+            np_img = np.array(pil_img)
+            # Меняем порядок каналов RGB -> BGR (OpenCV использует BGRA)
+            img = cv2.cvtColor(np_img, cv2.COLOR_RGBA2BGRA)
+        except Exception as e:
+            logger.warning(f"PIL failed to load {file_path}, falling back to OpenCV: {e}")
+            # Резервный вариант – OpenCV
             img = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
             if img is None:
-                logger.error(f"Failed to load image: {file_path}")
-                return None
-
-            # Конвертируем в RGBA если нужно
+                logger.error(f"Failed to load image with both PIL and OpenCV: {file_path}")
+                # Placeholder (красный квадрат)
+                placeholder = np.zeros((100, 100, 4), dtype=np.uint8)
+                placeholder[:, :, 0] = 255
+                placeholder[:, :, 3] = 128
+                return placeholder
+            # Приводим к 4 каналам, если нужно
             if img.shape[2] == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
             elif img.shape[2] == 1:
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
 
-            # Применяем трансформации
-            if scale != 1.0 and scale > 0:
-                new_width = max(1, int(img.shape[1] * scale))
-                new_height = max(1, int(img.shape[0] * scale))
-                img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+        # Далее применяем трансформации (scale, rotation, flip) – код остаётся без изменений
+        # Применяем трансформации
+        if scale != 1.0 and scale > 0:
+            new_width = max(1, int(img.shape[1] * scale))
+            new_height = max(1, int(img.shape[0] * scale))
+            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
 
-            if rotation != 0:
-                # Поворот с использованием матрицы аффинных преобразований
-                center = (img.shape[1] // 2, img.shape[0] // 2)
-                matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
-                cos_val = np.abs(matrix[0, 0])
-                sin_val = np.abs(matrix[0, 1])
-                new_width = int((img.shape[1] * cos_val) + (img.shape[0] * sin_val))
-                new_height = int((img.shape[1] * sin_val) + (img.shape[0] * cos_val))
-                matrix[0, 2] += (new_width / 2) - center[0]
-                matrix[1, 2] += (new_height / 2) - center[1]
-                img = cv2.warpAffine(img, matrix, (new_width, new_height),
-                                   flags=cv2.INTER_LINEAR,
-                                   borderMode=cv2.BORDER_CONSTANT,
-                                   borderValue=(0, 0, 0, 0))
+        if rotation != 0:
+            center = (img.shape[1] // 2, img.shape[0] // 2)
+            matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+            cos_val = np.abs(matrix[0, 0])
+            sin_val = np.abs(matrix[0, 1])
+            new_width = int((img.shape[1] * cos_val) + (img.shape[0] * sin_val))
+            new_height = int((img.shape[1] * sin_val) + (img.shape[0] * cos_val))
+            matrix[0, 2] += (new_width / 2) - center[0]
+            matrix[1, 2] += (new_height / 2) - center[1]
+            img = cv2.warpAffine(img, matrix, (new_width, new_height),
+                                flags=cv2.INTER_LINEAR,
+                                borderMode=cv2.BORDER_CONSTANT,
+                                borderValue=(0, 0, 0, 0))
 
-            if flip_h:
-                img = cv2.flip(img, 1)  # 1 = горизонтальное отражение
-            if flip_v:
-                img = cv2.flip(img, 0)  # 0 = вертикальное отражение
+        if flip_h:
+            img = cv2.flip(img, 1)
+        if flip_v:
+            img = cv2.flip(img, 0)
 
-            # Оптимизация памяти - уменьшаем размер если слишком большое
-            if img.shape[0] > 2048 or img.shape[1] > 2048:
-                scale_factor = min(2048/img.shape[0], 2048/img.shape[1])
-                new_width = int(img.shape[1] * scale_factor)
-                new_height = int(img.shape[0] * scale_factor)
-                img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        # Оптимизация размера
+        if img.shape[0] > 2048 or img.shape[1] > 2048:
+            scale_factor = min(2048/img.shape[0], 2048/img.shape[1])
+            new_width = int(img.shape[1] * scale_factor)
+            new_height = int(img.shape[0] * scale_factor)
+            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
-            return img
-
-        except Exception as e:
-            logger.error(f"Error loading image {file_path}: {e}")
-            # Создаем placeholder
-            placeholder = np.zeros((100, 100, 4), dtype=np.uint8)
-            placeholder[:, :, 0] = 255  # Красный
-            placeholder[:, :, 3] = 128  # Полупрозрачность
-            return placeholder
+        return img
 
     def _load_gif_frames_pil(self, file_path, layer_name, layer_data):
         """Загружает GIF с использованием PIL для правильной обработки анимации"""
