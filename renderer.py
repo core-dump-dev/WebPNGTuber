@@ -1,7 +1,5 @@
 import threading, time
 import os, io, math, random, sys
-import logging
-import logging.handlers
 import cv2
 import numpy as np
 from PIL import Image as PILImage
@@ -13,27 +11,9 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Создание папки для логов
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
-
-# Настройка логирования для renderer
-def setup_renderer_logging():
-    logger = logging.getLogger('renderer')
-    logger.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    log_file = os.path.join(LOGS_DIR, 'renderer.log')
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5
-    )
-    file_handler.setFormatter(formatter)
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    return logger
-
-logger = setup_renderer_logging()
+# Импортируем логирование из utils
+from utils import setup_logging
+logger = setup_logging('renderer')
 
 class Renderer:
     def __init__(self, width=700, height=700, fps=60):

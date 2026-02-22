@@ -12,9 +12,6 @@ import sys
 import glob
 import re
 from audio import AudioProcessor
-import logging
-import logging.handlers
-from datetime import datetime
 import zipfile
 import tempfile
 import queue
@@ -27,31 +24,9 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Создание папки для логов
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
-
-# Настройка логирования для editor
-def setup_editor_logging():
-    logger = logging.getLogger('editor')
-    logger.setLevel(logging.DEBUG)
-    # Форматирование
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    # Файловый обработчик с ротацией
-    log_file = os.path.join(LOGS_DIR, 'editor.log')
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5  # 1MB
-    )
-    file_handler.setFormatter(formatter)
-    # Консольный обработчик
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    return logger
-
-# Инициализация логгера
-logger = setup_editor_logging()
+# Импортируем логирование из utils
+from utils import setup_logging
+logger = setup_logging('editor')
 
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)

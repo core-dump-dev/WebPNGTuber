@@ -10,10 +10,8 @@ import json
 from PIL import Image, ImageTk
 import sounddevice as sd
 import sys
-import logging
-import logging.handlers
-from datetime import datetime
 import psutil
+import socket
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -21,36 +19,9 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Создание папки для логов
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
-
-# Настройка логирования для main
-def setup_main_logging():
-    logger = logging.getLogger('main')
-    logger.setLevel(logging.DEBUG)
-    
-    # Форматирование
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    # Файловый обработчик с ротацией
-    log_file = os.path.join(LOGS_DIR, 'main.log')
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1048576, backupCount=5  # 1MB
-    )
-    file_handler.setFormatter(formatter)
-    
-    # Консольный обработчик
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
-
-# Инициализация логгера
-logger = setup_main_logging()
+# Импортируем логирование из utils
+from utils import setup_logging
+logger = setup_logging('main')
 
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -92,6 +63,9 @@ class App:
         
         # Загрузка настроек
         self.settings = self.load_settings()
+
+        # Загружаем порт из настроек (по умолчанию 6969)
+        self.webserver_port = self.settings.get('webserver_port', 6969)
 
         # Инициализация компонентов
         self.renderer = Renderer(width=700, height=700, fps=60)
@@ -215,6 +189,14 @@ class App:
             state="disabled"  # Изначально отключена
         )
         self.link_btn.pack(fill="x", padx=2, pady=2)
+
+        # Кнопка изменения порта
+        self.port_btn = ttk.Button(
+            control_frame, 
+            text=f"Порт: {self.webserver_port}",
+            command=self.change_port
+        )
+        self.port_btn.pack(fill="x", padx=2, pady=2)
 
         # Настройки микрофона
         mic_frame = ttk.LabelFrame(settings_frame, text="🎤 Микрофон")
@@ -475,6 +457,9 @@ class App:
         # Настраиваем рендерер, но НЕ запускаем его
         self.renderer.set_noise_gate(self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
         self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get())
+
+        # Создаём веб-сервер с нужным портом (но не запускаем)
+        self.webserver = WebServer(self.renderer, port=self.webserver_port)
 
         # Обновление слотов
         self.refresh_slot_buttons()
@@ -776,12 +761,120 @@ class App:
         """Открытие ссылки веб-сервера в браузере"""
         import webbrowser
         try:
-            url = "http://localhost:6969/"
+            url = f"http://localhost:{self.webserver_port}/"
             webbrowser.open(url)
             logger.info(f"Opened web link: {url}")
         except Exception as e:
             logger.error(f"Error opening web link: {e}")
             messagebox.showerror("Ошибка", f"Не удалось открыть ссылку: {e}")
+
+    def change_port(self):
+        """Изменение порта веб-сервера (из старой версии)"""
+        if self.webserver and getattr(self.webserver, "is_running", False):
+            messagebox.showwarning("Веб-сервер запущен", 
+                                 "Пожалуйста, остановите веб-сервер перед изменением порта.")
+            return
+            
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Изменить порт веб-сервера")
+        dialog.geometry("300x150")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (300 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (150 // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        ttk.Label(dialog, text="Введите новый порт (1-65535):", 
+                  font=("Arial", 10)).pack(pady=(15, 5))
+        
+        port_frame = ttk.Frame(dialog)
+        port_frame.pack(pady=10)
+        
+        port_var = tk.StringVar(value=str(self.webserver_port))
+        port_entry = ttk.Entry(port_frame, textvariable=port_var, width=10, 
+                              font=("Arial", 12), justify="center")
+        port_entry.pack(side="left", padx=5)
+        port_entry.select_range(0, tk.END)
+        port_entry.focus_set()
+        
+        def is_port_available(port):
+            """Проверяет, свободен ли порт (не слушает ли его другой процесс)"""
+            try:
+                if port == self.webserver_port and not (self.webserver and self.webserver.is_running):
+                    return True
+                
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.5)
+                result = sock.connect_ex(('localhost', port))
+                sock.close()
+                return result != 0
+            except:
+                return False
+        
+        def apply_port():
+            try:
+                new_port = int(port_var.get())
+                if new_port < 1 or new_port > 65535:
+                    messagebox.showerror("Ошибка", 
+                        "Порт должен быть в диапазоне 1-65535", parent=dialog)
+                    return
+                
+                if new_port == self.webserver_port:
+                    dialog.destroy()
+                    return
+                
+                if not is_port_available(new_port):
+                    # Пробуем подождать, вдруг порт освободится
+                    for attempt in range(3):
+                        if is_port_available(new_port):
+                            break
+                        time.sleep(0.5)
+                    
+                    if not is_port_available(new_port):
+                        messagebox.showerror("Порт занят",
+                            f"Порт {new_port} уже занят другим процессом.\nПопробуйте другой порт.",
+                            parent=dialog)
+                        return
+                
+                old_port = self.webserver_port
+                self.webserver_port = new_port
+                
+                self.port_btn.config(text=f"Порт: {self.webserver_port}")
+                
+                # Пересоздаём веб-сервер с новым портом
+                self.webserver = WebServer(self.renderer, port=self.webserver_port)
+                
+                self.save_settings()
+                
+                self.show_temporary_message(
+                    "Порт изменен", 
+                    f"Порт веб-сервера изменен: {old_port} → {self.webserver_port}"
+                )
+                
+                dialog.destroy()
+                
+            except ValueError:
+                messagebox.showerror("Ошибка", 
+                    "Порт должен быть целым числом", parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Ошибка", 
+                    f"Не удалось изменить порт: {e}", parent=dialog)
+                logger.error(f"Error changing port: {e}")
+        
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=15)
+        
+        ttk.Button(btn_frame, text="Применить", 
+                   command=apply_port).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Отмена", 
+                   command=dialog.destroy).pack(side="left", padx=5)
+        
+        dialog.bind("<Return>", lambda e: apply_port())
+        
+        self.root.wait_window(dialog)
 
     def _round_to_step(self, value, step):
         """Округление значения до ближайшего шага"""
@@ -951,6 +1044,7 @@ class App:
             'idle_enabled': self.idle_enabled.get(),
             'idle_timeout': self.idle_timeout.get(),
             'current_slot': self.current_slot,
+            'webserver_port': self.webserver_port,  # Сохраняем порт
             'sections_state': {  # Сохраняем состояние раскрытия секций
                 'effects': self.effects_expanded,
                 'wave': self.wave_expanded,
@@ -1313,6 +1407,7 @@ class App:
             self.webserver.stop()
             self.server_btn.config(text="🌐 Запустить веб-сервер")
             self.link_btn.config(state="disabled")
+            self.port_btn.config(state="normal")
             logger.info("Web server stopped")
 
             # Останавливаем рендерер только если он был запущен для веб-сервера
@@ -1325,7 +1420,7 @@ class App:
                     logger.error(f"Error stopping renderer: {e}")
         else:
             if not self.webserver:
-                self.webserver = WebServer(self.renderer)
+                self.webserver = WebServer(self.renderer, port=self.webserver_port)
             elif not self.webserver.is_running:
                 self.webserver.renderer = self.renderer
 
@@ -1364,6 +1459,7 @@ class App:
                 self.webserver.start()
                 self.server_btn.config(text="⏹️ Остановить веб-сервер")
                 self.link_btn.config(state="normal")
+                self.port_btn.config(state="disabled")
                 logger.info("Web server started")
             except Exception as e:
                 logger.error(f"Error starting web server: {e}")
