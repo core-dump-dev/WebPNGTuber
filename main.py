@@ -482,7 +482,7 @@ class App:
         # Если в настройках есть текущий слот, загружаем его
         if self.current_slot:
             self.load_slot(self.current_slot - 1, silent=True)  # -1 потому что индексация с 0
-            
+        
         # Завершаем инициализацию
         self.initializing = False
 
@@ -531,17 +531,13 @@ class App:
                 col = 0
                 row += 1
 
-        # Кнопка "Применить все"
-        ttk.Button(thresholds_grid, text="Применить все", command=self.update_thresholds).grid(
-            row=row+1, column=0, columnspan=4, pady=3, sticky="ew")
-
         # Подсказка
         help_label = ttk.Label(
             thresholds_grid,
             text="Значения: 0.0-1.0",
             font=("Arial", 7)
         )
-        help_label.grid(row=row+2, column=0, columnspan=4, pady=(0, 1))
+        help_label.grid(row=row+1, column=0, columnspan=4, pady=(0, 1))
 
         # Обновляем визуализацию порогов
         self.update_threshold_visuals()
@@ -581,11 +577,6 @@ class App:
             if col >= 2:  # Две колонки
                 col = 0
                 row += 1
-
-        # Добавляем кнопку "Применить все"
-        if mouth_states:
-            ttk.Button(states_grid, text="Применить все", command=self.update_active_states).grid(
-                row=row+1, column=0, columnspan=2, pady=3, sticky="ew")
 
     def update_single_threshold(self, state_index):
         """Обновляет порог для одного состояния и сохраняет в модель"""

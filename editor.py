@@ -716,9 +716,6 @@ class ModelEditor(tk.Toplevel):
 
         ttk.Button(btn_frame, text="+ Добавить", width=12, command=self.add_mouth_state).pack(side="left", padx=2)
         ttk.Button(btn_frame, text="- Удалить", width=8, command=self.delete_mouth_state).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="✏️ Переименовать", width=12, command=self.rename_mouth_state).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="⬆ Вверх", width=6, command=self.move_mouth_state_up).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="⬇ Вниз", width=6, command=self.move_mouth_state_down).pack(side="left", padx=2)
 
         # Панель со списком состояний
         list_frame = ttk.Frame(main_frame)
@@ -936,74 +933,6 @@ class ModelEditor(tk.Toplevel):
         self.state_active_var.set(True)
 
         logger.info(f"Deleted mouth state {idx}")
-
-    def rename_mouth_state(self):
-        """Переименовывает выбранное состояние рта"""
-        selection = self.states_tree.selection()
-        if not selection:
-            return
-
-        idx = int(selection[0])
-        old_name = self.mouth_states[idx]['name']
-
-        new_name = simpledialog.askstring("Переименовать", "Новое название:", parent=self, initialvalue=old_name)
-        if new_name and new_name.strip():
-            # Проверяем уникальность
-            existing_names = [s['name'] for s in self.mouth_states if s['name'] != old_name]
-            if new_name in existing_names:
-                messagebox.showwarning("Ошибка", "Состояние с таким именем уже существует")
-                return
-            self.mouth_states[idx]['name'] = new_name.strip()
-            self.refresh_mouth_states_list()
-            logger.info(f"Renamed mouth state {idx}: {old_name} -> {new_name}")
-
-    def move_mouth_state_up(self):
-        """Перемещает выбранное состояние вверх"""
-        selection = self.states_tree.selection()
-        if not selection:
-            return
-
-        idx = int(selection[0])
-        if idx <= 0:
-            return
-
-        # Меняем местами
-        self.mouth_states[idx], self.mouth_states[idx-1] = self.mouth_states[idx-1], self.mouth_states[idx]
-
-        # Переиндексируем id
-        for i, state in enumerate(self.mouth_states):
-            state['id'] = i
-
-        # Перераспределяем пороги
-        self.auto_distribute_thresholds()
-
-        # Выделяем перемещенное состояние
-        self.states_tree.selection_set(str(idx-1))
-        self.states_tree.focus(str(idx-1))
-
-    def move_mouth_state_down(self):
-        """Перемещает выбранное состояние вниз"""
-        selection = self.states_tree.selection()
-        if not selection:
-            return
-
-        idx = int(selection[0])
-        if idx >= len(self.mouth_states) - 1:
-            return
-
-        # Меняем местами
-        self.mouth_states[idx], self.mouth_states[idx+1] = self.mouth_states[idx+1], self.mouth_states[idx]
-
-        # Переиндексируем id
-        for i, state in enumerate(self.mouth_states):
-            state['id'] = i
-
-        # Перераспределяем пороги
-        self.auto_distribute_thresholds()
-
-        # Выделяем перемещенное состояние
-        self.states_tree.selection_set(str(idx+1))
-        self.states_tree.focus(str(idx+1))
 
     def auto_distribute_thresholds(self):
         """Автоматически распределяет пороги между состояниями"""
@@ -3017,7 +2946,6 @@ class ModelEditor(tk.Toplevel):
         slot_dialog.update()
 
     def _save_slot(self, slot_num, dialog):
-        """Сохраняет модель в слот"""
         dialog.destroy()
 
         slot_dir = os.path.join(MODELS_DIR, f"slot{slot_num}")
@@ -3040,10 +2968,6 @@ class ModelEditor(tk.Toplevel):
                     shutil.copy2(src, os.path.join(slot_dir, f))
 
             self.original_slot = slot_num
-
-            # Обновляем модель в рендерере, если он есть
-            if self.renderer:
-                self.renderer.load_model(self.model, slot_dir)
 
             messagebox.showinfo("Сохранено", f"Модель сохранена в слот {slot_num}")
 
