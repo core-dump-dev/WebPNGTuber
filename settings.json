@@ -1,16 +1,4 @@
 {
-  "thresholds": {
-    "silent": 0.0,
-    "whisper": 0.05,
-    "normal": 0.3,
-    "shout": 0.9
-  },
-  "active_states": {
-    "silent": true,
-    "whisper": true,
-    "normal": true,
-    "shout": true
-  },
   "effects": {
     "shake": false,
     "bounce": false,
@@ -20,8 +8,8 @@
     "wave": false
   },
   "wave_params": {
-    "amplitude": 3.0,
-    "frequency": 2.0,
+    "amplitude": 7.0,
+    "frequency": 1.0,
     "speed": 3
   },
   "sensitivity": 1.5,
@@ -31,12 +19,11 @@
   "idle_enabled": true,
   "idle_timeout": 5.0,
   "current_slot": 1,
-  "webserver_port": 6969,
   "sections_state": {
-    "thresh": true,
-    "states": true,
     "effects": true,
     "wave": true,
-    "idle": true
+    "idle": true,
+    "thresh": true,
+    "states": true
   }
 }

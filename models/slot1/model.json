@@ -14,7 +14,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": false
+      "_selected": false,
+      "alpha": 1.0
     },
     {
       "name": "closed-eye",
@@ -29,7 +30,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": false
+      "_selected": false,
+      "alpha": 1.0
     },
     {
       "name": "closed-mouth",
@@ -44,7 +46,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": true
+      "_selected": false,
+      "alpha": 1.0
     },
     {
       "name": "open-eye-left",
@@ -59,7 +62,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": false
+      "_selected": false,
+      "alpha": 1.0
     },
     {
       "name": "open-eye-right",
@@ -74,7 +78,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": false
+      "_selected": false,
+      "alpha": 1.0
     },
     {
       "name": "open-mouth-bigger",
@@ -89,7 +94,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": false
+      "_selected": true,
+      "alpha": 1.0
     },
     {
       "name": "open-mouth-max",
@@ -104,7 +110,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": false
+      "_selected": true,
+      "alpha": 1.0
     },
     {
       "name": "open-mouth-min",
@@ -119,7 +126,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": false
+      "_selected": true,
+      "alpha": 1.0
     },
     {
       "name": "smiled-mouth",
@@ -134,7 +142,8 @@
       "is_gif": false,
       "flip_horizontal": false,
       "flip_vertical": false,
-      "_selected": true
+      "_selected": false,
+      "alpha": 1.0
     }
   ],
   "groups": [
@@ -177,10 +186,10 @@
       ],
       "parent": null,
       "logic": {
-        "silent": "cls-mouth",
-        "whisper": "open-mouth-min",
-        "normal": "open-mouth-bigger",
-        "shout": "open-mouth-max"
+        "state_0": "cls-mouth",
+        "state_1": "open-mouth-min",
+        "state_2": "open-mouth-bigger",
+        "state_3": "open-mouth-max"
       },
       "blink_freq": 0.0,
       "random_effect": false,
@@ -202,5 +211,31 @@
     }
   ],
   "width": 700,
-  "height": 700
+  "height": 700,
+  "mouth_states": [
+    {
+      "id": 0,
+      "name": "Молчание",
+      "threshold": 0.0,
+      "active": true
+    },
+    {
+      "id": 1,
+      "name": "Тишина",
+      "threshold": 0.05,
+      "active": true
+    },
+    {
+      "id": 2,
+      "name": "Норма",
+      "threshold": 0.3,
+      "active": true
+    },
+    {
+      "id": 3,
+      "name": "Крик",
+      "threshold": 0.9,
+      "active": true
+    }
+  ]
 }
