@@ -256,6 +256,7 @@ class App:
         # Индикатор уровня
         ttk.Label(mic_frame, text="Индикатор:").pack(anchor="w", padx=2, pady=(3, 0))
         self.level_canvas = tk.Canvas(mic_frame, width=180, height=25, bg="#f0f0f0")
+        self.level_canvas.bind("<Configure>", self.on_canvas_resize)
         self.level_canvas.pack(fill="x", padx=2, pady=(0, 3))
 
         # ---- КОЛОНКА 3: Расширенные настройки ----
@@ -470,6 +471,8 @@ class App:
         
         # Завершаем инициализацию
         self.initializing = False
+
+        self.root.after(100, self.on_canvas_resize)
 
     def refresh_thresholds_ui(self):
         """Обновляет UI порогов на основе текущих состояний рта из модели"""

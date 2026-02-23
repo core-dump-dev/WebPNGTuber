@@ -2692,6 +2692,20 @@ class ModelEditor(tk.Toplevel):
 
         # Загружаем элементы
         self.items.clear()
+
+        # Очищаем выделение и группу
+        self.current_selection = []
+        self.selected_group = None
+
+        # Очищаем кэш изображений редактора
+        self._photo_images.clear()
+
+        # Сбрасываем таймеры групп
+        self.group_blink_timers.clear()
+        self.group_blink_until.clear()
+        self.group_random_timers.clear()
+        self.group_random_current.clear()
+
         for layer in self.model.get("layers", []):
             filename = layer.get("file")
             if not filename:
