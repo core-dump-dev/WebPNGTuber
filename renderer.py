@@ -59,11 +59,20 @@ class Renderer:
         self._current_wave_frame = 0
         self._wave_frame_timer = 0
 
-        # Idle режим
+        # Idle режим с плавным затемнением
         self.idle_enabled = False
         self.idle_timeout = 60.0
-        self.last_activity_time = time.time()
+        # целевая яркость в idle (50%)
         self.idle_brightness = 0.5
+        # текущая яркость (плавно меняется)
+        self.idle_current_brightness = 1.0
+        self.idle_target_brightness = 1.0             # целевая яркость
+        self.idle_fade_duration = 0.5                 # время затухания (сек)
+        # время восстановления (сек)
+        self.idle_restore_duration = 0.3
+        # время последнего обновления яркости
+        self.idle_last_update_time = time.time()
+        self.last_activity_time = time.time()
 
         self.groups = {}
 
@@ -112,11 +121,19 @@ class Renderer:
         self.effects.update(effects)
         logger.info(f"Effects updated: {self.effects}")
 
-    def set_idle(self, enabled, timeout):
+    def set_idle(self, enabled, timeout, fade_duration=0.5, restore_duration=0.3):
+        """Устанавливает параметры idle-режима с плавным затемнением"""
         self.idle_enabled = enabled
         self.idle_timeout = timeout
+        self.idle_fade_duration = fade_duration
+        self.idle_restore_duration = restore_duration
         self.last_activity_time = time.time()
-        logger.info(f"Idle mode set: enabled={enabled}, timeout={timeout}")
+        # Принудительно устанавливаем целевую яркость в 1.0 при включении/изменении настроек
+        self.idle_target_brightness = 1.0
+        self.idle_current_brightness = 1.0
+        self.idle_last_update_time = time.time()
+        logger.info(
+            f"Idle mode set: enabled={enabled}, timeout={timeout}, fade={fade_duration}, restore={restore_duration}")
 
     def start(self):
         if self._running:
@@ -648,6 +665,10 @@ class Renderer:
         # Обновляем время последней активности для idle режима
         if self.idle_enabled and level > self._get_min_active_threshold():
             self.last_activity_time = time.time()
+            # Если звук появился – восстанавливаем яркость
+            if self.idle_target_brightness != 1.0:
+                self.idle_target_brightness = 1.0
+                self.idle_last_update_time = time.time()
 
         # Сбрасываем кэш видимых слоев
         self._visible_layers_cache_time = 0
@@ -1014,15 +1035,41 @@ class Renderer:
             except Exception as e:
                 logger.error(f"Error compositing layer {layer_name}: {e}")
 
-        # Применяем idle эффект
+        # Применяем idle эффект с плавным затуханием
         if self.idle_enabled:
-            current_time = time.time()
-            if current_time - self.last_activity_time > self.idle_timeout:
-                # Уменьшаем яркость
-                brightness_factor = self.idle_brightness
-                # Применяем только к RGB каналам
-                frame[:, :, :3] = (frame[:, :, :3] *
-                                   brightness_factor).astype(np.uint8)
+            now = time.time()
+            # Проверяем, пора ли переходить в idle режим (уменьшать яркость)
+            if now - self.last_activity_time > self.idle_timeout:
+                if self.idle_target_brightness != self.idle_brightness:
+                    self.idle_target_brightness = self.idle_brightness
+                    self.idle_last_update_time = now
+            else:
+                if self.idle_target_brightness != 1.0:
+                    self.idle_target_brightness = 1.0
+                    self.idle_last_update_time = now
+
+            # Плавно изменяем текущую яркость
+            dt = now - self.idle_last_update_time
+            if dt > 0:
+                # Определяем нужную длительность перехода в зависимости от направления
+                if self.idle_target_brightness > self.idle_current_brightness:
+                    duration = self.idle_restore_duration   # восстановление
+                else:
+                    duration = self.idle_fade_duration      # затухание
+
+                if duration > 0:
+                    step = dt / duration
+                    if step > 0:
+                        self.idle_current_brightness += (
+                            self.idle_target_brightness - self.idle_current_brightness) * min(step, 1.0)
+                        # Ограничиваем, чтобы не выйти за пределы [0,1]
+                        self.idle_current_brightness = max(
+                            0.0, min(1.0, self.idle_current_brightness))
+
+            # Применяем яркость к RGB каналам
+            if self.idle_current_brightness < 0.99:   # небольшая оптимизация
+                frame[:, :, :3] = (
+                    frame[:, :, :3] * self.idle_current_brightness).astype(np.uint8)
 
         return frame
 

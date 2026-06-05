@@ -472,6 +472,28 @@ class App:
         idle_entry.bind("<Return>", lambda e: self.update_idle_setting())
         idle_entry.bind("<FocusOut>", lambda e: self.update_idle_setting())
 
+        # Время затухания (сек)
+        ttk.Label(idle_grid, text="Время затухания (сек):").pack(
+            anchor="w", padx=3, pady=(3, 0))
+        self.idle_fade_duration = tk.DoubleVar(
+            value=self.settings.get('idle_fade_duration', 0.5))
+        fade_entry = ttk.Entry(
+            idle_grid, textvariable=self.idle_fade_duration, width=10)
+        fade_entry.pack(anchor="w", padx=3, pady=(0, 2))
+        fade_entry.bind("<Return>", lambda e: self.update_idle_setting())
+        fade_entry.bind("<FocusOut>", lambda e: self.update_idle_setting())
+
+        # Время восстановления (сек)
+        ttk.Label(idle_grid, text="Время восстановления (сек):").pack(
+            anchor="w", padx=3, pady=(3, 0))
+        self.idle_restore_duration = tk.DoubleVar(
+            value=self.settings.get('idle_restore_duration', 0.3))
+        restore_entry = ttk.Entry(
+            idle_grid, textvariable=self.idle_restore_duration, width=10)
+        restore_entry.pack(anchor="w", padx=3, pady=(0, 2))
+        restore_entry.bind("<Return>", lambda e: self.update_idle_setting())
+        restore_entry.bind("<FocusOut>", lambda e: self.update_idle_setting())
+
         # ---- Пороги голоса (четвертое место) ----
         thresh_frame = ttk.Frame(self.expand_content)
         thresh_frame.pack(fill="x", pady=(0, 3))
@@ -521,8 +543,12 @@ class App:
         # Настраиваем рендерер, но НЕ запускаем его
         self.renderer.set_noise_gate(
             self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
-        self.renderer.set_idle(self.idle_enabled.get(),
-                               self.idle_timeout.get())
+        self.renderer.set_idle(
+            self.idle_enabled.get(),
+            self.idle_timeout.get(),
+            self.idle_fade_duration.get(),
+            self.idle_restore_duration.get()
+        )
 
         # Создаём веб-сервер с нужным портом (но не запускаем)
         self.webserver = WebServer(self.renderer, port=self.webserver_port)
@@ -1131,11 +1157,14 @@ class App:
         self.save_settings()  # Автоматическое сохранение
 
     def update_idle_setting(self):
-        """Обновление настройки idle-режима"""
+        """Обновление настройки idle-режима с плавным затемнением"""
         enabled = self.idle_enabled.get()
         timeout = self.idle_timeout.get()
-        self.renderer.set_idle(enabled, timeout)
-        logger.info(f"Idle mode updated: enabled={enabled}, timeout={timeout}")
+        fade = self.idle_fade_duration.get()
+        restore = self.idle_restore_duration.get()
+        self.renderer.set_idle(enabled, timeout, fade, restore)
+        logger.info(
+            f"Idle mode updated: enabled={enabled}, timeout={timeout}, fade={fade}, restore={restore}")
         self.save_settings()  # Автоматическое сохранение
 
     def load_settings(self):
@@ -1169,6 +1198,8 @@ class App:
             'mic_device': self.device_var.get(),
             'idle_enabled': self.idle_enabled.get(),
             'idle_timeout': self.idle_timeout.get(),
+            'idle_fade_duration': self.idle_fade_duration.get(),
+            'idle_restore_duration': self.idle_restore_duration.get(),
             'current_slot': self.current_slot,
             'webserver_port': self.webserver_port,  # Сохраняем порт
             'sections_state': {  # Сохраняем состояние раскрытия секций
@@ -1567,7 +1598,11 @@ class App:
                     self.renderer.set_noise_gate(
                         self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
                     self.renderer.set_idle(
-                        self.idle_enabled.get(), self.idle_timeout.get())
+                        self.idle_enabled.get(),
+                        self.idle_timeout.get(),
+                        self.idle_fade_duration.get(),
+                        self.idle_restore_duration.get()
+                    )
                     self.renderer.set_effects(self.effects)
 
                     # Обновляем эффект "Волна" только если он включен
