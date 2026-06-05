@@ -210,15 +210,22 @@ class App:
         # Выбор устройства
         ttk.Label(mic_frame, text="Устройство:").pack(
             anchor='w', padx=2, pady=(2, 0))
+
+        device_row = ttk.Frame(mic_frame)
+        device_row.pack(fill='x', padx=2, pady=(0, 2))
+
         self.device_var = tk.StringVar(
             value=self.settings.get('mic_device', 'По умолчанию'))
         self.device_combo = ttk.Combobox(
-            mic_frame, textvariable=self.device_var, width=18)
-        self.device_combo.pack(fill='x', padx=2, pady=(0, 2))
+            device_row, textvariable=self.device_var, width=18)
+        self.device_combo.pack(side='left', fill='x', expand=True)
 
-        # Заполнение устройств
-        self.devices = self.get_audio_devices()
-        self.device_combo['values'] = self.devices
+        # Кнопка обновления списка устройств
+        refresh_btn = ttk.Button(device_row, text="↻",
+                                 width=3, command=self.refresh_devices)
+        refresh_btn.pack(side='left', padx=(2, 0))
+
+        # Заполнение устройств (будет вызвано после инициализации)
         self.device_combo.bind('<<ComboboxSelected>>', self.on_device_change)
 
         ttk.Label(mic_frame, text="Уровень:").pack(
@@ -531,7 +538,48 @@ class App:
         # Завершаем инициализацию
         self.initializing = False
 
+        # Обновляем список устройств (теперь все переменные созданы)
+        self.refresh_devices()
+
         self.root.after(100, self.on_canvas_resize)
+
+    def refresh_devices(self):
+        """Обновляет список доступных аудиоустройств с принудительным перечитыванием"""
+        # Останавливаем аудио, если оно запущено
+        audio_was_running = self.audio.running if hasattr(
+            self.audio, 'running') else False
+        if audio_was_running:
+            self.audio.stop()
+
+        # Принудительно переинициализируем sounddevice, чтобы он перечитал устройства
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:
+            logger.warning(f"Error reinitializing sounddevice: {e}")
+
+        # Получаем актуальный список
+        devices = self.get_audio_devices()
+        current_device = self.device_var.get()
+
+        # Обновляем выпадающий список
+        self.device_combo['values'] = devices
+
+        # Если текущее устройство всё ещё существует, оставляем его
+        if current_device in devices:
+            self.device_var.set(current_device)
+        else:
+            # Иначе выбираем "По умолчанию"
+            self.device_var.set("По умолчанию")
+            # Меняем устройство только если инициализация завершена
+            if not self.initializing:
+                self.on_device_change(None)
+
+        # Перезапускаем аудио, если оно было запущено
+        if audio_was_running:
+            self.audio.start()
+
+        logger.info(f"Devices refreshed, found {len(devices)} input devices")
 
     def refresh_thresholds_ui(self):
         """Обновляет UI порогов на основе текущих состояний рта из модели"""
@@ -991,6 +1039,7 @@ class App:
             for i, dev in enumerate(devices):
                 if dev.get('max_input_channels', 0) > 0:
                     name = dev.get('name', '')
+                    # Фильтруем виртуальные устройства (CABLE, VB-Audio, Voicemee)
                     if "CABLE" in name or "VB-Audio" in name or "Voicemee" in name or "virtual" in name.lower():
                         continue
                     input_devices.append(name)
