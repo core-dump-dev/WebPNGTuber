@@ -1,5 +1,6 @@
 # audio.py
-import threading, time
+import threading
+import time
 import numpy as np
 import sounddevice as sd
 import sys
@@ -18,6 +19,7 @@ else:
 from utils import setup_logging
 logger = setup_logging('audio')
 
+
 class AudioProcessor:
     def __init__(self, callback=None, device=None):
         self.callback = callback
@@ -28,7 +30,7 @@ class AudioProcessor:
         self.noise_gate_threshold = 0.01
         self.device_index = None
         self.sensitivity = 1.0
-        
+
         self._smoothing_buffer = deque(maxlen=3)
         self._smoothing_alpha = 0.7
         self._last_smoothed_level = 0.0
@@ -36,7 +38,7 @@ class AudioProcessor:
         self._audio_queue = queue.Queue(maxsize=10)
         self._processing_thread = None
         self._buffer = np.zeros(256, dtype=np.float32)
-        
+
         self._callback_lock = threading.Lock()
         self._last_callback_time = 0
         self._callback_interval = 0.01
@@ -78,39 +80,39 @@ class AudioProcessor:
         def callback(indata, frames, time_info, status):
             if not self.running or status:
                 return
-            
+
             current_time = time.time()
             if current_time - self._last_callback_time < self._callback_interval:
                 return
-            
+
             with self._callback_lock:
                 np.copyto(self._buffer, indata[:, 0])
-                
+
                 rms = np.sqrt(np.mean(self._buffer ** 2))
                 raw_level = min(1.0, rms * 10 * self.sensitivity)
-                
+
                 if raw_level < self.noise_gate_threshold:
                     raw_level = 0.0
-                
+
                 self._level = self._smoothing_alpha * raw_level + \
-                            (1 - self._smoothing_alpha) * self._level
-                
+                    (1 - self._smoothing_alpha) * self._level
+
                 if self.callback:
                     try:
                         self.callback(self._level)
                     except Exception as e:
                         logger.error(f"Error in callback: {e}")
-                
+
                 self._last_callback_time = current_time
-        
+
         try:
             device_params = {}
             if self.device_index is not None:
                 device_params['device'] = self.device_index
-                
+
             with sd.InputStream(
-                channels=1, 
-                callback=callback, 
+                channels=1,
+                callback=callback,
                 samplerate=22050,
                 blocksize=256,
                 latency='low',
@@ -118,6 +120,6 @@ class AudioProcessor:
             ):
                 while self.running:
                     time.sleep(0.01)
-                    
+
         except Exception as e:
             logger.error(f"Audio capture error: {e}")

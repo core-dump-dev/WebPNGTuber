@@ -1,4 +1,5 @@
 # webserver.py
+import logging
 from threading import Thread
 from werkzeug.serving import make_server
 from flask import Flask, Response, send_from_directory
@@ -17,9 +18,9 @@ from utils import setup_logging
 logger = setup_logging('webserver')
 
 # Отключение логирования Flask
-import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
+
 
 class WebServer:
     def __init__(self, renderer, host="0.0.0.0", port=6969):
@@ -29,17 +30,17 @@ class WebServer:
         self._thread = None
         self._server = None
         self.is_running = False
-        
+
         if getattr(sys, 'frozen', False):
             self.base_dir = os.path.dirname(sys.executable)
         else:
             self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        
+
         self.app = Flask("WebPNGTuberStream")
-        
+
         self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
         self.app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
-        
+
         @self.app.route("/stream")
         def stream():
             logger.info(f"Stream connection established on port {self.port}")
@@ -69,17 +70,17 @@ class WebServer:
                 'favicon.ico',
                 mimetype='image/vnd.microsoft.icon'
             )
-                
+
     def mjpeg_generator(self):
         """Оптимизированный генератор MJPEG потока"""
         last_frame = None
         last_frame_hash = None
-        
+
         while self.is_running:
             if not self.renderer or not self.renderer.model:
                 time.sleep(0.1)
                 continue
-                
+
             frame = self.renderer.get_frame_bytes()
             if frame:
                 frame_hash = hash(frame)
@@ -89,25 +90,25 @@ class WebServer:
                     frame_data = (
                         b"--frame\r\n"
                         b"Content-Type: image/png\r\n"
-                        b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n" + 
+                        b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n" +
                         frame + b"\r\n"
                     )
                     last_frame = frame_data
                     last_frame_hash = frame_hash
                     yield frame_data
-            
+
             time.sleep(1.0 / self.renderer.fps)
-                
+
     def start(self):
         """Запуск веб-сервера"""
         if self.is_running:
             return
-            
+
         def run():
             try:
                 self._server = make_server(
-                    self.host, 
-                    self.port, 
+                    self.host,
+                    self.port,
                     self.app,
                     threaded=True
                 )
@@ -120,21 +121,22 @@ class WebServer:
             finally:
                 if self._server:
                     self._server.server_close()
-                logger.info(f"Web server on port {self.port} stopped completely")
-                
+                logger.info(
+                    f"Web server on port {self.port} stopped completely")
+
         self._thread = Thread(target=run, daemon=True)
         self._thread.start()
-        
+
         time.sleep(0.5)
 
     def stop(self):
         """Остановка веб-сервера"""
         if not self.is_running or not self._server:
             return
-            
+
         logger.info(f"Web server stop requested for port {self.port}")
         self.is_running = False
-        
+
         try:
             if self._server:
                 self._server.shutdown()

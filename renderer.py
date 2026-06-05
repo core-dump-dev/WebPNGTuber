@@ -1,5 +1,10 @@
-import threading, time
-import os, io, math, random, sys
+import threading
+import time
+import os
+import io
+import math
+import random
+import sys
 import cv2
 import numpy as np
 from PIL import Image as PILImage
@@ -14,6 +19,7 @@ else:
 # Импортируем логирование из utils
 from utils import setup_logging
 logger = setup_logging('renderer')
+
 
 class Renderer:
     def __init__(self, width=700, height=700, fps=60):
@@ -136,11 +142,13 @@ class Renderer:
             # Меняем порядок каналов RGB -> BGR (OpenCV использует BGRA)
             img = cv2.cvtColor(np_img, cv2.COLOR_RGBA2BGRA)
         except Exception as e:
-            logger.warning(f"PIL failed to load {file_path}, falling back to OpenCV: {e}")
+            logger.warning(
+                f"PIL failed to load {file_path}, falling back to OpenCV: {e}")
             # Резервный вариант – OpenCV
             img = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
             if img is None:
-                logger.error(f"Failed to load image with both PIL and OpenCV: {file_path}")
+                logger.error(
+                    f"Failed to load image with both PIL and OpenCV: {file_path}")
                 # Placeholder (красный квадрат)
                 placeholder = np.zeros((100, 100, 4), dtype=np.uint8)
                 placeholder[:, :, 0] = 255
@@ -157,21 +165,24 @@ class Renderer:
         if scale != 1.0 and scale > 0:
             new_width = max(1, int(img.shape[1] * scale))
             new_height = max(1, int(img.shape[0] * scale))
-            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+            img = cv2.resize(img, (new_width, new_height),
+                             interpolation=cv2.INTER_LINEAR)
 
         if rotation != 0:
             center = (img.shape[1] // 2, img.shape[0] // 2)
             matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
             cos_val = np.abs(matrix[0, 0])
             sin_val = np.abs(matrix[0, 1])
-            new_width = int((img.shape[1] * cos_val) + (img.shape[0] * sin_val))
-            new_height = int((img.shape[1] * sin_val) + (img.shape[0] * cos_val))
+            new_width = int(
+                (img.shape[1] * cos_val) + (img.shape[0] * sin_val))
+            new_height = int(
+                (img.shape[1] * sin_val) + (img.shape[0] * cos_val))
             matrix[0, 2] += (new_width / 2) - center[0]
             matrix[1, 2] += (new_height / 2) - center[1]
             img = cv2.warpAffine(img, matrix, (new_width, new_height),
-                                flags=cv2.INTER_LINEAR,
-                                borderMode=cv2.BORDER_CONSTANT,
-                                borderValue=(0, 0, 0, 0))
+                                 flags=cv2.INTER_LINEAR,
+                                 borderMode=cv2.BORDER_CONSTANT,
+                                 borderValue=(0, 0, 0, 0))
 
         if flip_h:
             img = cv2.flip(img, 1)
@@ -183,7 +194,8 @@ class Renderer:
             scale_factor = min(2048/img.shape[0], 2048/img.shape[1])
             new_width = int(img.shape[1] * scale_factor)
             new_height = int(img.shape[0] * scale_factor)
-            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            img = cv2.resize(img, (new_width, new_height),
+                             interpolation=cv2.INTER_AREA)
 
         return img
 
@@ -193,7 +205,8 @@ class Renderer:
             pil_img = PILImage.open(file_path)
             if not pil_img.is_animated:
                 # Это статичное изображение, конвертируем в OpenCV формат
-                cv_img = cv2.cvtColor(np.array(pil_img.convert('RGBA')), cv2.COLOR_RGBA2BGRA)
+                cv_img = cv2.cvtColor(
+                    np.array(pil_img.convert('RGBA')), cv2.COLOR_RGBA2BGRA)
 
                 # Применяем трансформации к статичному GIF
                 scale = float(layer_data.get('scale', 1.0))
@@ -204,21 +217,24 @@ class Renderer:
                 if scale != 1.0 and scale > 0:
                     new_width = max(1, int(cv_img.shape[1] * scale))
                     new_height = max(1, int(cv_img.shape[0] * scale))
-                    cv_img = cv2.resize(cv_img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                    cv_img = cv2.resize(
+                        cv_img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
 
                 if rotation != 0:
                     center = (cv_img.shape[1] // 2, cv_img.shape[0] // 2)
                     matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
                     cos_val = np.abs(matrix[0, 0])
                     sin_val = np.abs(matrix[0, 1])
-                    new_width = int((cv_img.shape[1] * cos_val) + (cv_img.shape[0] * sin_val))
-                    new_height = int((cv_img.shape[1] * sin_val) + (cv_img.shape[0] * cos_val))
+                    new_width = int(
+                        (cv_img.shape[1] * cos_val) + (cv_img.shape[0] * sin_val))
+                    new_height = int(
+                        (cv_img.shape[1] * sin_val) + (cv_img.shape[0] * cos_val))
                     matrix[0, 2] += (new_width / 2) - center[0]
                     matrix[1, 2] += (new_height / 2) - center[1]
                     cv_img = cv2.warpAffine(cv_img, matrix, (new_width, new_height),
-                                          flags=cv2.INTER_LINEAR,
-                                          borderMode=cv2.BORDER_CONSTANT,
-                                          borderValue=(0, 0, 0, 0))
+                                            flags=cv2.INTER_LINEAR,
+                                            borderMode=cv2.BORDER_CONSTANT,
+                                            borderValue=(0, 0, 0, 0))
 
                 if flip_h:
                     cv_img = cv2.flip(cv_img, 1)
@@ -261,7 +277,8 @@ class Renderer:
                 frame_array = np.array(frame)
 
                 # Конвертируем в формат OpenCV (RGB -> BGR)
-                bgr_frame = cv2.cvtColor(frame_array[:, :, :3], cv2.COLOR_RGB2BGR)
+                bgr_frame = cv2.cvtColor(
+                    frame_array[:, :, :3], cv2.COLOR_RGB2BGR)
                 rgba_frame = np.dstack([bgr_frame, frame_array[:, :, 3]])
 
                 # Применяем трансформации к каждому кадру
@@ -273,21 +290,25 @@ class Renderer:
                 if scale != 1.0 and scale > 0:
                     new_width = max(1, int(rgba_frame.shape[1] * scale))
                     new_height = max(1, int(rgba_frame.shape[0] * scale))
-                    rgba_frame = cv2.resize(rgba_frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                    rgba_frame = cv2.resize(
+                        rgba_frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
 
                 if rotation != 0:
-                    center = (rgba_frame.shape[1] // 2, rgba_frame.shape[0] // 2)
+                    center = (rgba_frame.shape[1] //
+                              2, rgba_frame.shape[0] // 2)
                     matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
                     cos_val = np.abs(matrix[0, 0])
                     sin_val = np.abs(matrix[0, 1])
-                    new_width = int((rgba_frame.shape[1] * cos_val) + (rgba_frame.shape[0] * sin_val))
-                    new_height = int((rgba_frame.shape[1] * sin_val) + (rgba_frame.shape[0] * cos_val))
+                    new_width = int(
+                        (rgba_frame.shape[1] * cos_val) + (rgba_frame.shape[0] * sin_val))
+                    new_height = int(
+                        (rgba_frame.shape[1] * sin_val) + (rgba_frame.shape[0] * cos_val))
                     matrix[0, 2] += (new_width / 2) - center[0]
                     matrix[1, 2] += (new_height / 2) - center[1]
                     rgba_frame = cv2.warpAffine(rgba_frame, matrix, (new_width, new_height),
-                                              flags=cv2.INTER_LINEAR,
-                                              borderMode=cv2.BORDER_CONSTANT,
-                                              borderValue=(0, 0, 0, 0))
+                                                flags=cv2.INTER_LINEAR,
+                                                borderMode=cv2.BORDER_CONSTANT,
+                                                borderValue=(0, 0, 0, 0))
 
                 if flip_h:
                     rgba_frame = cv2.flip(rgba_frame, 1)
@@ -326,7 +347,8 @@ class Renderer:
                 'index': layer_data.get('index', 999)
             }
 
-            logger.info(f"Loaded animated GIF {layer_name} with {len(frames)} frames using PIL")
+            logger.info(
+                f"Loaded animated GIF {layer_name} with {len(frames)} frames using PIL")
 
         except Exception as e:
             logger.error(f"Error loading GIF {file_path} with PIL: {e}")
@@ -389,7 +411,8 @@ class Renderer:
         self._random_current.clear()
 
         # Инициализируем фон
-        self._background = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+        self._background = np.zeros(
+            (self.height, self.width, 4), dtype=np.uint8)
 
         # Загружаем слои
         for idx, layer in enumerate(self.model.get('layers', [])):
@@ -435,9 +458,11 @@ class Renderer:
 
                 if is_gif:
                     # Используем PIL для загрузки GIF - это самый надежный способ
-                    self._load_gif_frames_pil(file_path, unique_name, layer_data)
+                    self._load_gif_frames_pil(
+                        file_path, unique_name, layer_data)
                 else:
-                    image = self._load_image_cv2(file_path, scale, rotation, flip_h, flip_v)
+                    image = self._load_image_cv2(
+                        file_path, scale, rotation, flip_h, flip_v)
                     if image is not None:
                         self._layer_cache[unique_name] = {
                             'name': unique_name,
@@ -467,7 +492,8 @@ class Renderer:
             blink_freq = float(group.get("blink_freq", 0.0))
             if blink_freq > 0.001:
                 # Первое моргание через случайное время от 2 до 6 секунд
-                self._blink_timers[group_name] = current_time + random.uniform(2.0, 6.0)
+                self._blink_timers[group_name] = current_time + \
+                    random.uniform(2.0, 6.0)
                 self._blink_until[group_name] = 0.0  # Пока не моргаем
             else:
                 self._blink_timers[group_name] = 0.0
@@ -478,15 +504,18 @@ class Renderer:
                 # Первая смена через случайное время от min до max
                 random_min = float(group.get("random_min", 5.0))
                 random_max = float(group.get("random_max", 10.0))
-                self._random_timers[group_name] = current_time + random.uniform(random_min, random_max)
+                self._random_timers[group_name] = current_time + \
+                    random.uniform(random_min, random_max)
                 self._random_current[group_name] = None
 
         # Предрассчитываем кадры эффекта "Волна" для статичных изображений и GIF
         if self.wave_enabled:
             self._precalculate_wave_frames()
 
-        logger.info(f"Model loaded: {model_json.get('name', 'unnamed')} with {len(self.mouth_states)} mouth states")
-        logger.info(f"Layers: {len(self._layer_cache)} total, GIFs: {len([k for k, v in self._layer_cache.items() if v.get('is_gif')])}")
+        logger.info(
+            f"Model loaded: {model_json.get('name', 'unnamed')} with {len(self.mouth_states)} mouth states")
+        logger.info(
+            f"Layers: {len(self._layer_cache)} total, GIFs: {len([k for k, v in self._layer_cache.items() if v.get('is_gif')])}")
 
     def _precalculate_wave_frames(self):
         """Предрассчитывает кадры эффекта 'Волна' для всех слоев"""
@@ -504,7 +533,8 @@ class Renderer:
             # Создаем wave_num_frames вариантов искажения для статичных изображений
             for frame_idx in range(self.wave_num_frames):
                 cache_key = (unique_name, frame_idx)
-                distorted_img = self._create_discrete_wave_effect(original_image.copy(), frame_idx)
+                distorted_img = self._create_discrete_wave_effect(
+                    original_image.copy(), frame_idx)
                 if distorted_img is not None:
                     self._wave_frames_cache[cache_key] = distorted_img
 
@@ -514,7 +544,8 @@ class Renderer:
             if not frames:
                 continue
 
-            logger.info(f"Precalculating wave frames for GIF {gif_name} ({len(frames)} frames)")
+            logger.info(
+                f"Precalculating wave frames for GIF {gif_name} ({len(frames)} frames)")
 
             # Для каждого кадра GIF создаем wave_num_frames искажений
             for gif_frame_idx, original_frame in enumerate(frames):
@@ -522,11 +553,13 @@ class Renderer:
                     cache_key = (gif_name, gif_frame_idx, wave_frame_idx)
 
                     # Создаем искаженную версию кадра
-                    distorted_frame = self._create_discrete_wave_effect(original_frame.copy(), wave_frame_idx)
+                    distorted_frame = self._create_discrete_wave_effect(
+                        original_frame.copy(), wave_frame_idx)
                     if distorted_frame is not None:
                         self._gif_wave_frames_cache[cache_key] = distorted_frame
 
-        logger.info(f"Precalculated wave frames: {len(self._wave_frames_cache)} static, {len(self._gif_wave_frames_cache)} GIF")
+        logger.info(
+            f"Precalculated wave frames: {len(self._wave_frames_cache)} static, {len(self._gif_wave_frames_cache)} GIF")
 
     def _create_discrete_wave_effect(self, image, frame_index):
         """Создает дискретный эффект волны - разные искажения для разных frame_index"""
@@ -553,16 +586,20 @@ class Renderer:
             # Для каждого индекса - свой тип искажения
             if frame_index == 1:
                 # Легкое волнообразное искажение по X
-                dx = np.sin(xx * self.wave_frequency * 0.02 + phase) * self.wave_amplitude * 0.5
+                dx = np.sin(xx * self.wave_frequency * 0.02 +
+                            phase) * self.wave_amplitude * 0.5
                 dy = np.zeros_like(dx)
             elif frame_index == 2:
                 # Легкое волнообразное искажение по Y
                 dx = np.zeros_like(xx, dtype=np.float32)
-                dy = np.cos(yy * self.wave_frequency * 0.015 + phase) * self.wave_amplitude * 0.5
+                dy = np.cos(yy * self.wave_frequency * 0.015 +
+                            phase) * self.wave_amplitude * 0.5
             elif frame_index == 3:
                 # Диагональное искажение
-                dx = np.sin((xx + yy) * self.wave_frequency * 0.01 + phase) * self.wave_amplitude * 0.7
-                dy = np.cos((xx + yy) * self.wave_frequency * 0.01 + phase) * self.wave_amplitude * 0.7
+                dx = np.sin((xx + yy) * self.wave_frequency *
+                            0.01 + phase) * self.wave_amplitude * 0.7
+                dy = np.cos((xx + yy) * self.wave_frequency *
+                            0.01 + phase) * self.wave_amplitude * 0.7
             elif frame_index == 4:
                 # Спиральное искажение
                 center_x = width / 2
@@ -572,12 +609,16 @@ class Renderer:
                 angle = np.arctan2(dist_y, dist_x)
                 distance = np.sqrt(dist_x**2 + dist_y**2)
 
-                dx = np.sin(angle + distance * 0.01 + phase) * self.wave_amplitude * 0.3
-                dy = np.cos(angle + distance * 0.01 + phase) * self.wave_amplitude * 0.3
+                dx = np.sin(angle + distance * 0.01 + phase) * \
+                    self.wave_amplitude * 0.3
+                dy = np.cos(angle + distance * 0.01 + phase) * \
+                    self.wave_amplitude * 0.3
             else:
                 # Для других индексов - комбинированный эффект
-                dx = np.sin(xx * self.wave_frequency * 0.01 + phase) * self.wave_amplitude
-                dy = np.cos(yy * self.wave_frequency * 0.008 + phase) * self.wave_amplitude * 0.7
+                dx = np.sin(xx * self.wave_frequency * 0.01 +
+                            phase) * self.wave_amplitude
+                dy = np.cos(yy * self.wave_frequency * 0.008 +
+                            phase) * self.wave_amplitude * 0.7
 
             # Нормализуем смещения
             dx = np.clip(dx, -self.wave_amplitude, self.wave_amplitude)
@@ -621,7 +662,8 @@ class Renderer:
         for state in self.mouth_states:
             if state.get('active', True):
                 threshold = state.get('threshold', 0.0)
-                if threshold > 0 and threshold < min_threshold:  # Игнорируем порог 0 (тишина)
+                # Игнорируем порог 0 (тишина)
+                if threshold > 0 and threshold < min_threshold:
                     min_threshold = threshold
 
         return min_threshold if min_threshold != float('inf') else 0.0
@@ -650,7 +692,8 @@ class Renderer:
 
             # Инициализация таймеров если их нет
             if group_name not in self._blink_timers:
-                self._blink_timers[group_name] = current_time + random.uniform(2.0, 6.0)
+                self._blink_timers[group_name] = current_time + \
+                    random.uniform(2.0, 6.0)
                 self._blink_until[group_name] = 0.0
 
             # Проверяем, нужно ли начать моргание
@@ -669,7 +712,7 @@ class Renderer:
         # Рандомный эффект
         if (self.effects.get('random_effect', True) and
             group.get("random_effect", False) and
-            current_time > self._random_timers.get(group_name, 0)):
+                current_time > self._random_timers.get(group_name, 0)):
 
             random_min = float(group.get("random_min", 5.0))
             random_max = float(group.get("random_max", 10.0))
@@ -745,7 +788,8 @@ class Renderer:
                 return chosen
 
         # Обрабатываем корневые группы
-        root_groups = [name for name, g in self.groups.items() if not g.get('parent')]
+        root_groups = [name for name, g in self.groups.items()
+                       if not g.get('parent')]
         for group_name in root_groups:
             result = process_group(group_name)
             if result and result in self._layer_cache:
@@ -758,7 +802,7 @@ class Renderer:
 
         # Сортируем по индексу для правильного порядка наложения
         visible_layers.sort(key=lambda name:
-            self._layer_cache.get(name, {}).get('index', 999) if name in self._layer_cache else 999)
+                            self._layer_cache.get(name, {}).get('index', 999) if name in self._layer_cache else 999)
 
         # Обновляем кэш
         self._visible_layers_cache = visible_layers
@@ -797,7 +841,8 @@ class Renderer:
             interval = 1.0 / self.wave_speed  # Интервал между сменой кадров
 
             if now - self._wave_frame_timer > interval:
-                self._current_wave_frame = (self._current_wave_frame + 1) % self.wave_num_frames
+                self._current_wave_frame = (
+                    self._current_wave_frame + 1) % self.wave_num_frames
                 self._wave_frame_timer = now
 
         # Рендерим каждый слой
@@ -843,14 +888,16 @@ class Renderer:
                     # Применяем эффект волны если он включен
                     if self.wave_enabled and frames:
                         # Берем предрасчитанный кадр из кэша
-                        cache_key = (layer_name, current_gif_frame, self._current_wave_frame)
+                        cache_key = (layer_name, current_gif_frame,
+                                     self._current_wave_frame)
                         if cache_key in self._gif_wave_frames_cache:
                             image = self._gif_wave_frames_cache[cache_key]
                         else:
                             # Если нет в кэше, получаем оригинальный кадр и создаем эффект на лету
                             original_frame = frames[current_gif_frame]
                             if original_frame is not None:
-                                image = self._create_discrete_wave_effect(original_frame.copy(), self._current_wave_frame)
+                                image = self._create_discrete_wave_effect(
+                                    original_frame.copy(), self._current_wave_frame)
                                 # Сохраняем в кэш для будущего использования
                                 self._gif_wave_frames_cache[cache_key] = image
                     else:
@@ -872,7 +919,8 @@ class Renderer:
                         # Если нет в кэше, создаем на лету
                         original_image = layer_info.get('image')
                         if original_image is not None:
-                            image = self._create_discrete_wave_effect(original_image.copy(), self._current_wave_frame)
+                            image = self._create_discrete_wave_effect(
+                                original_image.copy(), self._current_wave_frame)
                 else:
                     image = layer_info.get('image')
 
@@ -887,20 +935,25 @@ class Renderer:
             # Эффекты
             bounce_intensity = 0
             if self.effects.get('bounce', False):
-                bounce_intensity = int(math.sin(time.time() * 5) * min(10, self.audio_level * 20))
+                bounce_intensity = int(
+                    math.sin(time.time() * 5) * min(10, self.audio_level * 20))
 
             if self.effects.get('shake', False):
                 shake_intensity = min(1.0, self.audio_level * 5)
                 offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
-                offset_y = int((random.random() - 0.5) * 10 * shake_intensity) + bounce_intensity
+                offset_y = int((random.random() - 0.5) * 10 *
+                               shake_intensity) + bounce_intensity
             else:
                 offset_x, offset_y = 0, bounce_intensity
 
             if self.effects.get('pulse', False):
-                pulse_scale = 1.0 + (math.sin(time.time() * 5) * 0.1 * self.audio_level)
-                new_size = (int(image.shape[1] * pulse_scale), int(image.shape[0] * pulse_scale))
+                pulse_scale = 1.0 + (math.sin(time.time() * 5)
+                                     * 0.1 * self.audio_level)
+                new_size = (
+                    int(image.shape[1] * pulse_scale), int(image.shape[0] * pulse_scale))
                 if new_size[0] > 0 and new_size[1] > 0:
-                    image = cv2.resize(image, new_size, interpolation=cv2.INTER_LINEAR)
+                    image = cv2.resize(
+                        image, new_size, interpolation=cv2.INTER_LINEAR)
 
             h, w = image.shape[:2]
             px = (self.width - w) // 2 + x + offset_x
@@ -935,17 +988,21 @@ class Renderer:
 
                 # Альфа-композитинг
                 alpha_overlay = overlay[:, :, 3].astype(np.float32) / 255.0
-                alpha_background = background[:, :, 3].astype(np.float32) / 255.0
+                alpha_background = background[:, :, 3].astype(
+                    np.float32) / 255.0
 
                 # Вычисляем итоговую альфа
-                alpha_out = alpha_overlay + alpha_background * (1 - alpha_overlay)
-                alpha_out = np.maximum(alpha_out, 0.001)  # Избегаем деления на ноль
+                alpha_out = alpha_overlay + \
+                    alpha_background * (1 - alpha_overlay)
+                # Избегаем деления на ноль
+                alpha_out = np.maximum(alpha_out, 0.001)
 
                 # Комбинируем цвета
                 for c in range(3):  # RGB каналы
                     background[:, :, c] = (
                         overlay[:, :, c] * alpha_overlay +
-                        background[:, :, c] * alpha_background * (1 - alpha_overlay)
+                        background[:, :, c] *
+                        alpha_background * (1 - alpha_overlay)
                     ) / alpha_out
 
                 # Комбинируем альфа канал
@@ -964,7 +1021,8 @@ class Renderer:
                 # Уменьшаем яркость
                 brightness_factor = self.idle_brightness
                 # Применяем только к RGB каналам
-                frame[:, :, :3] = (frame[:, :, :3] * brightness_factor).astype(np.uint8)
+                frame[:, :, :3] = (frame[:, :, :3] *
+                                   brightness_factor).astype(np.uint8)
 
         return frame
 
@@ -992,7 +1050,8 @@ class Renderer:
                 frame = self._render_frame()
 
                 # Конвертируем в PNG
-                success, buffer = cv2.imencode('.png', frame, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+                success, buffer = cv2.imencode(
+                    '.png', frame, [cv2.IMWRITE_PNG_COMPRESSION, 1])
                 if success:
                     with self._lock:
                         self._frame_bytes = buffer.tobytes()
@@ -1000,8 +1059,10 @@ class Renderer:
             except Exception as e:
                 logger.error(f"Error in rendering loop: {e}")
                 # Создаем черный кадр в случае ошибки
-                error_frame = np.zeros((self.height, self.width, 4), dtype=np.uint8)
-                success, buffer = cv2.imencode('.png', error_frame, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+                error_frame = np.zeros(
+                    (self.height, self.width, 4), dtype=np.uint8)
+                success, buffer = cv2.imencode(
+                    '.png', error_frame, [cv2.IMWRITE_PNG_COMPRESSION, 1])
                 if success:
                     with self._lock:
                         self._frame_bytes = buffer.tobytes()
@@ -1024,7 +1085,8 @@ class Renderer:
             if sleep_time > 0:
                 time.sleep(sleep_time)
             elif frame_time > target_frame_time * 1.5:
-                logger.warning(f"Frame render took {frame_time*1000:.2f}ms, target: {target_frame_time*1000:.2f}ms")
+                logger.warning(
+                    f"Frame render took {frame_time*1000:.2f}ms, target: {target_frame_time*1000:.2f}ms")
 
     def set_wave(self, enabled, amplitude=3.0, frequency=0.5, speed=1.0):
         """Включает/выключает эффект 'Волна' и устанавливает параметры"""
@@ -1032,7 +1094,8 @@ class Renderer:
         self.wave_enabled = enabled
         self.wave_amplitude = amplitude
         self.wave_frequency = frequency
-        self.wave_speed = max(0, min(5, speed))  # Ограничиваем скорость от 0 до 5
+        # Ограничиваем скорость от 0 до 5
+        self.wave_speed = max(0, min(5, speed))
 
         if enabled:
             # Если скорость = 0, отключаем эффект
@@ -1053,4 +1116,5 @@ class Renderer:
             # Сбрасываем кэш видимых слоев
             self._visible_layers_cache_time = 0
 
-        logger.info(f"Wave effect: enabled={enabled}, amplitude={amplitude}, frequency={frequency}, speed={speed}")
+        logger.info(
+            f"Wave effect: enabled={enabled}, amplitude={amplitude}, frequency={frequency}, speed={speed}")
