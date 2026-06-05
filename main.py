@@ -72,7 +72,7 @@ class App:
         # Инициализация компонентов
         self.renderer = Renderer(width=700, height=700, fps=60)
         self.audio = AudioProcessor(callback=self.on_audio_level,
-                                    device=self.settings.get('mic_device'))
+                                    device=self.settings.get('mic_device', ''))
         self.audio.noise_gate_threshold = self.settings.get(
             'noise_gate_threshold', 0.01)
         self.webserver = None
@@ -84,15 +84,15 @@ class App:
             'bounce': False,
             'pulse': False,
             'blink': True,
-            'random_effect': False,
+            'random_effect': True,
             'wave': False
         })
 
         # Параметры эффекта "Волна"
         self.wave_params = self.settings.get('wave_params', {
-            'amplitude': 3.0,
-            'frequency': 0.5,
-            'speed': 1
+            'amplitude': 7.0,
+            'frequency': 1.0,
+            'speed': 3
         })
 
         self.renderer.set_effects(self.effects)
@@ -100,9 +100,9 @@ class App:
         if self.effects.get('wave', False):
             self.renderer.set_wave(
                 True,
-                self.wave_params.get('amplitude', 3.0),
-                self.wave_params.get('frequency', 0.5),
-                self.wave_params.get('speed', 1.0)
+                self.wave_params.get('amplitude', 7.0),
+                self.wave_params.get('frequency', 1.0),
+                self.wave_params.get('speed', 3.0)
             )
 
         # Состояние раскрытия секций (по умолчанию все открыты)
@@ -215,7 +215,7 @@ class App:
         device_row.pack(fill='x', padx=2, pady=(0, 2))
 
         self.device_var = tk.StringVar(
-            value=self.settings.get('mic_device', 'По умолчанию'))
+            value=self.settings.get('mic_device', ''))
         self.device_combo = ttk.Combobox(
             device_row, textvariable=self.device_var, width=18)
         self.device_combo.pack(side='left', fill='x', expand=True)
@@ -240,7 +240,7 @@ class App:
         ttk.Label(sens_frame, text="Чувствительность:").pack(
             anchor="w", side="left")
         self.sensitivity = tk.DoubleVar(value=self._round_to_step(
-            self.settings.get('sensitivity', 1.0), 0.05))
+            self.settings.get('sensitivity', 1.5), 0.05))
         self.sens_percent_label = ttk.Label(
             sens_frame, text=f"{self.sensitivity.get()*100:.0f}%")
         self.sens_percent_label.pack(anchor="e", side="right")
@@ -352,7 +352,7 @@ class App:
                         command=self.update_effects).pack(anchor="w", padx=3, pady=1)
 
         self.random_effect = tk.BooleanVar(
-            value=self.effects.get('random_effect', False))
+            value=self.effects.get('random_effect', True))
         ttk.Checkbutton(effects_grid, text="Случайная смена", variable=self.random_effect,
                         command=self.update_effects).pack(anchor="w", padx=3, pady=1)
 
@@ -388,7 +388,7 @@ class App:
         ttk.Label(amplitude_frame,
                   text="Сила (0.5-10.0):").pack(anchor="w", side="left")
         self.wave_amplitude = tk.DoubleVar(value=self._round_to_step(
-            self.wave_params.get('amplitude', 3.0), 0.25))
+            self.wave_params.get('amplitude', 7.0), 0.25))
         self.wave_amplitude_label = ttk.Label(
             amplitude_frame, text=f"{self.wave_amplitude.get():.2f}")
         self.wave_amplitude_label.pack(anchor="e", side="right", padx=5)
@@ -406,7 +406,7 @@ class App:
         ttk.Label(frequency_frame,
                   text="Частота (0.1-2.0):").pack(anchor="w", side="left")
         self.wave_frequency = tk.DoubleVar(value=self._round_to_step(
-            self.wave_params.get('frequency', 0.5), 0.25))
+            self.wave_params.get('frequency', 1.0), 0.25))
         self.wave_frequency_label = ttk.Label(
             frequency_frame, text=f"{self.wave_frequency.get():.2f}")
         self.wave_frequency_label.pack(anchor="e", side="right", padx=5)
@@ -423,7 +423,7 @@ class App:
         speed_frame.pack(fill="x", padx=3, pady=(2, 0))
         ttk.Label(speed_frame, text="Скорость (0-5):").pack(anchor="w", side="left")
         self.wave_speed = tk.IntVar(
-            value=int(self.wave_params.get('speed', 1)))
+            value=int(self.wave_params.get('speed', 3)))
         self.wave_speed_label = ttk.Label(
             speed_frame, text=f"{self.wave_speed.get()}")
         self.wave_speed_label.pack(anchor="e", side="right", padx=5)
@@ -458,14 +458,14 @@ class App:
         idle_grid.pack(fill="x", padx=2, pady=2)
 
         self.idle_enabled = tk.BooleanVar(
-            value=self.settings.get('idle_enabled', False))
+            value=self.settings.get('idle_enabled', True))
         ttk.Checkbutton(idle_grid, text="Включить затемнение в idle", variable=self.idle_enabled,
                         command=self.update_idle_setting).pack(anchor="w", padx=3, pady=1)
 
         ttk.Label(idle_grid, text="Время до затемнения (сек):").pack(
             anchor="w", padx=3, pady=(3, 0))
         self.idle_timeout = tk.DoubleVar(
-            value=self.settings.get('idle_timeout', 60.0))
+            value=self.settings.get('idle_timeout', 5.0))
         idle_entry = ttk.Entry(
             idle_grid, textvariable=self.idle_timeout, width=10)
         idle_entry.pack(anchor="w", padx=3, pady=(0, 2))
@@ -476,7 +476,7 @@ class App:
         ttk.Label(idle_grid, text="Время затухания (сек):").pack(
             anchor="w", padx=3, pady=(3, 0))
         self.idle_fade_duration = tk.DoubleVar(
-            value=self.settings.get('idle_fade_duration', 0.5))
+            value=self.settings.get('idle_fade_duration', 0.3))
         fade_entry = ttk.Entry(
             idle_grid, textvariable=self.idle_fade_duration, width=10)
         fade_entry.pack(anchor="w", padx=3, pady=(0, 2))
@@ -487,7 +487,7 @@ class App:
         ttk.Label(idle_grid, text="Время восстановления (сек):").pack(
             anchor="w", padx=3, pady=(3, 0))
         self.idle_restore_duration = tk.DoubleVar(
-            value=self.settings.get('idle_restore_duration', 0.3))
+            value=self.settings.get('idle_restore_duration', 0.1))
         restore_entry = ttk.Entry(
             idle_grid, textvariable=self.idle_restore_duration, width=10)
         restore_entry.pack(anchor="w", padx=3, pady=(0, 2))
@@ -1201,8 +1201,8 @@ class App:
             'idle_fade_duration': self.idle_fade_duration.get(),
             'idle_restore_duration': self.idle_restore_duration.get(),
             'current_slot': self.current_slot,
-            'webserver_port': self.webserver_port,  # Сохраняем порт
-            'sections_state': {  # Сохраняем состояние раскрытия секций
+            'webserver_port': self.webserver_port,
+            'sections_state': {
                 'effects': self.effects_expanded,
                 'wave': self.wave_expanded,
                 'idle': self.idle_expanded,
@@ -1255,7 +1255,7 @@ class App:
                 self.thresh_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.thresh_expanded = True
                 self.thresh_header_label.config(text="▼ Пороги голоса")
-                self.refresh_thresholds_ui()  # Обновляем UI при разворачивании
+                self.refresh_thresholds_ui()
         elif section_name == "states":
             if self.states_expanded:
                 self.states_content.pack_forget()
@@ -1265,9 +1265,8 @@ class App:
                 self.states_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.states_expanded = True
                 self.states_header_label.config(text="▼ Активные состояния")
-                self.refresh_states_ui()  # Обновляем UI при разворачивании
+                self.refresh_states_ui()
 
-        # Автоматическое сохранение состояния секций
         self.save_settings()
 
     def update_active_states(self):
@@ -1280,13 +1279,8 @@ class App:
             if i < len(self.state_vars):
                 state['active'] = self.state_vars[i].get()
 
-        # Обновляем активные состояния в рендерере
         self.renderer.set_mouth_states(mouth_states)
-
-        # Обновляем визуализацию порогов
         self.update_threshold_visuals()
-
-        # Сохраняем модель в слот
         if self.current_slot:
             self.save_model_to_current_slot()
 
@@ -1308,13 +1302,8 @@ class App:
                 except Exception as e:
                     logger.error(f"Error updating threshold {i}: {e}")
 
-        # Обновляем пороги в рендерере
         self.renderer.set_mouth_states(mouth_states)
-
-        # Обновляем визуализацию
         self.update_threshold_visuals()
-
-        # Сохраняем модель в слот
         if self.current_slot:
             self.save_model_to_current_slot()
 
@@ -1327,7 +1316,6 @@ class App:
         if canvas_width < 10:
             return
 
-        # Удаляем старые метки и линии
         self.level_canvas.delete("threshold_line")
         self.level_canvas.delete("threshold_label")
 
@@ -1338,11 +1326,9 @@ class App:
         if not mouth_states:
             return
 
-        # Создаем словарь для хранения ID линий (для возможного будущего использования)
         self.threshold_lines = {}
 
         for i, state in enumerate(mouth_states):
-            # Показываем только активные состояния
             if not state.get('active', True):
                 continue
 
@@ -1353,7 +1339,6 @@ class App:
 
             pos = min(1.0, max(0.0, val)) * canvas_width
 
-            # Рисуем линию
             line_id = self.level_canvas.create_line(
                 pos, 0, pos, 25,
                 dash=(2, 2), width=1, fill="#2196F3",
@@ -1361,7 +1346,6 @@ class App:
             )
             self.threshold_lines[f"state_{i}"] = line_id
 
-            # Определяем положение текста
             if i == 0:
                 anchor = "w"
             elif i == len(mouth_states) - 1:
@@ -1369,7 +1353,6 @@ class App:
             else:
                 anchor = "center"
 
-            # Добавляем метку с названием состояния (обрезанным)
             state_name = state.get('name', f'S{i+1}')[:6]
             self.level_canvas.create_text(
                 pos, 7,
@@ -1387,7 +1370,6 @@ class App:
         level_clamped = min(1.0, max(0.0, float(level)))
         indicator_width = level_clamped * canvas_width
         try:
-            # Убедимся, что индикатор существует
             if not hasattr(self, 'level_indicator'):
                 self.level_indicator = self.level_canvas.create_rectangle(
                     0, 0, 0, 25, outline="", fill="#4CAF50", tags="level_bar")
@@ -1396,23 +1378,20 @@ class App:
         except Exception as e:
             logger.error(f"Error updating level indicator: {e}")
 
-        # Определяем цвет на основе текущего состояния
         if hasattr(self.renderer, 'model') and self.renderer.model:
             mouth_states = self.renderer.model.get('mouth_states', [])
             if mouth_states:
-                # Находим состояние, соответствующее текущему уровню
                 current_state_idx = -1
                 for i, state in enumerate(mouth_states):
                     if state.get('active', True) and level_clamped >= state.get('threshold', 0.0):
                         current_state_idx = i
 
-                # Градиент цветов (синий -> зеленый -> красный)
                 colors = ["#888888", "#2196F3",
                           "#4CAF50", "#FFC107", "#f44336"]
                 if 0 <= current_state_idx < len(colors):
                     color = colors[current_state_idx]
                 else:
-                    color = "#4CAF50"  # По умолчанию
+                    color = "#4CAF50"
             else:
                 color = "#4CAF50"
         else:
@@ -1441,7 +1420,6 @@ class App:
                 if not answer:
                     return
 
-            # Создаем модель по умолчанию с начальными состояниями
             self.renderer.model = {
                 "name": f"Слот {idx+1}",
                 "layers": [],
@@ -1461,7 +1439,6 @@ class App:
         else:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            # Убеждаемся, что mouth_states существует в модели
             if 'mouth_states' not in data or not data['mouth_states']:
                 data['mouth_states'] = [
                     {'id': 0, 'name': 'Тишина', 'threshold': 0.0, 'active': True},
@@ -1473,24 +1450,19 @@ class App:
             if self.webserver:
                 self.webserver.renderer = self.renderer
 
-        # Устанавливаем текущий слот
         self.current_slot = idx + 1
 
-        # Обновляем UI порогов и активных состояний
         self.refresh_thresholds_ui()
         self.refresh_states_ui()
 
-        # Обновляем кнопки слотов и превью
         self.refresh_slot_buttons()
 
-        # Сохраняем настройки
         self.save_settings()
 
         model_name = self.renderer.model.get('name', 'модель')
 
         if not silent:
             logger.info(f"Model loaded from slot {idx+1}: {model_name}")
-            # Используем временное сообщение вместо стандартного messagebox
             self.show_temporary_message(
                 "Загружено", f"Модель загружена из слота {idx+1}")
 
@@ -1498,7 +1470,6 @@ class App:
         """Открытие редактора моделей"""
         try:
             main_window = self.root
-            # ВАЖНО: Устанавливаем атрибут app для главного окна
             main_window.app = self
             main_window.attributes('-disabled', True)
 
@@ -1509,8 +1480,8 @@ class App:
                 noise_gate_threshold=self.noise_gate_threshold.get(
                 ) if self.noise_gate_enabled.get() else 0.0,
                 sensitivity=self.sensitivity.get(),
-                current_slot=self.current_slot,  # Передаем текущий слот в редактор
-                renderer=self.renderer  # Передаем рендерер для синхронизации
+                current_slot=self.current_slot,
+                renderer=self.renderer
             )
 
             def on_editor_close():
@@ -1522,7 +1493,6 @@ class App:
                 main_window.attributes('-disabled', False)
                 main_window.focus_set()
 
-                # Обновляем UI после закрытия редактора
                 self.refresh_slot_buttons()
                 self.refresh_thresholds_ui()
                 self.refresh_states_ui()
@@ -1556,27 +1526,21 @@ class App:
 
     def on_model_saved(self, model_data, model_dir, slot_num=None):
         """Обработка сохранения модели"""
-        # Обновляем кнопки слотов
         self.refresh_slot_buttons()
         logger.info(f"Model saved to directory: {model_dir}")
-
-        # Если сохранено в текущий слот, перезагружаем модель
         if slot_num == self.current_slot:
             logger.info(f"Model saved to current slot {slot_num}, reloading")
-            # -1 потому что индексация с 0
             self.load_slot(slot_num - 1, silent=True)
 
     def toggle_server(self):
         """Переключение веб-сервера"""
         if self.webserver and getattr(self.webserver, "is_running", False):
-            # Останавливаем веб-сервер
             self.webserver.stop()
             self.server_btn.config(text="🌐 Запустить веб-сервер")
             self.link_btn.config(state="disabled")
             self.port_btn.config(state="normal")
             logger.info("Web server stopped")
 
-            # Останавливаем рендерер только если он был запущен для веб-сервера
             if self.renderer_was_started:
                 try:
                     self.renderer.stop()
@@ -1591,10 +1555,8 @@ class App:
             elif not self.webserver.is_running:
                 self.webserver.renderer = self.renderer
 
-            # Запускаем рендерер перед запуском веб-сервера
             if not self.renderer_was_started:
                 try:
-                    # Настраиваем параметры рендерера перед запуском
                     self.renderer.set_noise_gate(
                         self.noise_gate_threshold.get() if self.noise_gate_enabled.get() else 0.0)
                     self.renderer.set_idle(
@@ -1605,7 +1567,6 @@ class App:
                     )
                     self.renderer.set_effects(self.effects)
 
-                    # Обновляем эффект "Волна" только если он включен
                     if self.wave_effect.get():
                         self.renderer.set_wave(
                             True,
@@ -1614,15 +1575,12 @@ class App:
                             self.wave_params['speed']
                         )
                     else:
-                        # Гарантируем, что волна выключена
                         self.renderer.set_wave(False, 0, 0, 0)
 
-                    # Устанавливаем состояния рта из модели
                     if self.renderer.model and 'mouth_states' in self.renderer.model:
                         self.renderer.set_mouth_states(
                             self.renderer.model['mouth_states'])
 
-                    # Запускаем рендерер
                     self.renderer.start()
                     self.renderer_was_started = True
                     logger.info("Renderer started for web server")
@@ -1647,7 +1605,6 @@ class App:
         except Exception as e:
             logger.error(f"Error stopping audio: {e}")
 
-        # Останавливаем рендерер только если он был запущен
         if self.renderer_was_started:
             try:
                 self.renderer.stop()
@@ -1660,10 +1617,9 @@ class App:
             except Exception as e:
                 logger.error(f"Error stopping web server: {e}")
 
-        # Отключаем кнопку ссылки при закрытии
         self.link_btn.config(state="disabled")
 
-        self.save_settings()  # Сохраняем настройки при закрытии
+        self.save_settings()
         logger.info("Application closed")
         self.root.destroy()
 

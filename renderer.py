@@ -48,9 +48,9 @@ class Renderer:
 
         # Параметры эффекта волны
         self.wave_enabled = False
-        self.wave_amplitude = 3.0
-        self.wave_frequency = 0.5
-        self.wave_speed = 1.0
+        self.wave_amplitude = 7.0
+        self.wave_frequency = 1.0
+        self.wave_speed = 3.0
         self.wave_num_frames = 5
 
         # Предрассчитанные кадры искажения для статичных изображений
@@ -61,16 +61,12 @@ class Renderer:
 
         # Idle режим с плавным затемнением
         self.idle_enabled = False
-        self.idle_timeout = 60.0
-        # целевая яркость в idle (50%)
+        self.idle_timeout = 5.0
         self.idle_brightness = 0.5
-        # текущая яркость (плавно меняется)
         self.idle_current_brightness = 1.0
-        self.idle_target_brightness = 1.0             # целевая яркость
-        self.idle_fade_duration = 0.5                 # время затухания (сек)
-        # время восстановления (сек)
-        self.idle_restore_duration = 0.3
-        # время последнего обновления яркости
+        self.idle_target_brightness = 1.0
+        self.idle_fade_duration = 0.3
+        self.idle_restore_duration = 0.1
         self.idle_last_update_time = time.time()
         self.last_activity_time = time.time()
 
@@ -121,7 +117,7 @@ class Renderer:
         self.effects.update(effects)
         logger.info(f"Effects updated: {self.effects}")
 
-    def set_idle(self, enabled, timeout, fade_duration=0.5, restore_duration=0.3):
+    def set_idle(self, enabled, timeout, fade_duration=0.3, restore_duration=0.1):
         """Устанавливает параметры idle-режима с плавным затемнением"""
         self.idle_enabled = enabled
         self.idle_timeout = timeout
@@ -1135,7 +1131,7 @@ class Renderer:
                 logger.warning(
                     f"Frame render took {frame_time*1000:.2f}ms, target: {target_frame_time*1000:.2f}ms")
 
-    def set_wave(self, enabled, amplitude=3.0, frequency=0.5, speed=1.0):
+    def set_wave(self, enabled, amplitude=7.0, frequency=1.0, speed=3.0):
         """Включает/выключает эффект 'Волна' и устанавливает параметры"""
         old_enabled = self.wave_enabled
         self.wave_enabled = enabled
