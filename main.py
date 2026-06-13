@@ -48,7 +48,7 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Установка размера окна: компактное
-        root.geometry("800x450")
+        root.geometry("800x470")
         root.minsize(800, 470)
 
         logger.info("Application started")
@@ -621,10 +621,8 @@ class App:
         self.refresh_devices()
         self.save_settings()  # сохраняем новый API
 
-    # Модифицированный метод refresh_devices (раньше он назывался refresh_devices и был без учёта API)
     def refresh_devices(self):
-        """Обновляет список доступных аудиоустройств с учётом выбранного Host API"""
-        # Получаем список устройств для текущего API
+        """Обновляет список аудиоустройств с учётом выбранного Host API"""
         devices = list_audio_devices(host_api_index=self.host_api_index)
         current_device_name = self.device_var.get()
         self.device_combo['values'] = [dev['name'] for dev in devices]
@@ -633,17 +631,20 @@ class App:
         if current_device_name in self.device_combo['values']:
             self.device_var.set(current_device_name)
         else:
-            self.device_var.set("По умолчанию")
+            self.device_var.set("🎤 По умолчанию (микрофон)")
 
         # Применяем новое устройство к аудиопроцессору
         selected_device_name = self.device_var.get()
-        # Находим индекс устройства для sounddevice
-        dev_index = None
+        dev_info = None
         for dev in devices:
             if dev['name'] == selected_device_name:
-                dev_index = dev['index']
+                dev_info = dev
                 break
-        self.audio.set_device_by_api(self.host_api_index, dev_index)
+        if dev_info:
+            self.audio.set_device_by_api(
+                self.host_api_index, dev_info['index'], dev_info.get('is_output', False))
+        else:
+            self.audio.set_device_by_api(self.host_api_index, None, False)
 
         # Если аудио уже запущено, перезапускаем
         was_running = self.audio.running
@@ -656,14 +657,18 @@ class App:
     def on_device_change(self, event):
         """Смена аудиоустройства"""
         device_name = self.device_var.get()
-        # Находим индекс устройства для текущего API
+        # Находим информацию об устройстве
         devices = list_audio_devices(host_api_index=self.host_api_index)
-        dev_index = None
+        dev_info = None
         for dev in devices:
             if dev['name'] == device_name:
-                dev_index = dev['index']
+                dev_info = dev
                 break
-        self.audio.set_device_by_api(self.host_api_index, dev_index)
+        if dev_info:
+            self.audio.set_device_by_api(
+                self.host_api_index, dev_info['index'], dev_info.get('is_output', False))
+        else:
+            self.audio.set_device_by_api(self.host_api_index, None, False)
 
         # Перезапускаем аудио
         was_running = self.audio.running
@@ -671,9 +676,8 @@ class App:
             self.audio.stop()
             self.audio.start()
         logger.info(f"Audio device changed to: {device_name}")
-        self.save_settings()  # Автоматическое сохранение
+        self.save_settings()
 
-    # Остальные методы без изменений, за исключением save_settings, куда добавлен host_api_index
     def load_preview_for_slot(self, slot_idx):
         """Загрузка превью для слота"""
         preview_path = os.path.join(
@@ -1495,7 +1499,7 @@ class App:
                     self.audio = AudioProcessor(
                         callback=self.on_audio_level,
                         device=self.device_var.get(),
-                        host_api_index=self.host_api_index  # передаём текущий API
+                        host_api_index=self.host_api_index
                     )
                     self.audio.noise_gate_threshold = self.noise_gate_threshold.get(
                     ) if self.noise_gate_enabled.get() else 0.0
