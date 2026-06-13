@@ -1,4 +1,3 @@
-# audio.py
 import threading
 import time
 import numpy as np
@@ -8,6 +7,13 @@ import os
 from collections import deque
 import queue
 import platform
+
+# Попытка импорта soundcard для поддержки Loopback (захват с динамиков)
+try:
+    import soundcard as sc
+    SOUNDCARD_AVAILABLE = True
+except ImportError:
+    SOUNDCARD_AVAILABLE = False
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -21,15 +27,11 @@ logger = setup_logging('audio')
 
 
 def list_host_apis():
-    """
-    Возвращает список доступных Host API (только WASAPI и MME).
-    Каждый элемент: {'index': int, 'name': str}
-    """
+    """Возвращает список доступных Host API (только WASAPI и MME)."""
     apis = []
     try:
         for idx, info in enumerate(sd.query_hostapis()):
             name = info.get('name', f'API {idx}')
-            # Оставляем только WASAPI и MME, исключаем WDM-KS и другие
             if 'WASAPI' in name or 'MME' in name:
                 apis.append({'index': idx, 'name': name})
     except Exception as e:
@@ -38,10 +40,7 @@ def list_host_apis():
 
 
 def is_loopback_supported(host_api_index):
-    """
-    Проверяет, поддерживает ли выбранный Host API loopback-захват.
-    На Windows это работает только с WASAPI.
-    """
+    """Проверяет, поддерживает ли выбранный Host API loopback-захват (только WASAPI)."""
     if platform.system() != 'Windows':
         return False
     try:
@@ -55,17 +54,7 @@ def is_loopback_supported(host_api_index):
 
 
 def list_audio_devices(host_api_index=None):
-    """
-    Возвращает список аудиоустройств для выбранного Host API.
-    Каждый элемент: {
-        'index': int,
-        'name': str,
-        'is_output': bool,
-        'hostapi': int,
-        'loopback_supported': bool,
-        'default_samplerate': float
-    }
-    """
+    """Возвращает список аудиоустройств для выбранного Host API."""
     devices = []
     try:
         all_devices = sd.query_devices()
@@ -102,8 +91,8 @@ def list_audio_devices(host_api_index=None):
                     })
     except Exception as e:
         logger.error(f"Error listing audio devices: {e}")
-    devices.insert(0, {'index': None, 'name': '🎤 По умолчанию (микрофон)', 'is_output': False,
-                   'hostapi': None, 'loopback_supported': False, 'default_samplerate': 44100})
+        devices.insert(0, {'index': None, 'name': '🎤 По умолчанию (микрофон)', 'is_output': False,
+                           'hostapi': None, 'loopback_supported': False, 'default_samplerate': 44100})
     return devices
 
 
@@ -122,9 +111,8 @@ class AudioProcessor:
         self.sensitivity = 1.0
         self.samplerate = 44100
         self.blocksize = 256
-        # временный буфер, будет заменён
-        self._buffer = np.zeros(256, dtype=np.float32)
 
+        self._buffer = np.zeros(256, dtype=np.float32)
         self._smoothing_alpha = 0.7
 
         self._callback_lock = threading.Lock()
@@ -174,7 +162,6 @@ class AudioProcessor:
 
         try:
             devices = sd.query_devices()
-            # Поиск с учётом API
             for idx, dev in enumerate(devices):
                 if self.host_api_index is not None and dev.get('hostapi') != self.host_api_index:
                     continue
@@ -259,22 +246,94 @@ class AudioProcessor:
         if getattr(sys, 'frozen', False):
             sys.stderr = sys.__stderr__
 
+    def _capture_loop_soundcard(self):
+        """Цикл захвата звука с динамиков (loopback) через библиотеку soundcard."""
+        if not SOUNDCARD_AVAILABLE:
+            logger.error(
+                "Для захвата звука с динамиков (loopback) необходима библиотека 'soundcard'.")
+            logger.error("Установите её командой: pip install soundcard")
+            self.running = False
+            return
+
+        logger.info("Инициализация захвата звука через soundcard (Loopback)...")
+        try:
+            all_mics = sc.all_microphones(include_loopback=True)
+
+            target_mic = None
+            clean_name = self.device or ""
+            if clean_name.startswith("🔊 "):
+                clean_name = clean_name[2:]
+            elif clean_name.startswith("🎤 "):
+                clean_name = clean_name[2:]
+
+            for mic in all_mics:
+                if clean_name and clean_name.lower() in mic.name.lower():
+                    target_mic = mic
+                    break
+
+            if target_mic is None:
+                loopback_mics = [m for m in all_mics if getattr(
+                    m, 'isloopback', False)]
+                if loopback_mics:
+                    target_mic = loopback_mics[0]
+                    logger.info(
+                        f"Устройство по имени не найдено, выбран первый доступный loopback: {target_mic.name}")
+                else:
+                    logger.error(
+                        "Loopback-устройства не найдены. Убедитесь, что в Windows включены стерео микшеры.")
+                    self.running = False
+                    return
+
+            logger.info(f"Выбрано устройство для loopback: {target_mic.name}")
+
+            with target_mic.recorder(samplerate=self.samplerate, channels=1) as mic:
+                logger.info(
+                    f"Audio stream (loopback) opened successfully via soundcard: sr={self.samplerate}")
+                while self.running:
+                    data = mic.record(numframes=self.blocksize)
+                    if not self.running:
+                        break
+
+                    audio_data = data.flatten()
+                    rms = np.sqrt(np.mean(audio_data ** 2))
+                    raw_level = min(1.0, rms * 10 * self.sensitivity)
+
+                    if raw_level < self.noise_gate_threshold:
+                        raw_level = 0.0
+
+                    self._level = self._smoothing_alpha * raw_level + \
+                        (1 - self._smoothing_alpha) * self._level
+
+                    if self.callback:
+                        try:
+                            self.callback(self._level)
+                        except Exception as e:
+                            logger.error(f"Error in callback: {e}")
+
+        except Exception as e:
+            logger.error(f"Ошибка при захвате звука через soundcard: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.running = False
+
     def _capture_loop(self):
         """Основной цикл захвата с автоматическим подбором частоты дискретизации."""
         self._resolve_device()
 
-        # Список частот для проб
+        # Если запрошен loopback, используем soundcard
+        if self.loopback:
+            self._capture_loop_soundcard()
+            return
+
+        # Список частот для проб (для обычного sounddevice)
         samplerates_to_try = [self.samplerate, 44100, 48000, 22050, 16000]
         samplerates_to_try = list(dict.fromkeys(samplerates_to_try))
 
-        # Для каждой частоты создадим callback, который использует буфер нужного размера
         for sr in samplerates_to_try:
-            blocksize = int(sr * 0.0116)  # ~256 при 22050, ~512 при 44100
-            blocksize = max(64, min(blocksize, 1024))  # ограничиваем
-            # Создаём буфер соответствующего размера
+            blocksize = int(sr * 0.0116)
+            blocksize = max(64, min(blocksize, 1024))
             buffer = np.zeros(blocksize, dtype=np.float32)
 
-            # Определяем callback с замыканием на этот буфер
             def callback(indata, frames, time_info, status):
                 if not self.running or status:
                     return
@@ -282,10 +341,8 @@ class AudioProcessor:
                 if current_time - self._last_callback_time < self._callback_interval:
                     return
                 with self._callback_lock:
-                    # Копируем данные из indata в наш буфер (обрезаем или дополняем при необходимости)
                     copy_len = min(frames, len(buffer))
                     buffer[:copy_len] = indata[:copy_len, 0]
-                    # Вычисляем RMS
                     rms = np.sqrt(np.mean(buffer[:copy_len] ** 2))
                     raw_level = min(1.0, rms * 10 * self.sensitivity)
                     if raw_level < self.noise_gate_threshold:
@@ -302,8 +359,7 @@ class AudioProcessor:
             device_params = {}
             if self.device_index is not None:
                 device_params['device'] = self.device_index
-            if self.loopback:
-                device_params['as_loopback'] = True
+            # УДАЛЕНО: device_params['as_loopback'] = True, так как sounddevice это не поддерживает
 
             try:
                 logger.info(
@@ -318,7 +374,7 @@ class AudioProcessor:
                 ):
                     self.samplerate = sr
                     self.blocksize = blocksize
-                    self._buffer = buffer  # сохраняем буфер в объекте на случай внешнего доступа
+                    self._buffer = buffer
                     logger.info(
                         f"Audio stream opened successfully: sr={sr}, blocksize={blocksize}")
                     while self.running:
