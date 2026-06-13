@@ -1,3 +1,4 @@
+# main.py
 import threading
 import time
 import tkinter as tk
@@ -5,7 +6,7 @@ from tkinter import ttk, messagebox
 from editor import ModelEditor
 from renderer import Renderer
 from webserver import WebServer
-from audio import AudioProcessor
+from audio import AudioProcessor, list_host_apis, list_audio_devices
 import os
 import json
 from PIL import Image, ImageTk
@@ -48,7 +49,7 @@ class App:
 
         # Установка размера окна: компактное
         root.geometry("800x450")
-        root.minsize(800, 450)
+        root.minsize(800, 470)
 
         logger.info("Application started")
 
@@ -69,10 +70,15 @@ class App:
         # Загружаем порт из настроек (по умолчанию 6969)
         self.webserver_port = self.settings.get('webserver_port', 6969)
 
+        # Загружаем выбранный Host API (новое)
+        self.host_api_index = self.settings.get(
+            'host_api_index')  # может быть None
+
         # Инициализация компонентов
         self.renderer = Renderer(width=700, height=700, fps=60)
         self.audio = AudioProcessor(callback=self.on_audio_level,
-                                    device=self.settings.get('mic_device', ''))
+                                    device=self.settings.get('mic_device', ''),
+                                    host_api_index=self.host_api_index)
         self.audio.noise_gate_threshold = self.settings.get(
             'noise_gate_threshold', 0.01)
         self.webserver = None
@@ -207,10 +213,19 @@ class App:
         mic_frame = ttk.LabelFrame(settings_frame, text="🎤 Микрофон")
         mic_frame.pack(fill="x", pady=(0, 3), padx=3)
 
+        # === НОВОЕ: выбор Host API ===
+        ttk.Label(mic_frame, text="Аудио API:").pack(
+            anchor='w', padx=2, pady=(2, 0))
+        api_row = ttk.Frame(mic_frame)
+        api_row.pack(fill='x', padx=2, pady=(0, 2))
+        self.host_api_combo = ttk.Combobox(api_row, state="readonly", width=20)
+        self.host_api_combo.pack(side='left', fill='x', expand=True)
+        self.host_api_combo.bind(
+            '<<ComboboxSelected>>', self.on_host_api_change)
+
         # Выбор устройства
         ttk.Label(mic_frame, text="Устройство:").pack(
             anchor='w', padx=2, pady=(2, 0))
-
         device_row = ttk.Frame(mic_frame)
         device_row.pack(fill='x', padx=2, pady=(0, 2))
 
@@ -227,6 +242,10 @@ class App:
 
         # Заполнение устройств (будет вызвано после инициализации)
         self.device_combo.bind('<<ComboboxSelected>>', self.on_device_change)
+
+        # Заполняем список Host API и устройств (новое)
+        self.refresh_host_apis()
+        self.refresh_devices()
 
         ttk.Label(mic_frame, text="Уровень:").pack(
             anchor="w", padx=2, pady=(2, 0))
@@ -564,221 +583,97 @@ class App:
         # Завершаем инициализацию
         self.initializing = False
 
-        # Обновляем список устройств (теперь все переменные созданы)
-        self.refresh_devices()
-
         self.root.after(100, self.on_canvas_resize)
 
-    def refresh_devices(self):
-        """Обновляет список доступных аудиоустройств с принудительным перечитыванием"""
-        # Останавливаем аудио, если оно запущено
-        audio_was_running = self.audio.running if hasattr(
-            self.audio, 'running') else False
-        if audio_was_running:
-            self.audio.stop()
-
-        # Принудительно переинициализируем sounddevice, чтобы он перечитал устройства
-        try:
-            sd._terminate()
-            sd._initialize()
-        except Exception as e:
-            logger.warning(f"Error reinitializing sounddevice: {e}")
-
-        # Получаем актуальный список
-        devices = self.get_audio_devices()
-        current_device = self.device_var.get()
-
-        # Обновляем выпадающий список
-        self.device_combo['values'] = devices
-
-        # Если текущее устройство всё ещё существует, оставляем его
-        if current_device in devices:
-            self.device_var.set(current_device)
+    # === НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ С HOST API ===
+    def refresh_host_apis(self):
+        """Обновляет список Host API в комбобоксе"""
+        apis = list_host_apis()
+        self.host_api_combo['values'] = [api['name'] for api in apis]
+        self._host_apis_cache = apis  # сохраняем для быстрого доступа
+        # Восстанавливаем выбранный API из настроек
+        if self.host_api_index is not None:
+            for idx, api in enumerate(apis):
+                if api['index'] == self.host_api_index:
+                    self.host_api_combo.current(idx)
+                    break
+            else:
+                if apis:
+                    self.host_api_combo.current(0)
+                    self.host_api_index = apis[0]['index']
         else:
-            # Иначе выбираем "По умолчанию"
+            # По умолчанию выбираем первый (обычно WASAPI на Windows)
+            if apis:
+                self.host_api_combo.current(0)
+                self.host_api_index = apis[0]['index']
+            else:
+                self.host_api_combo.set('')
+                self.host_api_index = None
+
+    def on_host_api_change(self, event=None):
+        """Обработчик смены Host API"""
+        selection = self.host_api_combo.current()
+        if selection >= 0 and hasattr(self, '_host_apis_cache') and selection < len(self._host_apis_cache):
+            self.host_api_index = self._host_apis_cache[selection]['index']
+        else:
+            self.host_api_index = None
+        # Обновляем список устройств
+        self.refresh_devices()
+        self.save_settings()  # сохраняем новый API
+
+    # Модифицированный метод refresh_devices (раньше он назывался refresh_devices и был без учёта API)
+    def refresh_devices(self):
+        """Обновляет список доступных аудиоустройств с учётом выбранного Host API"""
+        # Получаем список устройств для текущего API
+        devices = list_audio_devices(host_api_index=self.host_api_index)
+        current_device_name = self.device_var.get()
+        self.device_combo['values'] = [dev['name'] for dev in devices]
+
+        # Пытаемся сохранить выбранное устройство
+        if current_device_name in self.device_combo['values']:
+            self.device_var.set(current_device_name)
+        else:
             self.device_var.set("По умолчанию")
-            # Меняем устройство только если инициализация завершена
-            if not self.initializing:
-                self.on_device_change(None)
 
-        # Перезапускаем аудио, если оно было запущено
-        if audio_was_running:
+        # Применяем новое устройство к аудиопроцессору
+        selected_device_name = self.device_var.get()
+        # Находим индекс устройства для sounddevice
+        dev_index = None
+        for dev in devices:
+            if dev['name'] == selected_device_name:
+                dev_index = dev['index']
+                break
+        self.audio.set_device_by_api(self.host_api_index, dev_index)
+
+        # Если аудио уже запущено, перезапускаем
+        was_running = self.audio.running
+        if was_running:
+            self.audio.stop()
             self.audio.start()
+        logger.info(
+            f"Devices refreshed, found {len(devices)} devices for API {self.host_api_index}")
 
-        logger.info(f"Devices refreshed, found {len(devices)} input devices")
+    def on_device_change(self, event):
+        """Смена аудиоустройства"""
+        device_name = self.device_var.get()
+        # Находим индекс устройства для текущего API
+        devices = list_audio_devices(host_api_index=self.host_api_index)
+        dev_index = None
+        for dev in devices:
+            if dev['name'] == device_name:
+                dev_index = dev['index']
+                break
+        self.audio.set_device_by_api(self.host_api_index, dev_index)
 
-    def refresh_thresholds_ui(self):
-        """Обновляет UI порогов на основе текущих состояний рта из модели"""
-        # Очищаем предыдущие виджеты
-        for widget in self.thresh_content.winfo_children():
-            widget.destroy()
+        # Перезапускаем аудио
+        was_running = self.audio.running
+        if was_running:
+            self.audio.stop()
+            self.audio.start()
+        logger.info(f"Audio device changed to: {device_name}")
+        self.save_settings()  # Автоматическое сохранение
 
-        self.thresh_vars = []
-        self.threshold_lines = {}  # Будет заполнено в update_threshold_visuals
-        self.threshold_labels = {}  # Для хранения ссылок на метки порогов
-
-        if not hasattr(self.renderer, 'model') or not self.renderer.model:
-            ttk.Label(self.thresh_content,
-                      text="(Загрузите модель)").pack(pady=5)
-            return
-
-        mouth_states = self.renderer.model.get('mouth_states', [])
-        if not mouth_states:
-            ttk.Label(self.thresh_content,
-                      text="(Нет состояний рта)").pack(pady=5)
-            return
-
-        # Создаем сетку для порогов
-        thresholds_grid = ttk.Frame(self.thresh_content)
-        thresholds_grid.pack(fill="x", padx=2, pady=2)
-
-        row = 0
-        col = 0
-        for i, state in enumerate(mouth_states):
-            state_name = state.get('name', f'Состояние {i+1}')
-            # Создаем переменную для этого состояния
-            var = tk.DoubleVar(value=state.get('threshold', 0.0))
-            self.thresh_vars.append(var)
-
-            # Метка с названием
-            ttk.Label(thresholds_grid, text=f"{state_name}:").grid(
-                row=row, column=col*2, sticky="w", padx=1, pady=1)
-            # Поле ввода
-            entry = ttk.Entry(thresholds_grid, textvariable=var, width=6)
-            entry.grid(row=row, column=col*2+1, padx=1, pady=1)
-            entry.bind("<Return>", lambda e,
-                       idx=i: self.update_single_threshold(idx))
-            entry.bind("<FocusOut>", lambda e,
-                       idx=i: self.update_single_threshold(idx))
-
-            # Переходим к следующей колонке/строке
-            col += 1
-            if col >= 2:  # Две колонки
-                col = 0
-                row += 1
-
-        # Подсказка
-        help_label = ttk.Label(
-            thresholds_grid,
-            text="Значения: 0.0-1.0",
-            font=("Arial", 7)
-        )
-        help_label.grid(row=row+1, column=0, columnspan=4, pady=(0, 1))
-
-        # Обновляем визуализацию порогов
-        self.update_threshold_visuals()
-
-    def refresh_states_ui(self):
-        """Обновляет UI активных состояний на основе текущей модели"""
-        # Очищаем предыдущие виджеты
-        for widget in self.states_content.winfo_children():
-            widget.destroy()
-
-        self.state_vars = []  # Список булевых переменных для активных состояний
-
-        if not hasattr(self.renderer, 'model') or not self.renderer.model:
-            ttk.Label(self.states_content,
-                      text="(Загрузите модель)").pack(pady=5)
-            return
-
-        mouth_states = self.renderer.model.get('mouth_states', [])
-        if not mouth_states:
-            ttk.Label(self.states_content,
-                      text="(Нет состояний рта)").pack(pady=5)
-            return
-
-        states_grid = ttk.Frame(self.states_content)
-        states_grid.pack(fill="x", padx=2, pady=2)
-
-        row = 0
-        col = 0
-        for i, state in enumerate(mouth_states):
-            state_name = state.get('name', f'Состояние {i+1}')
-            var = tk.BooleanVar(value=state.get('active', True))
-            self.state_vars.append(var)
-
-            cb = ttk.Checkbutton(states_grid, text=state_name, variable=var,
-                                 command=lambda idx=i: self.update_single_active_state(idx))
-            cb.grid(row=row, column=col, sticky="w", padx=3, pady=1)
-
-            col += 1
-            if col >= 2:  # Две колонки
-                col = 0
-                row += 1
-
-    def update_single_threshold(self, state_index):
-        """Обновляет порог для одного состояния и сохраняет в модель"""
-        if not hasattr(self.renderer, 'model') or not self.renderer.model:
-            return
-
-        mouth_states = self.renderer.model.get('mouth_states', [])
-        if state_index < 0 or state_index >= len(mouth_states):
-            return
-
-        try:
-            new_threshold = self.thresh_vars[state_index].get()
-            new_threshold = max(0.0, min(1.0, new_threshold))
-            mouth_states[state_index]['threshold'] = new_threshold
-
-            # Обновляем пороги в рендерере
-            self.renderer.set_mouth_states(mouth_states)
-
-            # Обновляем визуализацию
-            self.update_threshold_visuals()
-
-            # Сохраняем модель в слот
-            if self.current_slot:
-                self.save_model_to_current_slot()
-
-        except Exception as e:
-            logger.error(f"Error updating single threshold: {e}")
-
-    def update_single_active_state(self, state_index):
-        """Обновляет активность одного состояния и сохраняет в модель"""
-        if not hasattr(self.renderer, 'model') or not self.renderer.model:
-            return
-
-        mouth_states = self.renderer.model.get('mouth_states', [])
-        if state_index < 0 or state_index >= len(mouth_states):
-            return
-
-        try:
-            mouth_states[state_index]['active'] = self.state_vars[state_index].get()
-
-            # Обновляем активные состояния в рендерере
-            self.renderer.set_mouth_states(mouth_states)
-
-            # Обновляем визуализацию порогов (линии неактивных скроются)
-            self.update_threshold_visuals()
-
-            # Сохраняем модель в слот
-            if self.current_slot:
-                self.save_model_to_current_slot()
-
-        except Exception as e:
-            logger.error(f"Error updating single active state: {e}")
-
-    def save_model_to_current_slot(self):
-        """Сохраняет текущую модель в текущий слот"""
-        if not self.current_slot or not self.renderer.model:
-            return
-
-        try:
-            slot_dir = os.path.join(MODELS_DIR, f"slot{self.current_slot}")
-            os.makedirs(slot_dir, exist_ok=True)
-
-            json_path = os.path.join(slot_dir, "model.json")
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(self.renderer.model, f, indent=2, ensure_ascii=False)
-
-            # Обновляем кнопку слота
-            self._update_single_slot(self.current_slot - 1)
-
-            logger.info(f"Model auto-saved to slot {self.current_slot}")
-
-        except Exception as e:
-            logger.error(f"Error auto-saving model to slot: {e}")
-
+    # Остальные методы без изменений, за исключением save_settings, куда добавлен host_api_index
     def load_preview_for_slot(self, slot_idx):
         """Загрузка превью для слота"""
         preview_path = os.path.join(
@@ -1056,40 +951,6 @@ class App:
             self.wave_speed.set(rounded_value)
             self.wave_speed_label.config(text=f"{rounded_value}")
 
-    def get_audio_devices(self):
-        """Получение списка аудиоустройств"""
-        try:
-            devices = sd.query_devices()
-            input_devices = ["По умолчанию"]
-
-            for i, dev in enumerate(devices):
-                if dev.get('max_input_channels', 0) > 0:
-                    name = dev.get('name', '')
-                    # Фильтруем виртуальные устройства (CABLE, VB-Audio, Voicemee)
-                    if "CABLE" in name or "VB-Audio" in name or "Voicemee" in name or "virtual" in name.lower():
-                        continue
-                    input_devices.append(name)
-
-            return input_devices
-        except Exception as e:
-            logger.error(f"Error getting audio devices: {e}")
-            return ["По умолчанию"]
-
-    def on_device_change(self, event):
-        """Смена аудиоустройства"""
-        device_name = self.device_var.get()
-        try:
-            self.audio.stop()
-        except Exception as e:
-            logger.error(f"Error stopping audio: {e}")
-        self.audio = AudioProcessor(
-            callback=self.on_audio_level, device=device_name)
-        self.audio.noise_gate_threshold = self.noise_gate_threshold.get(
-        ) if self.noise_gate_enabled.get() else 0.0
-        self.audio.start()
-        logger.info(f"Audio device changed to: {device_name}")
-        self.save_settings()  # Автоматическое сохранение
-
     def on_sensitivity_change(self):
         """Изменение чувствительности"""
         self.audio.set_sensitivity(self.sensitivity.get())
@@ -1208,7 +1069,8 @@ class App:
                 'idle': self.idle_expanded,
                 'thresh': self.thresh_expanded,
                 'states': self.states_expanded
-            }
+            },
+            'host_api_index': self.host_api_index  # Сохраняем выбранный API
         }
         try:
             with open(SETTINGS_FILE, 'w') as f:
@@ -1269,46 +1131,177 @@ class App:
 
         self.save_settings()
 
-    def update_active_states(self):
-        """Обновление активных состояний (применяет все сразу)"""
+    def refresh_thresholds_ui(self):
+        """Обновляет UI порогов на основе текущих состояний рта из модели"""
+        # Очищаем предыдущие виджеты
+        for widget in self.thresh_content.winfo_children():
+            widget.destroy()
+
+        self.thresh_vars = []
+        self.threshold_lines = {}  # Будет заполнено в update_threshold_visuals
+        self.threshold_labels = {}  # Для хранения ссылок на метки порогов
+
+        if not hasattr(self.renderer, 'model') or not self.renderer.model:
+            ttk.Label(self.thresh_content,
+                      text="(Загрузите модель)").pack(pady=5)
+            return
+
+        mouth_states = self.renderer.model.get('mouth_states', [])
+        if not mouth_states:
+            ttk.Label(self.thresh_content,
+                      text="(Нет состояний рта)").pack(pady=5)
+            return
+
+        # Создаем сетку для порогов
+        thresholds_grid = ttk.Frame(self.thresh_content)
+        thresholds_grid.pack(fill="x", padx=2, pady=2)
+
+        row = 0
+        col = 0
+        for i, state in enumerate(mouth_states):
+            state_name = state.get('name', f'Состояние {i+1}')
+            # Создаем переменную для этого состояния
+            var = tk.DoubleVar(value=state.get('threshold', 0.0))
+            self.thresh_vars.append(var)
+
+            # Метка с названием
+            ttk.Label(thresholds_grid, text=f"{state_name}:").grid(
+                row=row, column=col*2, sticky="w", padx=1, pady=1)
+            # Поле ввода
+            entry = ttk.Entry(thresholds_grid, textvariable=var, width=6)
+            entry.grid(row=row, column=col*2+1, padx=1, pady=1)
+            entry.bind("<Return>", lambda e,
+                       idx=i: self.update_single_threshold(idx))
+            entry.bind("<FocusOut>", lambda e,
+                       idx=i: self.update_single_threshold(idx))
+
+            # Переходим к следующей колонке/строке
+            col += 1
+            if col >= 2:  # Две колонки
+                col = 0
+                row += 1
+
+        # Подсказка
+        help_label = ttk.Label(
+            thresholds_grid,
+            text="Значения: 0.0-1.0",
+            font=("Arial", 7)
+        )
+        help_label.grid(row=row+1, column=0, columnspan=4, pady=(0, 1))
+
+        # Обновляем визуализацию порогов
+        self.update_threshold_visuals()
+
+    def refresh_states_ui(self):
+        """Обновляет UI активных состояний на основе текущей модели"""
+        # Очищаем предыдущие виджеты
+        for widget in self.states_content.winfo_children():
+            widget.destroy()
+
+        self.state_vars = []  # Список булевых переменных для активных состояний
+
+        if not hasattr(self.renderer, 'model') or not self.renderer.model:
+            ttk.Label(self.states_content,
+                      text="(Загрузите модель)").pack(pady=5)
+            return
+
+        mouth_states = self.renderer.model.get('mouth_states', [])
+        if not mouth_states:
+            ttk.Label(self.states_content,
+                      text="(Нет состояний рта)").pack(pady=5)
+            return
+
+        states_grid = ttk.Frame(self.states_content)
+        states_grid.pack(fill="x", padx=2, pady=2)
+
+        row = 0
+        col = 0
+        for i, state in enumerate(mouth_states):
+            state_name = state.get('name', f'Состояние {i+1}')
+            var = tk.BooleanVar(value=state.get('active', True))
+            self.state_vars.append(var)
+
+            cb = ttk.Checkbutton(states_grid, text=state_name, variable=var,
+                                 command=lambda idx=i: self.update_single_active_state(idx))
+            cb.grid(row=row, column=col, sticky="w", padx=3, pady=1)
+
+            col += 1
+            if col >= 2:  # Две колонки
+                col = 0
+                row += 1
+
+    def update_single_threshold(self, state_index):
+        """Обновляет порог для одного состояния и сохраняет в модель"""
         if not hasattr(self.renderer, 'model') or not self.renderer.model:
             return
 
         mouth_states = self.renderer.model.get('mouth_states', [])
-        for i, state in enumerate(mouth_states):
-            if i < len(self.state_vars):
-                state['active'] = self.state_vars[i].get()
+        if state_index < 0 or state_index >= len(mouth_states):
+            return
 
-        self.renderer.set_mouth_states(mouth_states)
-        self.update_threshold_visuals()
-        if self.current_slot:
-            self.save_model_to_current_slot()
+        try:
+            new_threshold = self.thresh_vars[state_index].get()
+            new_threshold = max(0.0, min(1.0, new_threshold))
+            mouth_states[state_index]['threshold'] = new_threshold
 
-        logger.info("Active states updated")
-        self.save_settings()
+            # Обновляем пороги в рендерере
+            self.renderer.set_mouth_states(mouth_states)
 
-    def update_thresholds(self):
-        """Обновление порогов голоса (применяет все сразу)"""
+            # Обновляем визуализацию
+            self.update_threshold_visuals()
+
+            # Сохраняем модель в слот
+            if self.current_slot:
+                self.save_model_to_current_slot()
+
+        except Exception as e:
+            logger.error(f"Error updating single threshold: {e}")
+
+    def update_single_active_state(self, state_index):
+        """Обновляет активность одного состояния и сохраняет в модель"""
         if not hasattr(self.renderer, 'model') or not self.renderer.model:
             return
 
         mouth_states = self.renderer.model.get('mouth_states', [])
-        for i, state in enumerate(mouth_states):
-            if i < len(self.thresh_vars):
-                try:
-                    new_threshold = self.thresh_vars[i].get()
-                    new_threshold = max(0.0, min(1.0, new_threshold))
-                    state['threshold'] = new_threshold
-                except Exception as e:
-                    logger.error(f"Error updating threshold {i}: {e}")
+        if state_index < 0 or state_index >= len(mouth_states):
+            return
 
-        self.renderer.set_mouth_states(mouth_states)
-        self.update_threshold_visuals()
-        if self.current_slot:
-            self.save_model_to_current_slot()
+        try:
+            mouth_states[state_index]['active'] = self.state_vars[state_index].get()
 
-        logger.info("Thresholds updated")
-        self.save_settings()
+            # Обновляем активные состояния в рендерере
+            self.renderer.set_mouth_states(mouth_states)
+
+            # Обновляем визуализацию порогов (линии неактивных скроются)
+            self.update_threshold_visuals()
+
+            # Сохраняем модель в слот
+            if self.current_slot:
+                self.save_model_to_current_slot()
+
+        except Exception as e:
+            logger.error(f"Error updating single active state: {e}")
+
+    def save_model_to_current_slot(self):
+        """Сохраняет текущую модель в текущий слот"""
+        if not self.current_slot or not self.renderer.model:
+            return
+
+        try:
+            slot_dir = os.path.join(MODELS_DIR, f"slot{self.current_slot}")
+            os.makedirs(slot_dir, exist_ok=True)
+
+            json_path = os.path.join(slot_dir, "model.json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(self.renderer.model, f, indent=2, ensure_ascii=False)
+
+            # Обновляем кнопку слота
+            self._update_single_slot(self.current_slot - 1)
+
+            logger.info(f"Model auto-saved to slot {self.current_slot}")
+
+        except Exception as e:
+            logger.error(f"Error auto-saving model to slot: {e}")
 
     def update_threshold_visuals(self):
         """Обновление визуализации порогов - только активные состояния"""
@@ -1501,7 +1494,8 @@ class App:
                     self.audio.stop()
                     self.audio = AudioProcessor(
                         callback=self.on_audio_level,
-                        device=self.device_var.get()
+                        device=self.device_var.get(),
+                        host_api_index=self.host_api_index  # передаём текущий API
                     )
                     self.audio.noise_gate_threshold = self.noise_gate_threshold.get(
                     ) if self.noise_gate_enabled.get() else 0.0

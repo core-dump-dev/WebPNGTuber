@@ -28,5 +28,6 @@
     "idle": true,
     "thresh": true,
     "states": true
-  }
+  },
+  "host_api_index": 2
 }
