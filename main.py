@@ -559,6 +559,9 @@ class App:
 
         self.root.after(100, self.on_canvas_resize)
 
+        # Запускаем монитор устройств для автоматического обнаружения подключения/отключения микрофона
+        self.start_device_monitor()
+
     # === НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ С HOST API ===
     def refresh_host_apis(self):
         """Обновляет список Host API в комбобоксе"""
@@ -596,45 +599,70 @@ class App:
         self.save_settings()  # сохраняем новый API
 
     def refresh_devices(self):
-        """Обновляет список аудиоустройств с учётом выбранного Host API"""
+        """Принудительное обновление списка аудиоустройств и переподключение"""
+        # Останавливаем текущий аудиопоток
+        self.audio.stop()
+
+        # Переинициализируем sounddevice для обновления списка устройств
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:
+            logger.warning(f"Error reinitializing sounddevice: {e}")
+
+        # Обновляем список устройств в комбобоксе
         devices = list_audio_devices(host_api_index=self.host_api_index)
         current_device_name = self.device_var.get()
         device_names = [dev['name'] for dev in devices]
         self.device_combo['values'] = device_names
 
-        # Если текущее устройство больше не существует в списке, сбрасываем на "По умолчанию"
+        # Если текущее устройство всё ещё существует, оставляем его, иначе выбираем "По умолчанию"
         if current_device_name not in device_names:
             logger.warning(
-                f"Previously selected device '{current_device_name}' is no longer available. Falling back to default.")
-            current_device_name = "🎤 По умолчанию (микрофон)"
-            self.device_var.set(current_device_name)
-
-        # Применяем новое устройство к аудиопроцессору
-        selected_device_name = self.device_var.get()
-        dev_info = None
-        for dev in devices:
-            if dev['name'] == selected_device_name:
-                dev_info = dev
-                break
-
-        if dev_info:
-            self.audio.set_device_by_api(
-                self.host_api_index, dev_info['index'], dev_info.get(
-                    'is_output', False)
-            )
+                f"Device '{current_device_name}' no longer available, switching to default")
+            self.device_var.set("🎤 По умолчанию (микрофон)")
+            dev_info = next(
+                (dev for dev in devices if dev['name'] == "🎤 По умолчанию (микрофон)"), None)
+            if dev_info:
+                self.audio.set_device_by_api(
+                    self.host_api_index, dev_info['index'], dev_info.get('is_output', False))
+            else:
+                self.audio.set_device_by_api(self.host_api_index, None, False)
         else:
-            self.audio.set_device_by_api(self.host_api_index, None, False)
+            # Применяем текущее устройство
+            dev_info = next(
+                (dev for dev in devices if dev['name'] == current_device_name), None)
+            if dev_info:
+                self.audio.set_device_by_api(
+                    self.host_api_index, dev_info['index'], dev_info.get('is_output', False))
+            else:
+                self.audio.set_device_by_api(self.host_api_index, None, False)
 
-        # === ПРИНУДИТЕЛЬНЫЙ ПЕРЕЗАПУСК АУДИО ===
-        logger.info("Restarting audio processor after device refresh...")
-        self.audio.stop()
-        # Короткая пауза для гарантированного завершения потока
-        time.sleep(0.1)
+        # Перезапускаем аудио
         self.audio.start()
 
         logger.info(
-            f"Devices refreshed. Found {len(devices)} devices. Active: {current_device_name}")
+            f"Devices refreshed, found {len(device_names)} devices. Active: {self.device_var.get()}")
         self.save_settings()
+
+    def start_device_monitor(self):
+        """Запускает периодическую проверку устройств (раз в 5 секунд)"""
+        def check():
+            if self.initializing:
+                self.root.after(5000, check)
+                return
+            try:
+                current_devices = list_audio_devices(
+                    host_api_index=self.host_api_index)
+                current_names = [dev['name'] for dev in current_devices]
+                old_names = self.device_combo['values']
+                if set(current_names) != set(old_names):
+                    logger.info("Audio device list changed, refreshing...")
+                    self.refresh_devices()
+            except Exception as e:
+                logger.error(f"Error in device monitor: {e}")
+            self.root.after(5000, check)
+        self.root.after(5000, check)
 
     def on_device_change(self, event):
         """Смена аудиоустройства"""
