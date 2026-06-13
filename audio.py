@@ -23,13 +23,16 @@ logger = setup_logging('audio')
 
 def list_host_apis():
     """
-    Возвращает список доступных Host API.
+    Возвращает список доступных Host API (только WASAPI и MME).
     Каждый элемент: {'index': int, 'name': str}
     """
     apis = []
     try:
         for idx, info in enumerate(sd.query_hostapis()):
-            apis.append({'index': idx, 'name': info.get('name', f'API {idx}')})
+            name = info.get('name', f'API {idx}')
+            # Оставляем только WASAPI и MME, исключаем WDM-KS и другие
+            if 'WASAPI' in name or 'MME' in name:
+                apis.append({'index': idx, 'name': name})
     except Exception as e:
         logger.error(f"Error listing host APIs: {e}")
     return apis
@@ -37,7 +40,7 @@ def list_host_apis():
 
 def list_audio_devices(host_api_index=None):
     """
-    Возвращает список аудиоустройств.
+    Возвращает список аудиоустройств для выбранного Host API.
     Если host_api_index указан, возвращает только устройства этого API.
     Каждый элемент: {'index': int, 'name': str, 'is_output': bool, 'hostapi': int}
     """
@@ -51,6 +54,16 @@ def list_audio_devices(host_api_index=None):
             api_idx = dev.get('hostapi')
             if host_api_index is not None and api_idx != host_api_index:
                 continue
+            # Получаем имя хоста API для проверки
+            try:
+                hostapis = sd.query_hostapis()
+                if 0 <= api_idx < len(hostapis):
+                    api_name = hostapis[api_idx].get('name', '')
+                    # Если API не WASAPI и не MME, пропускаем устройство
+                    if 'WASAPI' not in api_name and 'MME' not in api_name:
+                        continue
+            except:
+                pass
             devices.append({
                 'index': idx,
                 'name': dev.get('name', f'Device {idx}'),
@@ -126,6 +139,16 @@ class AudioProcessor:
                     continue
                 if self.host_api_index is not None and dev.get('hostapi') != self.host_api_index:
                     continue
+                # Проверяем API устройства
+                try:
+                    hostapis = sd.query_hostapis()
+                    api_idx = dev.get('hostapi')
+                    if 0 <= api_idx < len(hostapis):
+                        api_name = hostapis[api_idx].get('name', '')
+                        if 'WASAPI' not in api_name and 'MME' not in api_name:
+                            continue
+                except:
+                    pass
                 if dev.get('name') == device_name:
                     self.device_index = idx
                     return
