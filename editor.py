@@ -17,6 +17,7 @@ import tempfile
 import queue
 import weakref
 from functools import lru_cache
+import uuid
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -36,6 +37,11 @@ class CanvasItem:
     def __init__(self, layer, image_path):
         self.layer = layer
         self.image_path = image_path
+
+        # Уникальный ID для надежного отслеживания в истории Undo/Redo
+        self.uuid = layer.get('uuid', str(uuid.uuid4()))
+        layer['uuid'] = self.uuid
+
         self.is_gif = bool(layer.get("is_gif", False))
         self.scale = float(layer.get("scale", 1.0))
         self.rotation = int(layer.get("rotation", 0))
@@ -294,7 +300,9 @@ class ModelEditor(tk.Toplevel):
         self.original_slot = None
         self.items = []
         self.imported_files = []
-        self.drag_data = {"item": None, "x": 0, "y": 0, "group_items": []}
+        # Добавлены start_x и start_y для корректного определения движения мыши
+        self.drag_data = {"item": None, "x": 0, "y": 0,
+                          "start_x": 0, "start_y": 0, "group_items": []}
         self.selected_group = None
         self.current_selection = []
         self.preview_fps = 30
@@ -1003,10 +1011,24 @@ class ModelEditor(tk.Toplevel):
         # Получаем дочерние группы для указанной родительской группы
         return [g for g in self.model.get("groups", []) if g.get("parent") == parent_name]
 
+    def _get_all_items_in_group_recursive(self, group_name):
+        """Рекурсивно получает все элементы группы и её дочерних групп"""
+        items = []
+        # Непосредственные элементы группы
+        for ci in self.items:
+            if ci.layer.get("group") == group_name:
+                items.append(ci)
+        # Рекурсивно для дочерних групп
+        for g in self.model.get("groups", []):
+            if g.get("parent") == group_name:
+                items.extend(
+                    self._get_all_items_in_group_recursive(g.get("name")))
+        return items
+
     def _get_current_state_for_group(self, group_name):
         """Определяет текущее состояние для группы с учетом иерархии"""
         group = next((g for g in self.model.get("groups", [])
-                     if g.get("name") == group_name), None)
+                      if g.get("name") == group_name), None)
         if not group:
             return None
 
@@ -1144,7 +1166,7 @@ class ModelEditor(tk.Toplevel):
 
             # Получаем группу
             group = next((g for g in self.model.get("groups", [])
-                         if g.get("name") == group_name), None)
+                          if g.get("name") == group_name), None)
             if not group:
                 return
 
@@ -1184,151 +1206,59 @@ class ModelEditor(tk.Toplevel):
         return visible_items
 
     def save_to_history(self, description=""):
-        """Сохраняет ТОЛЬКО изменения в историю, а не полное состояние"""
+        """Сохраняет состояние в историю с использованием UUID"""
         if self.history_index < len(self.history) - 1:
             self.history = self.history[:self.history_index + 1]
 
-        # Создаем легковесное состояние с ТОЛЬКО изменениями
         state = {
             'model_snapshot': json.dumps({
                 'name': self.model.get('name', ''),
                 'width': self.model.get('width', 700),
                 'height': self.model.get('height', 700),
                 'groups': self.model.get('groups', []),
-                'mouth_states': self.mouth_states  # Добавляем состояния рта
+                'mouth_states': self.mouth_states
             }, ensure_ascii=False),
-            'items_changes': [],  # Только изменения элементов
+            'items_changes': [],
             'description': description,
             'timestamp': time.time()
         }
 
-        # Сохраняем ТОЛЬКО выбранные элементы или все, если описание указывает на глобальное изменение
         items_to_save = self.current_selection if self.current_selection else self.items
-
         for ci in items_to_save:
             item_state = {
-                'layer_id': id(ci),  # Используем ID для отслеживания
+                'uuid': ci.uuid,  # Используем UUID вместо id()
                 'layer_name': ci.layer.get('name', ''),
-                'x': ci.x,
-                'y': ci.y,
-                'scale': ci.scale,
-                'rotation': ci.rotation,
-                'flip_horizontal': ci.flip_horizontal,
-                'flip_vertical': ci.flip_vertical,
-                'visible': ci.visible,
-                'alpha': ci.alpha,
-                'is_gif': ci.is_gif,
-                'image_path': ci.image_path
+                'x': ci.x, 'y': ci.y,
+                'scale': ci.scale, 'rotation': ci.rotation,
+                'flip_horizontal': ci.flip_horizontal, 'flip_vertical': ci.flip_vertical,
+                'visible': ci.visible, 'alpha': ci.alpha,
+                'is_gif': ci.is_gif, 'image_path': ci.image_path
             }
             state['items_changes'].append(item_state)
 
         self.history.append(state)
         self.history_index = len(self.history) - 1
-
         if len(self.history) > self.max_history_size:
             self.history.pop(0)
             if self.history_index > 0:
                 self.history_index -= 1
-
         logger.info(
-            f"History saved: {description}, index: {self.history_index}, size: {len(self.history)}")
-
-    def get_slot_preview_image(self, slot_num):
-        """Получение изображения превью для слота"""
-        try:
-            preview_path = os.path.join(
-                MODELS_DIR, f"slot{slot_num}", "preview.png")
-            if os.path.exists(preview_path):
-                img = Image.open(preview_path)
-                img.thumbnail((100, 100), Image.LANCZOS)
-                return ImageTk.PhotoImage(img)
-        except Exception as e:
-            logger.error(f"Error loading preview for slot {slot_num}: {e}")
-
-        img = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
-        return ImageTk.PhotoImage(img)
-
-    def get_current_preview_image(self):
-        """Получение превью текущей модели"""
-        try:
-            if self.model_dir:
-                preview_path = os.path.join(self.model_dir, "preview.png")
-                if os.path.exists(preview_path):
-                    img = Image.open(preview_path)
-                    img.thumbnail((150, 150), Image.LANCZOS)
-                    return ImageTk.PhotoImage(img)
-        except Exception as e:
-            logger.error(f"Error loading current preview: {e}")
-
-        img = Image.new("RGBA", (150, 150), (0, 0, 0, 0))
-        return ImageTk.PhotoImage(img)
-
-    def undo(self, event=None):
-        """Отмена последнего действия с проверкой"""
-        if self.history_index > 0:
-            old_index = self.history_index
-            self.history_index -= 1
-
-            # Сохраняем текущее состояние перед отменой
-            current_state = self._capture_current_state()
-
-            # Загружаем предыдущее состояние
-            self.load_from_history()
-
-            # Если что-то пошло не так, возвращаемся
-            if not self._validate_state():
-                self.history_index = old_index
-                self.load_from_history()
-                logger.warning(
-                    "Undo validation failed, restored to previous state")
-            else:
-                logger.info(
-                    f"Undo successful: {old_index} -> {self.history_index}")
-
-    def redo(self, event=None):
-        """Повтор отмененного действия с проверкой"""
-        if self.history_index < len(self.history) - 1:
-            old_index = self.history_index
-            self.history_index += 1
-
-            # Сохраняем текущее состояние перед повтором
-            current_state = self._capture_current_state()
-
-            # Загружаем следующее состояние
-            self.load_from_history()
-
-            # Если что-то пошло не так, возвращаемся
-            if not self._validate_state():
-                self.history_index = old_index
-                self.load_from_history()
-                logger.warning(
-                    "Redo validation failed, restored to previous state")
-            else:
-                logger.info(
-                    f"Redo successful: {old_index} -> {self.history_index}")
+            f"History saved: {description}, index: {self.history_index}")
 
     def load_from_history(self):
-        """Загружает состояние из истории, применяя ТОЛЬКО изменения"""
+        """Загружает состояние из истории и синхронизирует UI"""
         if self.history_index < 0 or self.history_index >= len(self.history):
             return
 
         state = self.history[self.history_index]
-
         try:
-            # Восстанавливаем только изменения элементов
             for item_state in state['items_changes']:
-                layer_id = item_state['layer_id']
-                layer_name = item_state['layer_name']
-
-                # Ищем элемент по ID или по имени
-                target_item = None
-                for ci in self.items:
-                    if id(ci) == layer_id or ci.layer.get('name') == layer_name:
-                        target_item = ci
-                        break
+                item_uuid = item_state.get('uuid')
+                # Ищем элемент по UUID
+                target_item = next(
+                    (ci for ci in self.items if ci.uuid == item_uuid), None)
 
                 if target_item:
-                    # Применяем изменения ТОЛЬКО к найденному элементу
                     target_item.x = item_state['x']
                     target_item.y = item_state['y']
                     target_item.scale = item_state['scale']
@@ -1339,20 +1269,16 @@ class ModelEditor(tk.Toplevel):
                     target_item.alpha = item_state.get('alpha', 1.0)
                     target_item.is_gif = item_state['is_gif']
 
-                    # Обновляем слой в модели
                     if target_item.layer:
                         target_item.layer.update({
-                            'x': item_state['x'],
-                            'y': item_state['y'],
-                            'visible': item_state['visible'],
-                            'scale': item_state['scale'],
-                            'rotation': item_state['rotation'],
-                            'alpha': item_state.get('alpha', 1.0),
+                            'x': item_state['x'], 'y': item_state['y'],
+                            'visible': item_state['visible'], 'scale': item_state['scale'],
+                            'rotation': item_state['rotation'], 'alpha': item_state.get('alpha', 1.0),
                             'flip_horizontal': item_state['flip_horizontal'],
                             'flip_vertical': item_state['flip_vertical']
                         })
+                    target_item.clear_cache()
 
-            # Восстанавливаем основные параметры модели
             if 'model_snapshot' in state:
                 model_snapshot = json.loads(state['model_snapshot'])
                 self.model['name'] = model_snapshot.get(
@@ -1368,49 +1294,30 @@ class ModelEditor(tk.Toplevel):
                 self.canvas_height = self.model['height']
                 self.canvas_width_var.set(self.canvas_width)
                 self.canvas_height_var.set(self.canvas_height)
-
-                # Обновляем UI состояний рта
                 self.refresh_mouth_states_list()
 
-            self.refresh_tree()
+            self._photo_images.clear()
             self._canvas_cache_valid = False
+            self.refresh_tree()
             self.redraw_canvas()
+
+            if self.current_selection:
+                self.load_item_props(self.current_selection[0])
+            else:
+                self.clear_props_fields()
 
         except Exception as e:
             logger.error(f"Error loading from history: {e}")
-            import traceback
-            traceback.print_exc()
 
-    def _capture_current_state(self):
-        """Захватывает текущее состояние для валидации"""
-        state = {
-            'items_count': len(self.items),
-            'items_ids': [id(ci) for ci in self.items],
-            'model_name': self.model.get('name', ''),
-            'canvas_size': (self.canvas_width, self.canvas_height)
-        }
-        return state
+    def undo(self, event=None):
+        if self.history_index > 0:
+            self.history_index -= 1
+            self.load_from_history()
 
-    def _validate_state(self):
-        """Проверяет валидность текущего состояния"""
-        try:
-            # Проверяем базовую целостность
-            if len(self.items) == 0 and self.model.get('layers'):
-                logger.warning(
-                    "Validation failed: items list empty but model has layers")
-                return False
-
-            # Проверяем, что все элементы имеют правильные атрибуты
-            for ci in self.items:
-                if not hasattr(ci, 'x') or not hasattr(ci, 'y'):
-                    logger.warning(
-                        f"Validation failed: item missing coordinates")
-                    return False
-
-            return True
-        except Exception as e:
-            logger.error(f"Validation error: {e}")
-            return False
+    def redo(self, event=None):
+        if self.history_index < len(self.history) - 1:
+            self.history_index += 1
+            self.load_from_history()
 
     def delete_model(self):
         """Удаление текущей модели"""
@@ -1530,7 +1437,8 @@ class ModelEditor(tk.Toplevel):
                         "alpha": float(ci.alpha),
                         "group": layer.get("group", None),
                         "flip_horizontal": bool(ci.flip_horizontal),
-                        "flip_vertical": bool(ci.flip_vertical)
+                        "flip_vertical": bool(ci.flip_vertical),
+                        "uuid": ci.uuid  # Сохраняем UUID
                     }
                     model_data["layers"].append(layer_data)
 
@@ -1646,7 +1554,7 @@ class ModelEditor(tk.Toplevel):
                 else:
                     self.mouth_states = [
                         {'id': 0, 'name': 'Тишина',
-                            'threshold': 0.0, 'active': True},
+                         'threshold': 0.0, 'active': True},
                         {'id': 1, 'name': 'Шёпот', 'threshold': 0.3, 'active': True},
                         {'id': 2, 'name': 'Норма', 'threshold': 0.6, 'active': True},
                         {'id': 3, 'name': 'Крик', 'threshold': 0.9, 'active': True}
@@ -2148,6 +2056,25 @@ class ModelEditor(tk.Toplevel):
                         self.tree.see(child_id)
                         return
 
+    def _select_group_in_tree(self, group_name):
+        """Выделяет группу в дереве элементов"""
+        self.tree.selection_remove(self.tree.selection())
+
+        def search_group(parent):
+            for item_id in self.tree.get_children(parent):
+                values = self.tree.item(item_id, "values")
+                if values and values[0] == "group" and values[1] == group_name:
+                    self.tree.selection_set(item_id)
+                    self.tree.focus(item_id)
+                    self.tree.item(item_id, open=True)
+                    self.tree.see(item_id)
+                    return True
+                if search_group(item_id):
+                    return True
+            return False
+
+        search_group("")
+
     def on_tree_select(self, event=None):
         """Обработчик выбора в дереве"""
         try:
@@ -2181,11 +2108,12 @@ class ModelEditor(tk.Toplevel):
                     group_name = item_values[1]
                     selected_groups.add(group_name)
 
-                    # Выделяем все элементы группы
-                    for ci in self.items:
-                        if ci.layer.get("group") == group_name:
-                            ci.layer["_selected"] = True
-                            selected_items.add(ci)
+                    # Рекурсивно получаем все элементы группы и её дочерних групп
+                    group_items = self._get_all_items_in_group_recursive(
+                        group_name)
+                    for ci in group_items:
+                        ci.layer["_selected"] = True
+                        selected_items.add(ci)
                 elif item_values[0] == "item":
                     item_id_int = int(item_values[1])
                     ci = self._get_item_by_id(item_id_int)
@@ -2317,7 +2245,7 @@ class ModelEditor(tk.Toplevel):
     def update_group_logic_menus(self, group_name):
         """Обновляет меню логики группы - динамически на основе состояний рта"""
         group = next((g for g in self.model.get("groups", [])
-                     if g.get("name") == group_name), None)
+                      if g.get("name") == group_name), None)
         if not group:
             return
 
@@ -2345,7 +2273,7 @@ class ModelEditor(tk.Toplevel):
                     items.append((display_name, child_name, "group"))
                     # Рекурсивно собираем элементы из дочерней группы
                     items.extend(collect_group_items(
-                        child_name, indent + "  "))
+                        child_name, indent + "   "))
 
             return items
 
@@ -2914,6 +2842,7 @@ class ModelEditor(tk.Toplevel):
             layer["alpha"] = float(ci.alpha)
             layer["flip_horizontal"] = bool(ci.flip_horizontal)
             layer["flip_vertical"] = bool(ci.flip_vertical)
+            layer["uuid"] = ci.uuid  # Сохраняем UUID
 
             if "file" in layer:
                 layer["file"] = os.path.basename(layer["file"])
@@ -3416,7 +3345,7 @@ class ModelEditor(tk.Toplevel):
     def load_group_settings(self, group_name):
         """Загружает настройки группы"""
         group = next((g for g in self.model.get("groups", [])
-                     if g.get("name") == group_name), None)
+                      if g.get("name") == group_name), None)
         if not group:
             return
 
@@ -3465,7 +3394,7 @@ class ModelEditor(tk.Toplevel):
 
             # Получаем группу
             group = next((g for g in self.model.get("groups", [])
-                         if g.get("name") == group_name), None)
+                          if g.get("name") == group_name), None)
             if not group:
                 return
 
@@ -3559,7 +3488,7 @@ class ModelEditor(tk.Toplevel):
             "groups", []) if g.get("name") != group_name]
 
     def on_canvas_mouse_down(self, event):
-        """Обработчик нажатия мыши на холсте"""
+        """Обработчик нажатия мыши на холсте с учетом групп"""
         focus_widget = self.focus_get()
         if isinstance(focus_widget, (ttk.Entry, tk.Entry, ttk.Combobox)):
             return
@@ -3582,15 +3511,11 @@ class ModelEditor(tk.Toplevel):
         my = (event.y - canvas_y1) / \
             self.zoom_level if self.zoom_level > 0 else 0
 
-        # Сбрасываем выделение
-        for ci in self.items:
-            ci.layer["_selected"] = False
+        # Сохраняем стартовые координаты для корректного Undo
+        self.drag_data = {"item": None, "x": mx, "y": my,
+                          "start_x": mx, "start_y": my, "group_items": []}
 
-        self.current_selection = []
-        self.drag_data = {"item": None, "x": mx, "y": my, "group_items": []}
-        found = None
-        found_items = []  # Собираем все элементы под курсором
-
+        found_items = []
         # Ищем элемент под курсором (с конца для правильного Z-порядка)
         for ci in reversed(self.items):
             if not ci.visible:
@@ -3637,39 +3562,63 @@ class ModelEditor(tk.Toplevel):
                     logger.error(f"Error checking pixel: {e}")
                     found_items.append(ci)  # В случае ошибки тоже добавляем
 
-        # ВЫБИРАЕМ САМЫЙ ВЕРХНИЙ НЕПРОЗРАЧНЫЙ ЭЛЕМЕНТ
         if found_items:
             found = found_items[0]  # Берем первый (самый верхний) элемент
+            group_name = found.layer.get("group")
 
-        if found:
-            # Выделяем элемент
-            if event.state & 0x0004:  # Ctrl
-                found.layer["_selected"] = not found.layer.get(
-                    "_selected", False)
-                if found.layer["_selected"]:
-                    self.current_selection.append(found)
-                elif found in self.current_selection:
-                    self.current_selection.remove(found)
+            # Если кликнутый объект уже выделен (например, потому что в дереве выбрана вся группа)
+            if found in self.current_selection:
+                # Просто начинаем перетаскивание текущего выделения
+                self.drag_data["item"] = found
+                self.drag_data["group_items"] = self.current_selection.copy()
+
+                # Если выделен только один объект, загружаем его свойства
+                if len(self.current_selection) == 1:
+                    self._select_item_in_tree(found)
+                    self.load_item_props(found)
+                    self.selected_group = None
+                    self.group_label.config(
+                        text=found.layer.get("group") or "(нет группы)")
             else:
-                found.layer["_selected"] = True
-                self.current_selection = [found]
+                # Объект не был выделен. Работает как обычный клик.
+                if event.state & 0x0004:  # Ctrl
+                    found.layer["_selected"] = True
+                    if found not in self.current_selection:
+                        self.current_selection.append(found)
+                else:
+                    # Сбрасываем выделение на холсте
+                    for ci in self.items:
+                        ci.layer["_selected"] = False
 
-            self.drag_data["item"] = found
-            self.drag_data["group_items"] = self.current_selection.copy()
+                    # Если элемент в группе, выделяем всю группу (рекурсивно)
+                    if group_name:
+                        self.selected_group = group_name
+                        self.current_selection = self._get_all_items_in_group_recursive(
+                            group_name)
+                        for ci in self.current_selection:
+                            ci.layer["_selected"] = True
+                        self._select_group_in_tree(group_name)
+                        self.group_label.config(text=group_name)
+                        self.load_group_settings(group_name)
+                    else:
+                        found.layer["_selected"] = True
+                        self.current_selection = [found]
+                        self.selected_group = None
+                        self.group_label.config(text="(нет группы)")
+                        self._select_item_in_tree(found)
+                        self.load_item_props(found)
 
-            # ВЫДЕЛЯЕМ ЭЛЕМЕНТ В ДЕРЕВЕ
-            self._select_item_in_tree(found)
+                self.drag_data["item"] = found
+                self.drag_data["group_items"] = self.current_selection.copy()
 
-            # Загружаем свойства элемента
-            if self.current_selection:
-                self.load_item_props(self.current_selection[0])
         else:
-            # Сбрасываем выделение
+            # Клик по пустому месту
+            for ci in self.items:
+                ci.layer["_selected"] = False
+            self.current_selection = []
             self.selected_group = None
             self.group_label.config(text="(нет группы)")
             self.clear_props_fields()
-
-            # СНИМАЕМ ВЫДЕЛЕНИЕ В ДЕРЕВЕ
             self.tree.selection_remove(self.tree.selection())
 
         self._canvas_cache_valid = False
@@ -3709,11 +3658,11 @@ class ModelEditor(tk.Toplevel):
             ci.y += int(dy)
 
         # Обновляем поля ввода
-        if len(self.current_selection) == 1:
+        if len(self.drag_data["group_items"]) == 1:
             self.x_entry.delete(0, "end")
-            self.x_entry.insert(0, str(self.current_selection[0].x))
+            self.x_entry.insert(0, str(self.drag_data["group_items"][0].x))
             self.y_entry.delete(0, "end")
-            self.y_entry.insert(0, str(self.current_selection[0].y))
+            self.y_entry.insert(0, str(self.drag_data["group_items"][0].y))
 
         self._canvas_cache_valid = False
         self.redraw_canvas()
@@ -3721,9 +3670,9 @@ class ModelEditor(tk.Toplevel):
     def on_canvas_mouse_up(self, event):
         """Обработчик отпускания кнопки мыши"""
         if self.drag_data.get("item"):
-            # Сохраняем в историю только если было перемещение
-            if (self.drag_data.get("x", 0) != 0 or
-                    self.drag_data.get("y", 0) != 0):
+            # Проверяем, было ли реальное перемещение (сравниваем старт и текущую позицию)
+            if abs(self.drag_data.get("start_x", 0) - self.drag_data.get("x", 0)) > 0.1 or \
+               abs(self.drag_data.get("start_y", 0) - self.drag_data.get("y", 0)) > 0.1:
                 self.save_to_history("Перемещение элемента")
 
         self.drag_data["item"] = None
@@ -3840,7 +3789,7 @@ class ModelEditor(tk.Toplevel):
 
         gname = self.selected_group
         group = next((g for g in self.model.get("groups", [])
-                     if g.get("name") == gname), None)
+                      if g.get("name") == gname), None)
         if not group:
             return
 
@@ -3866,7 +3815,7 @@ class ModelEditor(tk.Toplevel):
 
         gname = self.selected_group
         group = next((g for g in self.model.get("groups", [])
-                     if g.get("name") == gname), None)
+                      if g.get("name") == gname), None)
         if not group:
             return
 
@@ -3915,7 +3864,8 @@ class ModelEditor(tk.Toplevel):
                                 "alpha": float(ci.alpha),
                                 "group": ci.layer.get("group", None),
                                 "flip_horizontal": bool(ci.flip_horizontal),
-                                "flip_vertical": bool(ci.flip_vertical)
+                                "flip_vertical": bool(ci.flip_vertical),
+                                "uuid": ci.uuid  # Сохраняем UUID
                             })
                         with open(os.path.join(self.model_dir, "model.json"), "w", encoding="utf-8") as f:
                             json.dump(temp, f, indent=2, ensure_ascii=False)
