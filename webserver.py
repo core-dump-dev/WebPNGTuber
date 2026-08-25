@@ -72,9 +72,9 @@ class WebServer:
             )
 
     def mjpeg_generator(self):
-        """Оптимизированный генератор MJPEG потока"""
-        last_frame = None
-        last_frame_hash = None
+        """Оптимизированный генератор MJPEG потока с прямым сравнением байтов вместо хеша"""
+        last_frame_data = None
+        last_frame_bytes = None
 
         while self.is_running:
             if not self.renderer or not self.renderer.model:
@@ -83,9 +83,11 @@ class WebServer:
 
             frame = self.renderer.get_frame_bytes()
             if frame:
-                frame_hash = hash(frame)
-                if frame_hash == last_frame_hash and last_frame:
-                    yield last_frame
+                # Сравниваем байты напрямую (быстрее, чем вычисление хеша)
+                if last_frame_bytes is not None and frame == last_frame_bytes:
+                    # Кадр не изменился – отправляем сохранённый пакет
+                    if last_frame_data is not None:
+                        yield last_frame_data
                 else:
                     frame_data = (
                         b"--frame\r\n"
@@ -93,8 +95,8 @@ class WebServer:
                         b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n" +
                         frame + b"\r\n"
                     )
-                    last_frame = frame_data
-                    last_frame_hash = frame_hash
+                    last_frame_data = frame_data
+                    last_frame_bytes = frame
                     yield frame_data
 
             time.sleep(1.0 / self.renderer.fps)

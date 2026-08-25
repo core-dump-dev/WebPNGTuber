@@ -88,19 +88,10 @@ class Renderer:
         # Инициализация пустого фона
         self._background = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Проверка поддержки OpenCL
-        self.use_umat = False
-        try:
-            if cv2.ocl.haveOpenCL():
-                cv2.ocl.setUseOpenCL(True)
-                self.use_umat = True
-                logger.info("OpenCL acceleration enabled")
-            else:
-                logger.warning("OpenCL not available, using CPU rendering")
-        except:
-            logger.warning("OpenCL initialization failed, using CPU rendering")
+        # Переиспользуемый буфер кадра (оптимизация)
+        self.frame_buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
 
-        logger.info(f"Renderer initialized with dynamic mouth states support")
+        logger.info("Renderer initialized with dynamic mouth states support")
 
     def set_mouth_states(self, mouth_states):
         """Устанавливает состояния рта из модели"""
@@ -547,7 +538,7 @@ class Renderer:
             for frame_idx in range(self.wave_num_frames):
                 cache_key = (unique_name, frame_idx)
                 distorted_img = self._create_discrete_wave_effect(
-                    original_image.copy(), frame_idx)
+                    original_image, frame_idx)  # БЕЗ .copy()
                 if distorted_img is not None:
                     self._wave_frames_cache[cache_key] = distorted_img
 
@@ -565,9 +556,9 @@ class Renderer:
                 for wave_frame_idx in range(self.wave_num_frames):
                     cache_key = (gif_name, gif_frame_idx, wave_frame_idx)
 
-                    # Создаем искаженную версию кадра
+                    # Создаем искаженную версию кадра (БЕЗ .copy())
                     distorted_frame = self._create_discrete_wave_effect(
-                        original_frame.copy(), wave_frame_idx)
+                        original_frame, wave_frame_idx)
                     if distorted_frame is not None:
                         self._gif_wave_frames_cache[cache_key] = distorted_frame
 
@@ -575,17 +566,19 @@ class Renderer:
             f"Precalculated wave frames: {len(self._wave_frames_cache)} static, {len(self._gif_wave_frames_cache)} GIF")
 
     def _create_discrete_wave_effect(self, image, frame_index):
-        """Создает дискретный эффект волны - разные искажения для разных frame_index"""
+        """Создает дискретный эффект волны - разные искажения для разных frame_index (без лишней копии)"""
         if image is None or image.shape[0] == 0 or image.shape[1] == 0:
             return image
 
         try:
-            # Конвертируем в numpy array для обработки
-            img_array = image.copy()
-            height, width = img_array.shape[:2]
+            height, width = image.shape[:2]
+            # Создаём пустой массив для результата (без копирования исходника)
+            distorted = np.zeros_like(image)
 
             if self.wave_num_frames <= 1 or frame_index == 0:
-                return img_array  # Нет искажения для первого кадра или если только 1 кадр
+                # Просто копируем исходник
+                distorted[:] = image
+                return distorted
 
             # Создаем сетку координат
             x_coords = np.arange(width)
@@ -641,16 +634,15 @@ class Renderer:
             new_x = np.clip(xx + dx, 0, width - 1).astype(np.int32)
             new_y = np.clip(yy + dy, 0, height - 1).astype(np.int32)
 
-            # Применяем искажение
-            distorted_array = np.zeros_like(img_array)
-            for c in range(img_array.shape[2]):
-                distorted_array[:, :, c] = img_array[new_y, new_x, c]
+            # Копируем пиксели из исходного изображения в искажённое (по каналам)
+            for c in range(image.shape[2]):
+                distorted[:, :, c] = image[new_y, new_x, c]
 
-            return distorted_array
+            return distorted
 
         except Exception as e:
             logger.error(f"Error creating discrete wave effect: {e}")
-            return image
+            return image.copy() if image is not None else None
 
     def set_audio_level(self, level):
         """Устанавливает уровень аудио с учетом noise gate"""
@@ -841,11 +833,14 @@ class Renderer:
         return frames[gif_info['current_frame']]
 
     def _render_frame(self):
-        """Рендерит один кадр с использованием OpenCV"""
-        # Создаем фон
-        frame = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+        """Рендерит один кадр с использованием OpenCV (оптимизированная версия)"""
+        # Используем переиспользуемый буфер
+        frame = self.frame_buffer
+        frame[:] = 0  # быстрое обнуление
 
-        # Получаем видимые слои
+        # Локальные переменные для ускорения доступа
+        height = self.height
+        width = self.width
         visible_layers = self._get_visible_layers()
 
         # Если нет видимых слоев, возвращаем пустой фон
@@ -861,6 +856,14 @@ class Renderer:
                 self._current_wave_frame = (
                     self._current_wave_frame + 1) % self.wave_num_frames
                 self._wave_frame_timer = now
+
+        # Кэшируем часто используемые эффекты
+        effects = self.effects
+        bounce_enabled = effects.get('bounce', False)
+        shake_enabled = effects.get('shake', False)
+        pulse_enabled = effects.get('pulse', False)
+
+        current_time = time.time()  # для анимаций
 
         # Рендерим каждый слой
         for layer_name in visible_layers:
@@ -891,15 +894,15 @@ class Renderer:
                     frames = gif_info['frames']
                     frame_times = gif_info['frame_times']
 
-                    current_time = time.time()
+                    current_time_gif = time.time()
 
                     # Проверяем, нужно ли переключить кадр GIF
                     if frames and frame_times:
-                        if current_time - last_update > frame_times[current_gif_frame]:
+                        if current_time_gif - last_update > frame_times[current_gif_frame]:
                             # Переходим к следующему кадру
                             new_frame = (current_gif_frame + 1) % len(frames)
                             gif_info['current_frame'] = new_frame
-                            gif_info['last_update'] = current_time
+                            gif_info['last_update'] = current_time_gif
                             current_gif_frame = new_frame  # Обновляем локальную переменную
 
                     # Применяем эффект волны если он включен
@@ -914,7 +917,7 @@ class Renderer:
                             original_frame = frames[current_gif_frame]
                             if original_frame is not None:
                                 image = self._create_discrete_wave_effect(
-                                    original_frame.copy(), self._current_wave_frame)
+                                    original_frame, self._current_wave_frame)  # БЕЗ .copy()
                                 # Сохраняем в кэш для будущего использования
                                 self._gif_wave_frames_cache[cache_key] = image
                     else:
@@ -937,7 +940,7 @@ class Renderer:
                         original_image = layer_info.get('image')
                         if original_image is not None:
                             image = self._create_discrete_wave_effect(
-                                original_image.copy(), self._current_wave_frame)
+                                original_image, self._current_wave_frame)  # БЕЗ .copy()
                 else:
                     image = layer_info.get('image')
 
@@ -950,21 +953,22 @@ class Renderer:
                 image[:, :, 3] = (image[:, :, 3] * alpha).astype(np.uint8)
 
             # Эффекты
-            bounce_intensity = 0
-            if self.effects.get('bounce', False):
-                bounce_intensity = int(
-                    math.sin(time.time() * 5) * min(10, self.audio_level * 20))
+            offset_x = 0
+            offset_y = 0
 
-            if self.effects.get('shake', False):
+            if bounce_enabled:
+                bounce_intensity = int(
+                    math.sin(current_time * 5) * min(10, self.audio_level * 20))
+                offset_y = bounce_intensity
+
+            if shake_enabled:
                 shake_intensity = min(1.0, self.audio_level * 5)
                 offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
-                offset_y = int((random.random() - 0.5) * 10 *
-                               shake_intensity) + bounce_intensity
-            else:
-                offset_x, offset_y = 0, bounce_intensity
+                offset_y += int((random.random() - 0.5) * 10 *
+                               shake_intensity)
 
-            if self.effects.get('pulse', False):
-                pulse_scale = 1.0 + (math.sin(time.time() * 5)
+            if pulse_enabled:
+                pulse_scale = 1.0 + (math.sin(current_time * 5)
                                      * 0.1 * self.audio_level)
                 new_size = (
                     int(image.shape[1] * pulse_scale), int(image.shape[0] * pulse_scale))
@@ -973,18 +977,18 @@ class Renderer:
                         image, new_size, interpolation=cv2.INTER_LINEAR)
 
             h, w = image.shape[:2]
-            px = (self.width - w) // 2 + x + offset_x
-            py = (self.height - h) // 2 + y + offset_y
+            px = (width - w) // 2 + x + offset_x
+            py = (height - h) // 2 + y + offset_y
 
             # Проверяем границы
-            if px + w <= 0 or px >= self.width or py + h <= 0 or py >= self.height:
+            if px + w <= 0 or px >= width or py + h <= 0 or py >= height:
                 continue
 
             # Определяем область перекрытия
             x1 = max(0, px)
             y1 = max(0, py)
-            x2 = min(self.width, px + w)
-            y2 = min(self.height, py + h)
+            x2 = min(width, px + w)
+            y2 = min(height, py + h)
 
             if x1 >= x2 or y1 >= y2:
                 continue
@@ -1003,7 +1007,7 @@ class Renderer:
                 overlay = image[sy1:sy2, sx1:sx2]
                 background = frame[y1:y2, x1:x2]
 
-                # Альфа-композитинг
+                # Альфа-композитинг (классический, проверенный вариант)
                 alpha_overlay = overlay[:, :, 3].astype(np.float32) / 255.0
                 alpha_background = background[:, :, 3].astype(
                     np.float32) / 255.0
@@ -1014,13 +1018,12 @@ class Renderer:
                 # Избегаем деления на ноль
                 alpha_out = np.maximum(alpha_out, 0.001)
 
-                # Комбинируем цвета
+                # Комбинируем цвета (цикл по каналам)
                 for c in range(3):  # RGB каналы
                     background[:, :, c] = (
-                        overlay[:, :, c] * alpha_overlay +
-                        background[:, :, c] *
-                        alpha_background * (1 - alpha_overlay)
-                    ) / alpha_out
+                        (overlay[:, :, c] * alpha_overlay +
+                         background[:, :, c] * alpha_background * (1 - alpha_overlay)) / alpha_out
+                    ).astype(np.uint8)
 
                 # Комбинируем альфа канал
                 background[:, :, 3] = (alpha_out * 255).astype(np.uint8)
