@@ -418,6 +418,9 @@ class Renderer:
         self._background = np.zeros(
             (self.height, self.width, 4), dtype=np.uint8)
 
+        # Пересоздаём буфер кадра под новый размер
+        self.frame_buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+
         # Загружаем слои
         for idx, layer in enumerate(self.model.get('layers', [])):
             filename = layer.get('file')
@@ -833,7 +836,7 @@ class Renderer:
         return frames[gif_info['current_frame']]
 
     def _render_frame(self):
-        """Рендерит один кадр с использованием OpenCV (оптимизированная версия)"""
+        """Рендерит один кадр с использованием OpenCV (исправленная версия с проверкой размеров)"""
         # Используем переиспользуемый буфер
         frame = self.frame_buffer
         frame[:] = 0  # быстрое обнуление
@@ -980,11 +983,8 @@ class Renderer:
             px = (width - w) // 2 + x + offset_x
             py = (height - h) // 2 + y + offset_y
 
-            # Проверяем границы
-            if px + w <= 0 or px >= width or py + h <= 0 or py >= height:
-                continue
-
-            # Определяем область перекрытия
+            # --- Исправленный блок вычисления пересечения ---
+            # Вычисляем область пересечения на холсте
             x1 = max(0, px)
             y1 = max(0, py)
             x2 = min(width, px + w)
@@ -993,19 +993,36 @@ class Renderer:
             if x1 >= x2 or y1 >= y2:
                 continue
 
-            # Координаты в исходном изображении
+            # Вычисляем соответствующие координаты в изображении
             sx1 = x1 - px
             sy1 = y1 - py
             sx2 = sx1 + (x2 - x1)
             sy2 = sy1 + (y2 - y1)
 
+            # Проверяем, что координаты в пределах изображения
             if sx1 < 0 or sy1 < 0 or sx2 > w or sy2 > h:
+                # Если вышли за границы (не должно случаться, но на всякий случай корректируем)
+                sx1 = max(0, sx1)
+                sy1 = max(0, sy1)
+                sx2 = min(w, sx2)
+                sy2 = min(h, sy2)
+                # Пересчитываем x2,y2 соответственно, чтобы они совпадали с размерами изображения
+                x2 = x1 + (sx2 - sx1)
+                y2 = y1 + (sy2 - sy1)
+
+            # Повторная проверка после корректировки
+            if sx1 >= sx2 or sy1 >= sy2:
                 continue
 
             try:
-                # Извлекаем области
                 overlay = image[sy1:sy2, sx1:sx2]
                 background = frame[y1:y2, x1:x2]
+
+                # Проверка совпадения размеров – если не совпадают, пропускаем слой
+                if overlay.shape != background.shape:
+                    logger.error(
+                        f"Shape mismatch: overlay {overlay.shape} vs background {background.shape} for layer {layer_name}")
+                    continue
 
                 # Альфа-композитинг (классический, проверенный вариант)
                 alpha_overlay = overlay[:, :, 3].astype(np.float32) / 255.0
