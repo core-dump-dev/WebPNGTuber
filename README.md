@@ -1,49 +1,49 @@
-# WebPNGTuber - Продвинутый редактор PNG-тюберов
+# WebPNGTuber - Advanced PNG Tuber Editor
 
-WebPNGTuber - это приложение с открытым исходным кодом для создания и управления PNG-тюбер моделями. Программа сочетает простоту использования с расширенным функционалом, позволяя создавать интерактивные аватары, реагирующие на ваш голос.
+WebPNGTuber is an open-source application for creating and managing PNG Tuber models. It combines ease of use with advanced functionality, allowing you to build interactive avatars that react to your voice.
 
-## ✨ Основные возможности
+## ✨ Key Features
 
-- 🎨 **Многослойный редактор**: Создавайте сложные модели из PNG и GIF изображений
-- 🔊 **Аудиореакции**: Настройка 4 уровней реакции (тишина, шепот, норма, крик)
-- 👁️ **Автоматическое моргание**: Реалистичная анимация глаз с настраиваемой частотой
-- 🌐 **Встроенный веб-сервер**: Трансляция для OBS через `http://localhost:6969`
-- ⚙️ **Продвинутые настройки**: Регулировка чувствительности, шумоподавление, эффекты
-- 💾 **Система слотов**: Сохранение до 6 моделей с превью
-- 🌑 **Idle-режим**: Автоматическое затемнение аватара при бездействии
+- 🎨 **Multi‑layer editor**: Build complex models from PNG and GIF images.
+- 🔊 **Audio reactions**: Configure 4 reaction levels (silence, whisper, normal, shout).
+- 👁️ **Automatic blinking**: Realistic eye animation with adjustable frequency.
+- 🌐 **Built‑in web server**: Stream to OBS via `http://localhost:6969`.
+- ⚙️ **Advanced settings**: Adjust sensitivity, noise reduction, effects.
+- 💾 **Slot system**: Save up to 6 models with previews.
+- 🌑 **Idle mode**: Automatically dim the avatar during inactivity.
 
-## Модель
+## Model
 
-Модель "Customizable Slugcat PNGTuber Model" предоставлена CurioKryptic (itch.io):
+The "Customizable Slugcat PNGTuber Model" is provided by CurioKryptic (itch.io):  
 [https://curiokryptic.itch.io/slugcat-pngtuber-model](https://curiokryptic.itch.io/slugcat-pngtuber-model)
 
-Условия: модель бесплатна для использования; используйте для тестов.
+Terms: the model is free to use; use it for testing.
 
-## 🚀 Быстрый старт
+## 🚀 Quick Start
 
-### Для пользователей Windows:
-1. Скачайте последнюю версию из [раздела Releases](https://github.com/core-dump-dev/WebPNGTuber/releases)
-2. Распакуйте архив в любую папку
-3. Запустите `WebPNGTuber.exe`
+### For Windows users:
+1. Download the latest version from the [Releases section](https://github.com/core-dump-dev/WebPNGTuber/releases).
+2. Extract the archive to any folder.
+3. Run `WebPNGTuber.exe`.
 
-### Для разработчиков:
+### For developers:
 ```bash
-# Клонировать репозиторий
+# Clone the repository
 git clone https://github.com/core-dump-dev/WebPNGTuber.git
 
-# Установить зависимости
+# Install dependencies
 pip install -r requirements.txt
 
-# Запустить приложение
+# Run the application
 python main.py
 ```
 
-## 🛠 Требования
-- Windows 7 или новее
-- Для разработки: Python 3.7+
+## 🛠 Requirements
+- Windows 7 or newer
+- For development: Python 3.7+
 
 <details>
-<summary>📦 Полный список зависимостей (requirements.txt)</summary>
+<summary>📦 Full list of dependencies (requirements.txt)</summary>
 
 ```txt
 Pillow==10.3.0
@@ -54,44 +54,44 @@ requests==2.31.0
 ```
 </details>
 
-## 🎥 Интеграция с OBS
-1. Запустите веб-сервер в программе
-2. В OBS добавьте новый источник "Браузер"
-3. Укажите URL: `http://localhost:6969`
-4. Установите размеры: 700x700 пикселей
+## 🎥 OBS Integration
+1. Start the web server inside the application.
+2. In OBS, add a new "Browser" source.
+3. Enter the URL: `http://localhost:6969`.
+4. Set the size to 700x700 pixels.
 
-## 🧩 Руководство пользователя
+## 🧩 User Guide
 
-### Создание модели
-1. Откройте редактор через главное окно
-2. Импортируйте PNG/GIF изображения
-3. Расположите слои в нужном порядке
-4. Настройте позицию, масштаб и поворот элементов
-5. Сгруппируйте связанные элементы (например, глаза)
-6. Настройте реакции на разные уровни громкости
-7. Сохраните модель в один из 6 слотов
+### Creating a model
+1. Open the editor from the main window.
+2. Import PNG/GIF images.
+3. Arrange the layers in the desired order.
+4. Adjust position, scale, and rotation of elements.
+5. Group related elements (e.g., eyes).
+6. Configure reactions for different volume levels.
+7. Save the model to one of the 6 slots.
 
-### Настройка эффектов
-- **Дрожание**: Легкое покачивание при громких звуках
-- **Прыжки**: Анимация подпрыгивания
-- **Пульсация**: Плавное изменение размера
-- **Idle-режим**: Затемнение при отсутствии звука
+### Configuring effects
+- **Shake**: Slight wobble on loud sounds.
+- **Bounce**: Hopping animation.
+- **Pulse**: Smooth size oscillation.
+- **Idle mode**: Dimming when no sound is detected.
 
-## ⚠️ Известные проблемы
+## ⚠️ Known Issues
 
-- **Закрытие основного окна при сохранении модели**  
-  После сохранения в редакторе не закрывайте его сразу - сначала проверьте модель в главном окне
-  
-- **Ограниченная поддержка GIF**  
-  Для анимаций используйте оптимизированные файлы
-  
-- **Задержка реакции на звук**  
-  Убедитесь, что выбрано правильное аудиоустройство в настройках
+- **Closing the main window while saving a model**  
+  After saving in the editor, do not close it immediately – first check the model in the main window.
 
-## 💡 Советы по созданию PNG-тюберов
+- **Limited GIF support**  
+  For animations, use optimized files.
 
-1. **Начните с простого**: Тело + рот + глаза
-2. **Используйте прозрачность**: PNG с прозрачным фоном выглядят лучше
-3. **Оптимизируйте GIF**: Уменьшите количество кадров и цветов
-4. **Экспериментируйте**: Пробуйте разные реакции для разных частей лица
-5. **Сохраняйтесь**: Регулярно сохраняйте работу в разные слоты
+- **Sound reaction delay**  
+  Make sure the correct audio device is selected in settings.
+
+## 💡 Tips for Creating PNG Tubers
+
+1. **Start simple**: Body + mouth + eyes.
+2. **Use transparency**: PNGs with transparent backgrounds look better.
+3. **Optimise GIFs**: Reduce the number of frames and colours.
+4. **Experiment**: Try different reactions for different parts of the face.
+5. **Save often**: Regularly save your work into different slots.
