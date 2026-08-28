@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image as PILImage
 from PIL import ImageSequence
+from locale_loader import tr
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -128,13 +129,13 @@ class Renderer:
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
-        logger.info("Renderer started")
+        logger.info(tr('renderer_started'))
 
     def stop(self):
         self._running = False
         if self._thread:
             self._thread.join(timeout=1.0)
-        logger.info("Renderer stopped")
+        logger.info(tr('renderer_stopped'))
 
     def _load_image_cv2(self, file_path, scale=1.0, rotation=0, flip_h=False, flip_v=False):
         """Загружает изображение с использованием PIL (поддержка Unicode) и преобразует в OpenCV."""
@@ -1120,7 +1121,7 @@ class Renderer:
                         self._frame_bytes = buffer.tobytes()
 
             except Exception as e:
-                logger.error(f"Error in rendering loop: {e}")
+                logger.error(tr('renderer_error', error=e))
                 # Создаем черный кадр в случае ошибки
                 error_frame = np.zeros(
                     (self.height, self.width, 4), dtype=np.uint8)
@@ -1139,7 +1140,7 @@ class Renderer:
                 last_fps_time = current_time
 
                 if fps < self.fps * 0.8:
-                    logger.warning(f"Low FPS: {fps}/{self.fps}")
+                    logger.warning(tr('renderer_low_fps', fps=fps, target=self.fps))
 
             # Контроль FPS
             frame_time = current_time - frame_start
@@ -1149,7 +1150,7 @@ class Renderer:
                 time.sleep(sleep_time)
             elif frame_time > target_frame_time * 1.5:
                 logger.warning(
-                    f"Frame render took {frame_time*1000:.2f}ms, target: {target_frame_time*1000:.2f}ms")
+                    tr('renderer_frame_time', time=frame_time*1000, target=target_frame_time*1000))
 
     def set_wave(self, enabled, amplitude=7.0, frequency=1.0, speed=3.0):
         """Включает/выключает эффект 'Волна' и устанавливает параметры"""
@@ -1180,4 +1181,5 @@ class Renderer:
             self._visible_layers_cache_time = 0
 
         logger.info(
-            f"Wave effect: enabled={enabled}, amplitude={amplitude}, frequency={frequency}, speed={speed}")
+            tr('effect_wave_enabled' if enabled else 'effect_wave_disabled',
+               amplitude=amplitude, frequency=frequency, speed=speed))

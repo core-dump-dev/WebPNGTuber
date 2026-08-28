@@ -15,7 +15,7 @@
   "sensitivity": 1.5,
   "noise_gate_enabled": true,
   "noise_gate_threshold": 0.01,
-  "mic_device": "",
+  "mic_device": "\ud83c\udfa4 \u041f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e (\u043c\u0438\u043a\u0440\u043e\u0444\u043e\u043d)",
   "idle_enabled": true,
   "idle_timeout": 5.0,
   "idle_fade_duration": 0.3,

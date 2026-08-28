@@ -7,6 +7,7 @@ import os
 from collections import deque
 import queue
 import platform
+from locale_loader import tr
 
 # Попытка импорта soundcard для поддержки Loopback (захват с динамиков)
 try:
@@ -67,7 +68,7 @@ def list_audio_devices(host_api_index=None):
                 default_sr = dev.get('default_samplerate', 44100)
                 devices.append({
                     'index': idx,
-                    'name': f"🎤 {dev.get('name', f'Mic {idx}')}",
+                    'name': f"{tr('audio_mic_prefix')}{dev.get('name', f'Mic {idx}')}",
                     'is_output': False,
                     'hostapi': api_idx,
                     'loopback_supported': False,
@@ -83,7 +84,7 @@ def list_audio_devices(host_api_index=None):
                     default_sr = dev.get('default_samplerate', 44100)
                     devices.append({
                         'index': idx,
-                        'name': f"🔊 {dev.get('name', f'Speaker {idx}')}",
+                        'name': f"{tr('audio_speaker_prefix')}{dev.get('name', f'Speaker {idx}')}",
                         'is_output': True,
                         'hostapi': api_idx,
                         'loopback_supported': True,
@@ -92,7 +93,7 @@ def list_audio_devices(host_api_index=None):
     except Exception as e:
         logger.error(f"Error listing audio devices: {e}")
 
-    devices.insert(0, {'index': None, 'name': '🎤 По умолчанию (микрофон)', 'is_output': False,
+    devices.insert(0, {'index': None, 'name': tr('audio_default_mic'), 'is_output': False,
                        'hostapi': None, 'loopback_supported': False, 'default_samplerate': 44100})
     return devices
 
@@ -131,8 +132,8 @@ class AudioProcessor:
         self.loopback = False
         self.samplerate = 44100
 
-        if self.device is None or self.device == "🎤 По умолчанию (микрофон)":
-            self.device = "🎤 По умолчанию (микрофон)"
+        if self.device is None or self.device == tr('audio_default_mic'):
+            self.device = tr('audio_default_mic')
             try:
                 default_input = sd.default.device[0]
                 if default_input is not None and default_input >= 0:
@@ -148,15 +149,15 @@ class AudioProcessor:
             self.device_index = self.device
         else:
             device_name = self.device
-            if device_name == "🎤 По умолчанию (микрофон)":
+            if device_name == tr('audio_default_mic'):
                 self.device_index = None
                 return
 
             clean_name = device_name
-            if clean_name.startswith("🎤 "):
-                clean_name = clean_name[2:]
-            elif clean_name.startswith("🔊 "):
-                clean_name = clean_name[2:]
+            if clean_name.startswith(tr('audio_mic_prefix')):
+                clean_name = clean_name[len(tr('audio_mic_prefix')):]
+            elif clean_name.startswith(tr('audio_speaker_prefix')):
+                clean_name = clean_name[len(tr('audio_speaker_prefix')):]
 
             try:
                 devices = sd.query_devices()
@@ -205,7 +206,7 @@ class AudioProcessor:
                 logger.warning(
                     f"Device {self.device_index} disconnected. Falling back to default.")
                 self.device_index = None
-                self.device = "🎤 По умолчанию (микрофон)"
+                self.device = tr('audio_default_mic')
                 self.is_output_device = False
                 self.loopback = False
                 self.samplerate = 44100
@@ -214,7 +215,7 @@ class AudioProcessor:
         """Устанавливает устройство через указание Host API и индекса."""
         self.host_api_index = host_api_index
         if device_index is None:
-            self.device = "🎤 По умолчанию (микрофон)"
+            self.device = tr('audio_default_mic')
             self.device_index = None
             self.is_output_device = False
             self.loopback = False
@@ -226,18 +227,18 @@ class AudioProcessor:
                 self.samplerate = int(dev_info.get(
                     'default_samplerate', 44100))
                 if is_output or (dev_info.get('max_output_channels', 0) > 0 and dev_info.get('max_input_channels', 0) == 0):
-                    self.device = f"🔊 {name}"
+                    self.device = f"{tr('audio_speaker_prefix')}{name}"
                     self.is_output_device = True
                     self.loopback = is_loopback_supported(
                         host_api_index) if host_api_index is not None else False
                 else:
-                    self.device = f"🎤 {name}"
+                    self.device = f"{tr('audio_mic_prefix')}{name}"
                     self.is_output_device = False
                     self.loopback = False
                 self.device_index = device_index
             except Exception as e:
                 logger.error(f"Error setting device: {e}")
-                self.device = "🎤 По умолчанию (микрофон)"
+                self.device = tr('audio_default_mic')
                 self.device_index = None
                 self.is_output_device = False
                 self.loopback = False
@@ -286,7 +287,7 @@ class AudioProcessor:
                 "Для захвата звука с динамиков (loopback) необходима библиотека 'soundcard'. Переключаюсь на микрофон по умолчанию.")
             self.loopback = False
             self.device_index = None
-            self.device = "🎤 По умолчанию (микрофон)"
+            self.device = tr('audio_default_mic')
             self._capture_loop_fallback()
             return
 
@@ -296,10 +297,10 @@ class AudioProcessor:
                 all_mics = sc.all_microphones(include_loopback=True)
                 target_mic = None
                 clean_name = self.device or ""
-                if clean_name.startswith("🔊 "):
-                    clean_name = clean_name[2:]
-                elif clean_name.startswith("🎤 "):
-                    clean_name = clean_name[2:]
+                if clean_name.startswith(tr('audio_speaker_prefix')):
+                    clean_name = clean_name[len(tr('audio_speaker_prefix')):]
+                elif clean_name.startswith(tr('audio_mic_prefix')):
+                    clean_name = clean_name[len(tr('audio_mic_prefix')):]
 
                 # Поиск устройства по имени
                 for mic in all_mics:

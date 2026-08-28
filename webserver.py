@@ -6,6 +6,7 @@ from flask import Flask, Response, send_from_directory
 import time
 import os
 import sys
+from locale_loader import tr
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -43,7 +44,7 @@ class WebServer:
 
         @self.app.route("/stream")
         def stream():
-            logger.info(f"Stream connection established on port {self.port}")
+            logger.info(tr('web_stream_connected', port=self.port))
             return Response(
                 self.mjpeg_generator(),
                 mimetype="multipart/x-mixed-replace; boundary=frame"
@@ -51,7 +52,7 @@ class WebServer:
 
         @self.app.route("/")
         def index():
-            logger.info(f"Index page requested on port {self.port}")
+            logger.info(tr('web_index_requested', port=self.port))
             return """<html>
 <head>
     <title>WebPNGTuber</title>
@@ -115,16 +116,15 @@ class WebServer:
                     threaded=True
                 )
                 self.is_running = True
-                logger.info(f"Web server starting on {self.host}:{self.port}")
+                logger.info(tr('web_server_starting', host=self.host, port=self.port))
                 self._server.serve_forever()
             except Exception as e:
-                logger.error(f"Web server error on port {self.port}: {e}")
+                logger.error(tr('web_server_error', port=self.port, error=e))
                 self.is_running = False
             finally:
                 if self._server:
                     self._server.server_close()
-                logger.info(
-                    f"Web server on port {self.port} stopped completely")
+                logger.info(tr('web_server_stopped'))
 
         self._thread = Thread(target=run, daemon=True)
         self._thread.start()
