@@ -18,6 +18,7 @@ import queue
 import weakref
 from functools import lru_cache
 import uuid
+from locale_loader import tr
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -272,7 +273,7 @@ class CanvasItem:
 class ModelEditor(tk.Toplevel):
     def __init__(self, master, on_save=None, device='По умолчанию', noise_gate_threshold=0.01, sensitivity=1.0, current_slot=None, renderer=None):
         super().__init__(master)
-        self.title("Редактор моделей")
+        self.title(tr('editor_title'))
         self.geometry("1400x800")
         self.on_save = on_save
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -394,7 +395,7 @@ class ModelEditor(tk.Toplevel):
 
         # ---- Левая панель ----
         # Имя модели
-        name_frame = ttk.LabelFrame(left, text="Имя модели")
+        name_frame = ttk.LabelFrame(left, text=tr('editor_model_name'))
         name_frame.pack(fill="x", pady=2)
 
         self.model_name_var = tk.StringVar(value="Без названия")
@@ -405,34 +406,34 @@ class ModelEditor(tk.Toplevel):
         # Панель с кнопками управления моделью
         button_row1 = ttk.Frame(left)
         button_row1.pack(fill="x", pady=2)
-        ttk.Button(button_row1, text="Новая", command=self.new_model, width=10).pack(
+        ttk.Button(button_row1, text=tr('editor_new'), command=self.new_model, width=10).pack(
             side="left", padx=1, fill="x", expand=True)
-        ttk.Button(button_row1, text="Загрузить", command=self.load_model,
+        ttk.Button(button_row1, text=tr('editor_load'), command=self.load_model,
                    width=10).pack(side="left", padx=1, fill="x", expand=True)
-        ttk.Button(button_row1, text="Сохранить", command=self.save_model,
+        ttk.Button(button_row1, text=tr('editor_save'), command=self.save_model,
                    width=10).pack(side="left", padx=1, fill="x", expand=True)
 
         button_row2 = ttk.Frame(left)
         button_row2.pack(fill="x", pady=2)
-        ttk.Button(button_row2, text="Импорт PNG/GIF", command=self.import_images,
+        ttk.Button(button_row2, text=tr('editor_import'), command=self.import_images,
                    width=15).pack(side="left", padx=1, fill="x", expand=True)
 
         button_row3 = ttk.Frame(left)
         button_row3.pack(fill="x", pady=2)
-        ttk.Button(button_row3, text="Экспорт ZIP", command=self.export_zip,
+        ttk.Button(button_row3, text=tr('editor_export_zip'), command=self.export_zip,
                    width=10).pack(side="left", padx=1, fill="x", expand=True)
-        ttk.Button(button_row3, text="Импорт ZIP", command=self.import_zip,
+        ttk.Button(button_row3, text=tr('editor_import_zip'), command=self.import_zip,
                    width=10).pack(side="left", padx=1, fill="x", expand=True)
 
         # Кнопка удаления модели
-        ttk.Button(left, text="Удалить модель",
+        ttk.Button(left, text=tr('editor_delete_model'),
                    command=self.delete_model).pack(fill="x", pady=2)
 
         # Настройки холста
-        canvas_frame = ttk.LabelFrame(left, text="Настройки холста")
+        canvas_frame = ttk.LabelFrame(left, text=tr('editor_canvas_settings'))
         canvas_frame.pack(fill="x", pady=10)
 
-        ttk.Label(canvas_frame, text="Ширина:").grid(
+        ttk.Label(canvas_frame, text=tr('editor_width')).grid(
             row=0, column=0, sticky="w", padx=2, pady=2)
         self.canvas_width_var = tk.IntVar(value=self.canvas_width)
         width_entry = ttk.Entry(
@@ -440,7 +441,7 @@ class ModelEditor(tk.Toplevel):
         width_entry.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
         width_entry.bind("<Return>", self.update_canvas_size)
 
-        ttk.Label(canvas_frame, text="Высота:").grid(
+        ttk.Label(canvas_frame, text=tr('editor_height')).grid(
             row=1, column=0, sticky="w", padx=2, pady=2)
         self.canvas_height_var = tk.IntVar(value=self.canvas_height)
         height_entry = ttk.Entry(
@@ -448,33 +449,33 @@ class ModelEditor(tk.Toplevel):
         height_entry.grid(row=1, column=1, sticky="ew", padx=2, pady=2)
         height_entry.bind("<Return>", self.update_canvas_size)
 
-        ttk.Button(canvas_frame, text="Применить", command=self.update_canvas_size).grid(
+        ttk.Button(canvas_frame, text=tr('editor_apply'), command=self.update_canvas_size).grid(
             row=2, column=0, columnspan=2, pady=5)
 
         # Управление зумом
         zoom_frame = ttk.Frame(canvas_frame)
         zoom_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
-        ttk.Button(zoom_frame, text="+", width=3,
+        ttk.Button(zoom_frame, text=tr('editor_zoom_in'), width=3,
                    command=self.zoom_in).pack(side="left", padx=2)
-        ttk.Button(zoom_frame, text="-", width=3,
+        ttk.Button(zoom_frame, text=tr('editor_zoom_out'), width=3,
                    command=self.zoom_out).pack(side="left", padx=2)
-        ttk.Button(zoom_frame, text="Сброс", width=6,
+        ttk.Button(zoom_frame, text=tr('editor_zoom_reset'), width=6,
                    command=self.zoom_reset).pack(side="left", padx=2)
 
         # Режим тестирования
-        test_frame = ttk.LabelFrame(left, text="Режим тестирования")
+        test_frame = ttk.LabelFrame(left, text=tr('editor_test_mode'))
         test_frame.pack(fill="x", pady=10)
 
         self.test_mode_var = tk.StringVar(value="none")
-        ttk.Radiobutton(test_frame, text="Микрофон", variable=self.test_mode_var,
+        ttk.Radiobutton(test_frame, text=tr('editor_microphone'), variable=self.test_mode_var,
                         value="microphone", command=self.update_test_mode).pack(anchor="w")
-        ttk.Radiobutton(test_frame, text="Выкл", variable=self.test_mode_var,
+        ttk.Radiobutton(test_frame, text=tr('editor_off'), variable=self.test_mode_var,
                         value="none", command=self.update_test_mode).pack(anchor="w")
 
         # Индикатор уровня
         self.level_frame = ttk.Frame(test_frame)
         self.level_frame.pack(fill="x", pady=5)
-        ttk.Label(self.level_frame, text="Уровень:").pack(side="left")
+        ttk.Label(self.level_frame, text=tr('editor_level')).pack(side="left")
         self.level_bar = ttk.Progressbar(
             self.level_frame, length=200, mode="determinate")
         self.level_bar.pack(side="left", fill="x", expand=True, padx=5)
@@ -487,7 +488,7 @@ class ModelEditor(tk.Toplevel):
         self.audio_processor.noise_gate_threshold = self.mic_noise_gate_threshold
         self.audio_processor.set_sensitivity(self.mic_sensitivity)
 
-        ttk.Label(left, text="Импортированные изображения:").pack(
+        ttk.Label(left, text=tr('editor_imported')).pack(
             anchor="w", pady=(8, 0))
 
         # Список импортированных изображений
@@ -511,14 +512,14 @@ class ModelEditor(tk.Toplevel):
         preview_header = ttk.Frame(center)
         preview_header.pack(fill="x", padx=5, pady=(0, 5))
 
-        ttk.Label(preview_header, text="Предпросмотр", font=(
+        ttk.Label(preview_header, text=tr('editor_preview'), font=(
             "Arial", 10, "bold")).pack(side="left", padx=(0, 10))
 
         # Кнопки отмены/повтора
-        undo_btn = ttk.Button(preview_header, text="←",
+        undo_btn = ttk.Button(preview_header, text=tr('editor_undo'),
                               width=2, command=self.undo)
         undo_btn.pack(side="left", padx=2)
-        redo_btn = ttk.Button(preview_header, text="→",
+        redo_btn = ttk.Button(preview_header, text=tr('editor_redo'),
                               width=2, command=self.redo)
         redo_btn.pack(side="left", padx=2)
 
@@ -550,18 +551,18 @@ class ModelEditor(tk.Toplevel):
 
         # Вкладка 1: Управление элементами
         items_tab = ttk.Frame(notebook)
-        notebook.add(items_tab, text="Элементы")
+        notebook.add(items_tab, text=tr('editor_items'))
 
         # Вкладка 2: Логика групп
         groups_tab = ttk.Frame(notebook)
-        notebook.add(groups_tab, text="Логика групп")
+        notebook.add(groups_tab, text=tr('editor_groups'))
 
         # Вкладка 3: Состояния рта (НОВАЯ)
         mouth_states_tab = ttk.Frame(notebook)
-        notebook.add(mouth_states_tab, text="Состояния рта")
+        notebook.add(mouth_states_tab, text=tr('editor_mouth_states'))
 
         # ---- Вкладка "Элементы" ----
-        items_frame = ttk.LabelFrame(items_tab, text="Элементы холста")
+        items_frame = ttk.LabelFrame(items_tab, text=tr('editor_canvas_items'))
         items_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Древовидный список элементов
@@ -581,57 +582,57 @@ class ModelEditor(tk.Toplevel):
         # Кнопки управления
         btns_frame = ttk.Frame(items_frame)
         btns_frame.pack(fill="x", pady=(0, 10))
-        ttk.Button(btns_frame, text="↑", width=3,
+        ttk.Button(btns_frame, text=tr('editor_bring_forward'), width=3,
                    command=self.bring_forward).pack(side="left", padx=2)
-        ttk.Button(btns_frame, text="↓", width=3,
+        ttk.Button(btns_frame, text=tr('editor_send_backward'), width=3,
                    command=self.send_backward).pack(side="left", padx=2)
-        ttk.Button(btns_frame, text="Группа", command=self.group_selected).pack(
+        ttk.Button(btns_frame, text=tr('editor_group'), command=self.group_selected).pack(
             side="left", padx=2, fill="x", expand=True)
-        ttk.Button(btns_frame, text="Разгруппировать", command=self.ungroup_selected).pack(
+        ttk.Button(btns_frame, text=tr('editor_ungroup'), command=self.ungroup_selected).pack(
             side="left", padx=2, fill="x", expand=True)
 
         # Свойства элемента
-        props = ttk.LabelFrame(items_frame, text="Свойства элемента")
+        props = ttk.LabelFrame(items_frame, text=tr('editor_item_props'))
         props.pack(fill="x", pady=(0, 5))
 
         grid_frame = ttk.Frame(props)
         grid_frame.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(grid_frame, text="Имя:").grid(
+        ttk.Label(grid_frame, text=tr('editor_name')).grid(
             row=0, column=0, sticky="w", padx=2, pady=2)
         self.name_entry = ttk.Entry(grid_frame)
         self.name_entry.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
         self.name_entry.bind("<FocusIn>", lambda e: "break")
 
-        ttk.Label(grid_frame, text="X:").grid(
+        ttk.Label(grid_frame, text=tr('editor_x')).grid(
             row=1, column=0, sticky="w", padx=2, pady=2)
         self.x_entry = ttk.Entry(grid_frame)
         self.x_entry.grid(row=1, column=1, sticky="ew", padx=2, pady=2)
         self.x_entry.bind("<Return>", self.apply_props_from_entry)
         self.x_entry.bind("<FocusIn>", lambda e: "break")
 
-        ttk.Label(grid_frame, text="Y:").grid(
+        ttk.Label(grid_frame, text=tr('editor_y')).grid(
             row=2, column=0, sticky="w", padx=2, pady=2)
         self.y_entry = ttk.Entry(grid_frame)
         self.y_entry.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
         self.y_entry.bind("<Return>", self.apply_props_from_entry)
         self.y_entry.bind("<FocusIn>", lambda e: "break")
 
-        ttk.Label(grid_frame, text="Масштаб:").grid(
+        ttk.Label(grid_frame, text=tr('editor_scale')).grid(
             row=3, column=0, sticky="w", padx=2, pady=2)
         self.scale_entry = ttk.Entry(grid_frame)
         self.scale_entry.grid(row=3, column=1, sticky="ew", padx=2, pady=2)
         self.scale_entry.bind("<Return>", self.apply_props_from_entry)
         self.scale_entry.bind("<FocusIn>", lambda e: "break")
 
-        ttk.Label(grid_frame, text="Поворот:").grid(
+        ttk.Label(grid_frame, text=tr('editor_rotation')).grid(
             row=4, column=0, sticky="w", padx=2, pady=2)
         self.rotation_entry = ttk.Entry(grid_frame)
         self.rotation_entry.grid(row=4, column=1, sticky="ew", padx=2, pady=2)
         self.rotation_entry.bind("<Return>", self.apply_props_from_entry)
         self.rotation_entry.bind("<FocusIn>", lambda e: "break")
 
-        ttk.Label(grid_frame, text="Прозрачность:").grid(
+        ttk.Label(grid_frame, text=tr('editor_alpha')).grid(
             row=5, column=0, sticky="w", padx=2, pady=2)
         self.alpha_entry = ttk.Entry(grid_frame)
         self.alpha_entry.grid(row=5, column=1, sticky="ew", padx=2, pady=2)
@@ -641,43 +642,44 @@ class ModelEditor(tk.Toplevel):
         # Зеркалирование
         mirror_frame = ttk.Frame(props)
         mirror_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(mirror_frame, text="Зеркалирование:").pack(side="left")
+        ttk.Label(mirror_frame, text=tr('editor_mirror')).pack(side="left")
         self.flip_h_var = tk.BooleanVar(value=False)
         self.flip_v_var = tk.BooleanVar(value=False)
-        self.flip_h_cb = ttk.Checkbutton(mirror_frame, text="Гор.", variable=self.flip_h_var,
+        self.flip_h_cb = ttk.Checkbutton(mirror_frame, text=tr('editor_mirror_h'), variable=self.flip_h_var,
                                          command=self.on_mirror_change)
         self.flip_h_cb.pack(side="left", padx=5)
-        self.flip_v_cb = ttk.Checkbutton(mirror_frame, text="Верт.", variable=self.flip_v_var,
+        self.flip_v_cb = ttk.Checkbutton(mirror_frame, text=tr('editor_mirror_v'), variable=self.flip_v_var,
                                          command=self.on_mirror_change)
         self.flip_v_cb.pack(side="left", padx=5)
 
         # ВИДИМОСТЬ
         self.visible_var = tk.BooleanVar(value=True)
-        self.visible_cb = ttk.Checkbutton(props, text="Видимый", variable=self.visible_var,
+        self.visible_cb = ttk.Checkbutton(props, text=tr('editor_visible'), variable=self.visible_var,
                                           command=self.on_visible_change)
         self.visible_cb.pack(anchor="w", padx=5, pady=(0, 5))
 
-        ttk.Button(props, text="Применить к выбранному",
+        ttk.Button(props, text=tr('editor_apply_props'),
                    command=self.apply_props).pack(fill="x", padx=5, pady=5)
-        ttk.Button(props, text="- Удалить выбранные",
+        ttk.Button(props, text=tr('editor_delete_selected'),
                    command=self.delete_selected_items).pack(fill="x", padx=5, pady=5)
 
         # ---- Вкладка "Логика групп" ----
-        groups_frame = ttk.LabelFrame(groups_tab, text="Логика групп")
+        groups_frame = ttk.LabelFrame(
+            groups_tab, text=tr('editor_group_logic'))
         groups_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Выбранная группа
         group_info_frame = ttk.Frame(groups_frame)
         group_info_frame.pack(fill="x", pady=(0, 10))
-        ttk.Label(group_info_frame, text="Выбранная группа:").pack(
+        ttk.Label(group_info_frame, text=tr('editor_selected_group')).pack(
             side="left", padx=(0, 5))
         self.group_label = ttk.Label(
-            group_info_frame, text="(нет группы)", font=("Arial", 9, "bold"))
+            group_info_frame, text=tr('editor_no_group'), font=("Arial", 9, "bold"))
         self.group_label.pack(side="left")
 
         # Настройки логики
         logic_frame = ttk.LabelFrame(
-            groups_frame, text="Состояния → Слой/Группа")
+            groups_frame, text=tr('editor_state_to_layer'))
         logic_frame.pack(fill="x", pady=(0, 10))
 
         # Словарь для переменных состояний будет заполнен динамически
@@ -688,32 +690,37 @@ class ModelEditor(tk.Toplevel):
         self.logic_content_frame.pack(fill="x", padx=5, pady=5)
 
         # Случайный эффект
-        random_frame = ttk.LabelFrame(groups_tab, text="Случайный эффект")
+        random_frame = ttk.LabelFrame(
+            groups_tab, text=tr('editor_random_effect'))
         random_frame.pack(fill="x", pady=(0, 10))
 
         self.random_effect_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(random_frame, text="Случайная смена состояний",
+        ttk.Checkbutton(random_frame, text=tr('editor_random_effect'),
                         variable=self.random_effect_var).pack(anchor="w", padx=5, pady=2)
 
         interval_frame = ttk.Frame(random_frame)
         interval_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(interval_frame, text="Интервал:").pack(side="left")
+        ttk.Label(interval_frame, text=tr(
+            'editor_random_interval')).pack(side="left")
         self.random_min_var = tk.DoubleVar(value=5.0)
         ttk.Entry(interval_frame, textvariable=self.random_min_var,
                   width=5).pack(side="left", padx=2)
-        ttk.Label(interval_frame, text="до").pack(side="left")
+        ttk.Label(interval_frame, text=tr(
+            'editor_random_to')).pack(side="left")
         self.random_max_var = tk.DoubleVar(value=10.0)
         ttk.Entry(interval_frame, textvariable=self.random_max_var,
                   width=5).pack(side="left", padx=2)
-        ttk.Label(interval_frame, text="сек").pack(side="left")
+        ttk.Label(interval_frame, text=tr(
+            'editor_random_seconds')).pack(side="left")
 
         # Настройки моргания
-        blink_frame = ttk.LabelFrame(groups_tab, text="Настройки моргания")
+        blink_frame = ttk.LabelFrame(
+            groups_tab, text=tr('editor_blink_settings'))
         blink_frame.pack(fill="x", pady=(0, 10))
 
         freq_frame = ttk.Frame(blink_frame)
         freq_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(freq_frame, text="Частота:").pack(side="left")
+        ttk.Label(freq_frame, text=tr('editor_blink_freq')).pack(side="left")
         self.blink_freq = tk.DoubleVar(value=0.0)
         self.blink_freq_entry = ttk.Entry(
             freq_frame, width=6, textvariable=self.blink_freq)
@@ -723,13 +730,13 @@ class ModelEditor(tk.Toplevel):
 
         btn_frame = ttk.Frame(blink_frame)
         btn_frame.pack(fill="x", padx=5, pady=(0, 5))
-        ttk.Button(btn_frame, text="Превью", width=8,
+        ttk.Button(btn_frame, text=tr('editor_blink_preview'), width=8,
                    command=self.show_blink_preview).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="Стоп", command=self.stop_blink_preview).pack(
+        ttk.Button(btn_frame, text=tr('editor_blink_stop'), command=self.stop_blink_preview).pack(
             side="left", padx=2)
 
         # Кнопка применения
-        ttk.Button(groups_frame, text="Применить логику",
+        ttk.Button(groups_frame, text=tr('editor_apply_logic'),
                    command=self.apply_group_logic).pack(fill="x", pady=10)
 
         # ---- Вкладка "Состояния рта" (НОВАЯ) ----
@@ -746,16 +753,16 @@ class ModelEditor(tk.Toplevel):
         main_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Заголовок
-        ttk.Label(main_frame, text="Управление состояниями рта (макс. 10)", font=(
+        ttk.Label(main_frame, text=tr('editor_mouth_states_manage'), font=(
             "Arial", 9, "bold")).pack(anchor="w", pady=(0, 5))
 
         # Верхняя панель с кнопками
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill="x", pady=(0, 5))
 
-        ttk.Button(btn_frame, text="+ Добавить", width=12,
+        ttk.Button(btn_frame, text=tr('editor_add_state'), width=12,
                    command=self.add_mouth_state).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="- Удалить", width=8,
+        ttk.Button(btn_frame, text=tr('editor_delete_state'), width=8,
                    command=self.delete_mouth_state).pack(side="left", padx=2)
 
         # Панель со списком состояний
@@ -766,9 +773,9 @@ class ModelEditor(tk.Toplevel):
         columns = ('#1', '#2', '#3')
         self.states_tree = ttk.Treeview(
             list_frame, columns=columns, show='headings', height=8)
-        self.states_tree.heading('#1', text='Название')
-        self.states_tree.heading('#2', text='Порог')
-        self.states_tree.heading('#3', text='Активно')
+        self.states_tree.heading('#1', text=tr('editor_state_name'))
+        self.states_tree.heading('#2', text=tr('editor_state_threshold'))
+        self.states_tree.heading('#3', text=tr('editor_state_active'))
         self.states_tree.column('#1', width=120, anchor='w')
         self.states_tree.column('#2', width=60, anchor='center')
         self.states_tree.column('#3', width=60, anchor='center')
@@ -782,22 +789,22 @@ class ModelEditor(tk.Toplevel):
         self.states_tree.bind('<<TreeviewSelect>>', self.on_mouth_state_select)
 
         # Панель свойств выбранного состояния
-        props_frame = ttk.LabelFrame(main_frame, text="Свойства состояния")
+        props_frame = ttk.LabelFrame(main_frame, text=tr('editor_state_props'))
         props_frame.pack(fill="x", pady=(0, 5))
 
         props_grid = ttk.Frame(props_frame)
         props_grid.pack(fill="x", padx=5, pady=5)
 
         # Название
-        ttk.Label(props_grid, text="Название:").grid(
+        ttk.Label(props_grid, text=tr('editor_state_name')).grid(
             row=0, column=0, sticky="w", padx=2, pady=2)
         self.state_name_entry = ttk.Entry(props_grid, width=20)
         self.state_name_entry.grid(
             row=0, column=1, sticky="ew", padx=2, pady=2)
 
         # Порог
-        ttk.Label(props_grid, text="Порог (0.0-1.0):").grid(row=1,
-                                                            column=0, sticky="w", padx=2, pady=2)
+        ttk.Label(props_grid, text=tr('editor_state_threshold')).grid(row=1,
+                                                                      column=0, sticky="w", padx=2, pady=2)
         self.state_threshold_var = tk.DoubleVar(value=0.0)
         self.state_threshold_entry = ttk.Entry(
             props_grid, textvariable=self.state_threshold_var, width=8)
@@ -806,15 +813,15 @@ class ModelEditor(tk.Toplevel):
 
         # Активно
         self.state_active_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(props_grid, text="Активно", variable=self.state_active_var).grid(
+        ttk.Checkbutton(props_grid, text=tr('editor_state_active'), variable=self.state_active_var).grid(
             row=2, column=0, columnspan=2, sticky="w", padx=2, pady=2)
 
         # Кнопка "Применить"
-        ttk.Button(props_grid, text="Применить к выбранному", command=self.apply_mouth_state_props).grid(
+        ttk.Button(props_grid, text=tr('editor_state_apply'), command=self.apply_mouth_state_props).grid(
             row=3, column=0, columnspan=2, pady=5, sticky="ew")
 
         # Кнопка "Авто-распределить пороги"
-        ttk.Button(main_frame, text="🔄 Авто-распределить пороги",
+        ttk.Button(main_frame, text=tr('editor_auto_thresholds'),
                    command=self.auto_distribute_thresholds).pack(fill="x", pady=5)
 
         # Обновляем список состояний
@@ -864,7 +871,7 @@ class ModelEditor(tk.Toplevel):
         # Добавляем отдельные меню для blink и open
         row_blink = ttk.Frame(self.logic_content_frame)
         row_blink.pack(fill="x", padx=2, pady=2)
-        ttk.Label(row_blink, text="Моргание (blink):",
+        ttk.Label(row_blink, text=tr('editor_blink_settings') + " (blink):",
                   width=15).pack(side="left")
         self.blink_var = tk.StringVar(value="")
         blink_om = ttk.OptionMenu(row_blink, self.blink_var, "")
@@ -897,7 +904,7 @@ class ModelEditor(tk.Toplevel):
         """Применяет свойства к выбранному состоянию"""
         selection = self.states_tree.selection()
         if not selection:
-            messagebox.showwarning("Нет выбора", "Выберите состояние")
+            messagebox.showwarning(tr('warning'), tr('editor_no_group'))
             return
 
         idx = int(selection[0])
@@ -913,7 +920,8 @@ class ModelEditor(tk.Toplevel):
                 threshold = max(0.0, min(1.0, threshold))
                 self.mouth_states[idx]['threshold'] = threshold
             except:
-                messagebox.showwarning("Ошибка", "Порог должен быть числом")
+                messagebox.showwarning(
+                    tr('warning'), tr('editor_state_threshold'))
                 return
 
             # Активность
@@ -927,7 +935,8 @@ class ModelEditor(tk.Toplevel):
     def add_mouth_state(self):
         """Добавляет новое состояние рта (макс. 10)"""
         if len(self.mouth_states) >= 10:
-            messagebox.showwarning("Лимит", "Достигнут лимит в 10 состояний")
+            messagebox.showwarning(tr('warning'), tr(
+                'editor_mouth_states_manage'))
             return
 
         # Генерируем уникальное имя
@@ -958,17 +967,17 @@ class ModelEditor(tk.Toplevel):
         """Удаляет выбранное состояние рта"""
         selection = self.states_tree.selection()
         if not selection:
-            messagebox.showwarning("Нет выбора", "Выберите состояние")
+            messagebox.showwarning(tr('warning'), tr('editor_no_group'))
             return
 
         if len(self.mouth_states) <= 1:
             messagebox.showwarning(
-                "Нельзя удалить", "Должно быть хотя бы одно состояние")
+                tr('warning'), tr('editor_empty'))
             return
 
         idx = int(selection[0])
         confirm = messagebox.askyesno(
-            "Удаление", f"Удалить состояние '{self.mouth_states[idx]['name']}'?")
+            tr('delete_confirm_title'), f"Удалить состояние '{self.mouth_states[idx]['name']}'?")
         if not confirm:
             return
 
@@ -1323,7 +1332,7 @@ class ModelEditor(tk.Toplevel):
         """Удаление текущей модели"""
         if not self.model_dir:
             messagebox.showwarning(
-                "Нет модели", "Нет загруженной модели для удаления")
+                tr('warning'), tr('no_model'))
             return
 
         slot_info = ""
@@ -1331,9 +1340,8 @@ class ModelEditor(tk.Toplevel):
             slot_info = f" из слота {self.original_slot}"
 
         confirm = messagebox.askyesno(
-            "Удаление модели",
-            f"Вы уверены, что хотите удалить модель{slot_info}?\n\n"
-            "Это действие нельзя отменить!"
+            tr('delete_confirm_title'),
+            f"{tr('delete_confirm', slot=slot_info)}\n\n{tr('delete_confirm')}"
         )
 
         if not confirm:
@@ -1380,11 +1388,12 @@ class ModelEditor(tk.Toplevel):
             if hasattr(self.master, 'app') and hasattr(self.master.app, 'refresh_slot_buttons'):
                 self.master.app.refresh_slot_buttons()
 
-            messagebox.showinfo("Модель удалена", f"Модель удалена{slot_info}")
+            messagebox.showinfo(tr('model_deleted'), tr(
+                'delete_success', slot=slot_info))
 
         except Exception as e:
             logger.error(f"Error deleting model: {e}")
-            messagebox.showerror("Ошибка", f"Не удалось удалить модель: {e}")
+            messagebox.showerror(tr('error'), tr('delete_error', error=e))
 
     def export_zip(self):
         """Экспорт модели в ZIP архив с выбором места сохранения"""
@@ -1392,18 +1401,18 @@ class ModelEditor(tk.Toplevel):
             from utils import export_model_zip
         except Exception as e:
             messagebox.showerror(
-                "Ошибка экспорта", f"Не удалось импортировать утилиту экспорта: {e}")
+                tr('error'), tr('zip_export_error', error=e))
             logger.error(f"Error importing export utility: {e}")
             return
 
         if not self.model:
             messagebox.showwarning(
-                "Нет модели", "Сначала создайте или загрузите модель")
+                tr('warning'), tr('no_model'))
             return
 
         default_name = f"{self.model.get('name', 'model').replace(' ', '_')}.zip"
         zip_path = filedialog.asksaveasfilename(
-            title="Сохранить модель как ZIP",
+            title=tr('editor_export_zip'),
             defaultextension=".zip",
             filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*.*")],
             initialfile=default_name
@@ -1457,7 +1466,7 @@ class ModelEditor(tk.Toplevel):
                 export_model_zip(model_data, temp_dir, zip_path)
 
             messagebox.showinfo(
-                "Экспортировано", f"Модель экспортирована:\n{zip_path}")
+                tr('info'), tr('exported_zip', path=zip_path))
             logger.info(f"Model exported to: {zip_path}")
 
         except Exception as e:
@@ -1467,7 +1476,7 @@ class ModelEditor(tk.Toplevel):
                 f.write(tb)
 
             messagebox.showerror(
-                "Ошибка экспорта", f"Ошибка при экспорте: {e}. Смотри export_zip_error.log")
+                tr('error'), tr('zip_export_error', error=e))
             logger.error(f"Error exporting model: {e}\n{tb}")
 
     def _create_preview_for_export(self, temp_dir, preview_path):
@@ -1527,7 +1536,7 @@ class ModelEditor(tk.Toplevel):
             from utils import import_model_zip
 
             zip_path = filedialog.askopenfilename(
-                title="Выберите ZIP архив с моделью",
+                title=tr('editor_import_zip'),
                 filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*.*")]
             )
 
@@ -1619,19 +1628,19 @@ class ModelEditor(tk.Toplevel):
                 self.cleanup_old_temp_folders()
 
                 messagebox.showinfo(
-                    "Импорт завершен", f"Модель успешно импортирована из:\n{os.path.basename(zip_path)}")
+                    tr('info'), tr('imported_zip', path=os.path.basename(zip_path)))
                 logger.info(f"Model imported from ZIP: {zip_path}")
 
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
                 messagebox.showerror(
-                    "Ошибка импорта", f"Ошибка при импорте модели: {e}")
+                    tr('error'), tr('zip_import_error', error=e))
                 logger.error(f"Error importing model from ZIP: {e}\n{tb}")
 
         except Exception as e:
             messagebox.showerror(
-                "Ошибка импорта", f"Не удалось импортировать утилиту импорта: {e}")
+                tr('error'), tr('zip_import_error', error=e))
             logger.error(f"Error importing import utility: {e}")
             return
 
@@ -1792,17 +1801,18 @@ class ModelEditor(tk.Toplevel):
     def group_selected(self):
         """Создает группу из выбранных элементов"""
         if not self.current_selection:
-            messagebox.showwarning("Группа", "Выберите хотя бы один элемент")
+            messagebox.showwarning(tr('warning'), tr('editor_group'))
             return
 
         name = simpledialog.askstring(
-            "Имя группы", "Введите имя новой группы", parent=self)
+            tr('editor_group'), tr('editor_name'), parent=self)
         if not name:
             return
 
         existing = [g.get("name") for g in self.model.get("groups", [])]
         if name in existing:
-            messagebox.showwarning("Группа", "Имя группы уже существует")
+            messagebox.showwarning(
+                tr('warning'), tr('group_created', name=name))
             return
 
         # Определяем родительскую группу (если все выбранные элементы из одной группы)
@@ -1858,8 +1868,8 @@ class ModelEditor(tk.Toplevel):
         self._canvas_cache_valid = False
         self.redraw_canvas()
 
-        logger.info(f"Created new group: {name} with parent {parent_group}")
-        self.save_to_history("Создание группы")
+        logger.info(tr('group_created', name=name))
+        self.save_to_history(tr('group_created', name=name))
 
     def _save_tree_state(self):
         """Сохраняет состояние дерева"""
@@ -2090,7 +2100,7 @@ class ModelEditor(tk.Toplevel):
                 c.layer["_selected"] = False
 
             if not selection:
-                self.group_label.config(text="(нет группы)")
+                self.group_label.config(text=tr('editor_no_group'))
                 self.clear_props_fields()
                 self._canvas_cache_valid = False
                 self.redraw_canvas()
@@ -2129,7 +2139,7 @@ class ModelEditor(tk.Toplevel):
                 self.load_group_settings(self.selected_group)
             else:
                 self.selected_group = None
-                self.group_label.config(text="(нет группы)")
+                self.group_label.config(text=tr('editor_no_group'))
                 if self.current_selection:
                     self.load_item_props(self.current_selection[0])
                 else:
@@ -2165,7 +2175,7 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
 
         logger.info("Brought selection forward")
-        self.save_to_history("Перемещение вперед")
+        self.save_to_history(tr('editor_bring_forward'))
 
     def send_backward(self):
         """Перемещает выделенные элементы назад"""
@@ -2191,16 +2201,16 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
 
         logger.info("Sent selection backward")
-        self.save_to_history("Перемещение назад")
+        self.save_to_history(tr('editor_send_backward'))
 
     def delete_selected_items(self):
         """Удаляет выбранные элементы с холста"""
         if not self.current_selection:
-            messagebox.showwarning("Нет выбора", "Сначала выберите элемент(ы)")
+            messagebox.showwarning(tr('warning'), tr('editor_delete_selected'))
             return
 
         confirm = messagebox.askyesno(
-            "Удаление элементов",
+            tr('delete_confirm_title'),
             f"Вы уверены, что хотите удалить {len(self.current_selection)} выбранных элементов?"
         )
 
@@ -2240,7 +2250,7 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
 
         logger.info(f"Deleted {len(items_to_remove)} selected items")
-        self.save_to_history("Удаление выбранных элементов")
+        self.save_to_history(tr('editor_delete_selected'))
 
     def update_group_logic_menus(self, group_name):
         """Обновляет меню логики группы - динамически на основе состояний рта"""
@@ -2290,7 +2300,7 @@ class ModelEditor(tk.Toplevel):
 
                 # Добавляем пустую опцию
                 menu.add_command(
-                    label="(нет)",
+                    label=tr('editor_empty'),
                     command=lambda v=self.state_vars[state_key], val="": v.set(
                         val)
                 )
@@ -2309,7 +2319,7 @@ class ModelEditor(tk.Toplevel):
             menu = blink_menu_widget['menu']
             menu.delete(0, 'end')
             menu.add_command(
-                label="(нет)", command=lambda v=self.blink_var, val="": v.set(val))
+                label=tr('editor_empty'), command=lambda v=self.blink_var, val="": v.set(val))
             for display_name, real_name, item_type in all_items:
                 menu.add_command(
                     label=display_name, command=lambda v=self.blink_var, val=real_name: v.set(val))
@@ -2320,7 +2330,7 @@ class ModelEditor(tk.Toplevel):
             menu = open_menu_widget['menu']
             menu.delete(0, 'end')
             menu.add_command(
-                label="(нет)", command=lambda v=self.open_var, val="": v.set(val))
+                label=tr('editor_empty'), command=lambda v=self.open_var, val="": v.set(val))
             for display_name, real_name, item_type in all_items:
                 menu.add_command(
                     label=display_name, command=lambda v=self.open_var, val=real_name: v.set(val))
@@ -2331,7 +2341,7 @@ class ModelEditor(tk.Toplevel):
     def apply_group_logic(self):
         """Применяет логику группы"""
         if not self.selected_group:
-            messagebox.showwarning("Нет группы", "Сначала выберите группу")
+            messagebox.showwarning(tr('warning'), tr('editor_group_logic'))
             return
 
         group_name = self.selected_group
@@ -2343,7 +2353,8 @@ class ModelEditor(tk.Toplevel):
                 break
 
         if not group:
-            messagebox.showerror("Ошибка", "Группа не найдена")
+            messagebox.showerror(tr('error'), tr(
+                'group_deleted', name=group_name))
             return
 
         # Сохраняем логику состояний рта
@@ -2383,7 +2394,7 @@ class ModelEditor(tk.Toplevel):
         self.tree_state["preserve_selection"] = True
 
         messagebox.showinfo(
-            "Логика группы", f"Логика для группы {group_name} сохранена")
+            tr('info'), tr('group_logic_applied', name=group_name))
         logger.info(f"Group logic applied to {group_name}")
 
     def on_mirror_change(self):
@@ -2400,7 +2411,7 @@ class ModelEditor(tk.Toplevel):
         self._photo_images.clear()
         self._canvas_cache_valid = False
         self.redraw_canvas()
-        self.save_to_history("Изменение отражения")
+        self.save_to_history(tr('editor_mirror'))
 
     def on_visible_change(self):
         """Обработчик изменения видимости"""
@@ -2415,7 +2426,7 @@ class ModelEditor(tk.Toplevel):
         self._photo_images.clear()
         self._canvas_cache_valid = False
         self.redraw_canvas()
-        self.save_to_history("Изменение видимости")
+        self.save_to_history(tr('editor_visible'))
 
     def zoom_in(self):
         """Увеличивает масштаб"""
@@ -2472,7 +2483,7 @@ class ModelEditor(tk.Toplevel):
         """Обновляет размер холста"""
         try:
             # Сохраняем в историю перед изменением
-            self.save_to_history("Изменение размера холста")
+            self.save_to_history(tr('editor_canvas_settings'))
 
             new_width = max(100, min(1500, self.canvas_width_var.get()))
             new_height = max(100, min(1500, self.canvas_height_var.get()))
@@ -2486,7 +2497,7 @@ class ModelEditor(tk.Toplevel):
             self._canvas_cache_valid = False
             logger.info(f"Canvas size updated to: {new_width}x{new_height}")
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Неверный размер холста: {e}")
+            messagebox.showerror(tr('error'), f"Неверный размер холста: {e}")
             logger.error(f"Error updating canvas size: {e}")
 
     def on_close(self):
@@ -2544,7 +2555,7 @@ class ModelEditor(tk.Toplevel):
     def new_model(self):
         """Создает новую модель"""
         name = simpledialog.askstring(
-            "Имя модели", "Введите имя модели", parent=self)
+            tr('editor_new'), tr('editor_model_name'), parent=self)
         if not name:
             return
 
@@ -2582,7 +2593,7 @@ class ModelEditor(tk.Toplevel):
     def load_model(self):
         """Загружает модель из слота"""
         slot_dialog = tk.Toplevel(self)
-        slot_dialog.title("Загрузка из слота")
+        slot_dialog.title(tr('editor_load'))
         slot_dialog.geometry("400x500")
         slot_dialog.transient(self)
         slot_dialog.grab_set()
@@ -2590,7 +2601,7 @@ class ModelEditor(tk.Toplevel):
 
         slot_dialog.images = []
 
-        ttk.Label(slot_dialog, text="Выберите слот для загрузки:",
+        ttk.Label(slot_dialog, text=tr('editor_load'),
                   font=("Arial", 10, "bold")).pack(pady=10)
 
         main_frame = ttk.Frame(slot_dialog)
@@ -2615,7 +2626,7 @@ class ModelEditor(tk.Toplevel):
 
         # Превью текущей модели
         current_preview_frame = ttk.LabelFrame(
-            inner_frame, text="Текущая модель")
+            inner_frame, text=tr('editor_preview'))
         current_preview_frame.pack(fill="x", pady=(0, 10), padx=5)
 
         current_preview_label = ttk.Label(current_preview_frame)
@@ -2643,7 +2654,7 @@ class ModelEditor(tk.Toplevel):
         slots_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         for i in range(1, 7):
-            slot_frame = ttk.LabelFrame(slots_frame, text=f"Слот {i}")
+            slot_frame = ttk.LabelFrame(slots_frame, text=f"{tr('slot')} {i}")
             slot_frame.pack(fill="x", pady=5, padx=5)
 
             content_frame = ttk.Frame(slot_frame)
@@ -2682,12 +2693,12 @@ class ModelEditor(tk.Toplevel):
                 try:
                     with open(json_path, "r", encoding="utf-8") as f:
                         model_data = json.load(f)
-                    model_name = model_data.get('name', f'Слот {i}')
+                    model_name = model_data.get('name', f"{tr('slot')} {i}")
                     status_text = model_name
                 except:
-                    status_text = "Ошибка загрузки"
+                    status_text = tr('error')
             else:
-                status_text = "Пустой слот"
+                status_text = tr('empty_slot')
 
             status = ttk.Label(info_frame, text=status_text, font=("Arial", 9))
             status.pack(anchor="w", pady=(5, 0))
@@ -2695,13 +2706,13 @@ class ModelEditor(tk.Toplevel):
             # Кнопка загрузки
             btn = ttk.Button(
                 info_frame,
-                text="Загрузить",
+                text=tr('editor_load'),
                 command=lambda slot=i, dlg=slot_dialog: self._load_slot(
                     slot, dlg)
             )
             btn.pack(anchor="w", pady=5)
 
-        ttk.Button(slot_dialog, text="Отмена",
+        ttk.Button(slot_dialog, text=tr('port_dialog_cancel'),
                    command=slot_dialog.destroy).pack(pady=10)
 
         slot_dialog.update()
@@ -2714,7 +2725,7 @@ class ModelEditor(tk.Toplevel):
 
         if not os.path.exists(json_path):
             messagebox.showerror(
-                "Ошибка", "model.json не найден в выбранном слоте")
+                tr('error'), "model.json не найден в выбранном слоте")
             return
 
         with open(json_path, "r", encoding="utf-8") as f:
@@ -2859,7 +2870,8 @@ class ModelEditor(tk.Toplevel):
                 json.dump(self.model, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error saving model JSON: {e}")
-            messagebox.showerror("Ошибка", f"Не удалось сохранить модель: {e}")
+            messagebox.showerror(
+                tr('error'), f"Не удалось сохранить модель: {e}")
             return
 
         # Создаем превью
@@ -2874,7 +2886,7 @@ class ModelEditor(tk.Toplevel):
     def show_save_slot_dialog(self):
         """Показывает диалог сохранения в слот"""
         slot_dialog = tk.Toplevel(self)
-        slot_dialog.title("Сохранение в слот")
+        slot_dialog.title(tr('editor_save'))
         slot_dialog.geometry("400x500")
         slot_dialog.transient(self)
         slot_dialog.grab_set()
@@ -2882,7 +2894,7 @@ class ModelEditor(tk.Toplevel):
 
         slot_dialog.images = []
 
-        ttk.Label(slot_dialog, text="Выберите слот для сохранения:",
+        ttk.Label(slot_dialog, text=tr('editor_save'),
                   font=("Arial", 10, "bold")).pack(pady=10)
 
         main_frame = ttk.Frame(slot_dialog)
@@ -2907,7 +2919,7 @@ class ModelEditor(tk.Toplevel):
 
         # Превью текущей модели
         current_preview_frame = ttk.LabelFrame(
-            inner_frame, text="Текущая модель для сохранения")
+            inner_frame, text=tr('editor_preview'))
         current_preview_frame.pack(fill="x", pady=(0, 10), padx=5)
 
         current_preview_label = ttk.Label(current_preview_frame)
@@ -2931,7 +2943,7 @@ class ModelEditor(tk.Toplevel):
             logger.error(f"Error loading current preview: {e}")
 
         ttk.Label(current_preview_frame,
-                  text=f"Имя: {self.model_name_var.get()}",
+                  text=f"{tr('editor_model_name')}: {self.model_name_var.get()}",
                   font=("Arial", 9)).pack()
 
         # Слоты
@@ -2939,7 +2951,7 @@ class ModelEditor(tk.Toplevel):
         slots_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         for i in range(1, 7):
-            slot_frame = ttk.LabelFrame(slots_frame, text=f"Слот {i}")
+            slot_frame = ttk.LabelFrame(slots_frame, text=f"{tr('slot')} {i}")
             slot_frame.pack(fill="x", pady=5, padx=5)
 
             content_frame = ttk.Frame(slot_frame)
@@ -2978,15 +2990,15 @@ class ModelEditor(tk.Toplevel):
                 try:
                     with open(json_path, "r", encoding="utf-8") as f:
                         model_data = json.load(f)
-                    model_name = model_data.get('name', f'Слот {i}')
+                    model_name = model_data.get('name', f"{tr('slot')} {i}")
                     status_text = f"Занят: {model_name}"
-                    btn_text = "Перезаписать"
+                    btn_text = tr('editor_save')
                 except:
-                    status_text = "Ошибка загрузки"
-                    btn_text = "Перезаписать"
+                    status_text = tr('error')
+                    btn_text = tr('editor_save')
             else:
-                status_text = "Пустой слот"
-                btn_text = "Сохранить"
+                status_text = tr('empty_slot')
+                btn_text = tr('editor_save')
 
             status = ttk.Label(info_frame, text=status_text, font=("Arial", 8))
             status.pack(anchor="w", pady=(5, 0))
@@ -2999,7 +3011,7 @@ class ModelEditor(tk.Toplevel):
             )
             btn.pack(anchor="w", pady=5)
 
-        ttk.Button(slot_dialog, text="Отмена",
+        ttk.Button(slot_dialog, text=tr('port_dialog_cancel'),
                    command=slot_dialog.destroy).pack(pady=10)
 
         slot_dialog.update()
@@ -3029,7 +3041,7 @@ class ModelEditor(tk.Toplevel):
             self.original_slot = slot_num
 
             messagebox.showinfo(
-                "Сохранено", f"Модель сохранена в слот {slot_num}")
+                tr('model_saved'), tr('model_saved_msg', slot=slot_num))
 
             if self.on_save:
                 self.on_save(self.model, slot_dir, slot_num)
@@ -3042,7 +3054,7 @@ class ModelEditor(tk.Toplevel):
         except Exception as e:
             logger.error(f"Error saving to slot {slot_num}: {e}")
             messagebox.showerror(
-                "Ошибка", f"Не удалось сохранить модель в слот {slot_num}: {e}")
+                tr('error'), f"Не удалось сохранить модель в слот {slot_num}: {e}")
 
     def create_preview(self):
         """Создает превью модели"""
@@ -3107,7 +3119,7 @@ class ModelEditor(tk.Toplevel):
     def import_images(self):
         """Импортирует изображения"""
         files = filedialog.askopenfilenames(
-            title="Выберите PNG или GIF изображения",
+            title=tr('editor_import'),
             filetypes=[("Изображения", "*.png *.gif"), ("Все файлы", "*.*")]
         )
         if not files:
@@ -3201,8 +3213,8 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
         self.last_autosave = time.time()
 
-        logger.info(f"Imported {len(files)} images")
-        self.save_to_history("Импорт изображений")
+        logger.info(tr('imported_images', count=len(files)))
+        self.save_to_history(tr('imported_images', count=len(files)))
 
     def refresh_import_list(self):
         """Обновляет список импортированных файлов"""
@@ -3278,11 +3290,11 @@ class ModelEditor(tk.Toplevel):
     def apply_props(self):
         """Применяет свойства к выбранным элементам"""
         if not self.current_selection:
-            messagebox.showwarning("Нет выбора", "Сначала выберите элемент")
+            messagebox.showwarning(tr('warning'), tr('editor_apply_props'))
             return
 
         # Сохраняем предыдущее состояние перед изменением
-        self.save_to_history("Изменение свойств элемента")
+        self.save_to_history(tr('editor_item_props'))
 
         for ci in self.current_selection:
             # Имя
@@ -3296,7 +3308,7 @@ class ModelEditor(tk.Toplevel):
                 ci.y = int(self.y_entry.get().strip())
             except ValueError:
                 messagebox.showwarning(
-                    "Ошибка", "X и Y должны быть целыми числами")
+                    tr('warning'), tr('editor_x') + " и " + tr('editor_y') + " должны быть целыми числами")
                 return
 
             # Масштаб и поворот
@@ -3305,7 +3317,7 @@ class ModelEditor(tk.Toplevel):
                 ci.rotation = int(self.rotation_entry.get().strip())
             except ValueError:
                 messagebox.showwarning(
-                    "Ошибка", "Масштаб должен быть дробным числом, поворот - целым")
+                    tr('warning'), tr('editor_scale') + " должен быть дробным числом, " + tr('editor_rotation') + " - целым")
                 return
 
             # Прозрачность
@@ -3313,12 +3325,12 @@ class ModelEditor(tk.Toplevel):
                 alpha = float(self.alpha_entry.get().strip())
                 if alpha < 0.0 or alpha > 1.0:
                     messagebox.showwarning(
-                        "Ошибка", "Прозрачность должна быть от 0.0 до 1.0")
+                        tr('warning'), tr('editor_alpha') + " должна быть от 0.0 до 1.0")
                     return
                 ci.alpha = alpha
             except ValueError:
                 messagebox.showwarning(
-                    "Ошибка", "Прозрачность должна быть числом")
+                    tr('warning'), tr('editor_alpha') + " должна быть числом")
                 return
 
             # Видимость и отражение
@@ -3340,7 +3352,7 @@ class ModelEditor(tk.Toplevel):
         self.redraw_canvas()
         self.last_autosave = time.time()
 
-        self.save_to_history("Изменение свойств элемента")
+        self.save_to_history(tr('editor_item_props'))
 
     def load_group_settings(self, group_name):
         """Загружает настройки группы"""
@@ -3441,8 +3453,8 @@ class ModelEditor(tk.Toplevel):
             self.refresh_tree()
             self._canvas_cache_valid = False
             self.redraw_canvas()
-            logger.info(f"Ungrouped group: {group_name}")
-            self.save_to_history("Разгруппирование")
+            logger.info(tr('group_deleted', name=group_name))
+            self.save_to_history(tr('editor_ungroup'))
             return
 
         if not self.current_selection:
@@ -3468,7 +3480,7 @@ class ModelEditor(tk.Toplevel):
         self._canvas_cache_valid = False
         self.redraw_canvas()
         logger.info(f"Ungrouped {len(self.current_selection)} items")
-        self.save_to_history("Разгруппирование элементов")
+        self.save_to_history(tr('editor_ungroup'))
 
     def _delete_group_and_children(self, group_name):
         """Рекурсивно удаляет группу и все ее дочерние группы"""
@@ -3578,7 +3590,7 @@ class ModelEditor(tk.Toplevel):
                     self.load_item_props(found)
                     self.selected_group = None
                     self.group_label.config(
-                        text=found.layer.get("group") or "(нет группы)")
+                        text=found.layer.get("group") or tr('editor_no_group'))
             else:
                 # Объект не был выделен. Работает как обычный клик.
                 if event.state & 0x0004:  # Ctrl
@@ -3604,7 +3616,7 @@ class ModelEditor(tk.Toplevel):
                         found.layer["_selected"] = True
                         self.current_selection = [found]
                         self.selected_group = None
-                        self.group_label.config(text="(нет группы)")
+                        self.group_label.config(text=tr('editor_no_group'))
                         self._select_item_in_tree(found)
                         self.load_item_props(found)
 
@@ -3617,7 +3629,7 @@ class ModelEditor(tk.Toplevel):
                 ci.layer["_selected"] = False
             self.current_selection = []
             self.selected_group = None
-            self.group_label.config(text="(нет группы)")
+            self.group_label.config(text=tr('editor_no_group'))
             self.clear_props_fields()
             self.tree.selection_remove(self.tree.selection())
 
@@ -3673,7 +3685,7 @@ class ModelEditor(tk.Toplevel):
             # Проверяем, было ли реальное перемещение (сравниваем старт и текущую позицию)
             if abs(self.drag_data.get("start_x", 0) - self.drag_data.get("x", 0)) > 0.1 or \
                abs(self.drag_data.get("start_y", 0) - self.drag_data.get("y", 0)) > 0.1:
-                self.save_to_history("Перемещение элемента")
+                self.save_to_history(tr('editor_x') + "/" + tr('editor_y'))
 
         self.drag_data["item"] = None
         self.drag_data["group_items"] = []
@@ -3745,7 +3757,7 @@ class ModelEditor(tk.Toplevel):
 
     def delete_file(self, filename):
         """Удаляет файл полностью"""
-        if messagebox.askyesno("Удаление файла", f"Удалить {filename} навсегда?"):
+        if messagebox.askyesno(tr('delete_confirm_title'), f"Удалить {filename} навсегда?"):
             self.remove_from_canvas_by_file(filename)
             self.imported_files = [
                 f for f in self.imported_files if f[0] != filename]
@@ -3767,7 +3779,7 @@ class ModelEditor(tk.Toplevel):
             self.redraw_canvas()
 
             logger.info(f"File deleted: {filename}")
-            self.save_to_history("Удаление файла")
+            self.save_to_history(tr('editor_delete_model'))
 
     def show_blink_preview(self):
         """Показывает превью моргания"""
