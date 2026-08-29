@@ -1,4 +1,5 @@
 {
+  "lang": "Русский",
   "app_title": "WebPNGTuber TG: @memory_not_found",
   "models_frame": "Модели (6 слотов)",
   "slot": "Слот",
@@ -165,5 +166,10 @@
   "exported_zip": "Модель экспортирована в {path}",
   "imported_zip": "Модель импортирована из {path}",
   "zip_export_error": "Ошибка экспорта: {error}",
-  "zip_import_error": "Ошибка импорта: {error}"
+  "zip_import_error": "Ошибка импорта: {error}",
+  "default_model_name": "Без названия",
+  "default_state_0": "Тишина",
+  "default_state_1": "Шёпот",
+  "default_state_2": "Норма",
+  "default_state_3": "Крик"
 }

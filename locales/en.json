@@ -1,4 +1,5 @@
 {
+  "lang": "English",
   "app_title": "WebPNGTuber TG: @memory_not_found",
   "models_frame": "Models (6 slots)",
   "slot": "Slot",
@@ -165,5 +166,10 @@
   "exported_zip": "Model exported to {path}",
   "imported_zip": "Model imported from {path}",
   "zip_export_error": "Export error: {error}",
-  "zip_import_error": "Import error: {error}"
+  "zip_import_error": "Import error: {error}",
+  "default_model_name": "Untitled",
+  "default_state_0": "Silence",
+  "default_state_1": "Whisper",
+  "default_state_2": "Normal",
+  "default_state_3": "Shout"
 }

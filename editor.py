@@ -287,14 +287,18 @@ class ModelEditor(tk.Toplevel):
         self.mic_sensitivity = sensitivity
 
         # Данные модели
-        self.model = {"name": "Без названия", "layers": [],
+        self.model = {"name": tr('default_model_name'), "layers": [],
                       "groups": [], "width": 700, "height": 700}
         # Состояния рта (макс 10)
         self.mouth_states = [
-            {'id': 0, 'name': 'Тишина', 'threshold': 0.0, 'active': True},
-            {'id': 1, 'name': 'Шёпот', 'threshold': 0.3, 'active': True},
-            {'id': 2, 'name': 'Норма', 'threshold': 0.6, 'active': True},
-            {'id': 3, 'name': 'Крик', 'threshold': 0.9, 'active': True}
+            {'id': 0, 'name': tr('default_state_0'),
+             'threshold': 0.0, 'active': True},
+            {'id': 1, 'name': tr('default_state_1'),
+             'threshold': 0.3, 'active': True},
+            {'id': 2, 'name': tr('default_state_2'),
+             'threshold': 0.6, 'active': True},
+            {'id': 3, 'name': tr('default_state_3'),
+             'threshold': 0.9, 'active': True}
         ]
 
         self.model_dir = None
@@ -1356,19 +1360,23 @@ class ModelEditor(tk.Toplevel):
                     logger.info(
                         f"Deleted model from slot {self.original_slot}")
 
-            self.model = {"name": "Без названия", "layers": [],
+            self.model = {"name": tr('default_model_name'), "layers": [],
                           "groups": [], "width": 700, "height": 700}
             self.mouth_states = [
-                {'id': 0, 'name': 'Тишина', 'threshold': 0.0, 'active': True},
-                {'id': 1, 'name': 'Шёпот', 'threshold': 0.3, 'active': True},
-                {'id': 2, 'name': 'Норма', 'threshold': 0.6, 'active': True},
-                {'id': 3, 'name': 'Крик', 'threshold': 0.9, 'active': True}
+                {'id': 0, 'name': tr('default_state_0'),
+                 'threshold': 0.0, 'active': True},
+                {'id': 1, 'name': tr('default_state_1'),
+                 'threshold': 0.3, 'active': True},
+                {'id': 2, 'name': tr('default_state_2'),
+                 'threshold': 0.6, 'active': True},
+                {'id': 3, 'name': tr('default_state_3'),
+                 'threshold': 0.9, 'active': True}
             ]
             self.model_dir = None
             self.original_slot = None
             self.items.clear()
             self.imported_files.clear()
-            self.model_name_var.set("Без названия")
+            self.model_name_var.set(tr('default_model_name'))
             self.canvas_width = 700
             self.canvas_height = 700
             self.canvas_width_var.set(700)
@@ -1550,7 +1558,8 @@ class ModelEditor(tk.Toplevel):
                 self.model_dir = import_dir
                 self.original_slot = None
 
-                self.model_name_var.set(self.model.get("name", "Без названия"))
+                self.model_name_var.set(self.model.get(
+                    "name", tr('default_model_name')))
 
                 self.canvas_width = self.model.get("width", 700)
                 self.canvas_height = self.model.get("height", 700)
@@ -1562,11 +1571,14 @@ class ModelEditor(tk.Toplevel):
                     self.mouth_states = model_data['mouth_states']
                 else:
                     self.mouth_states = [
-                        {'id': 0, 'name': 'Тишина',
-                         'threshold': 0.0, 'active': True},
-                        {'id': 1, 'name': 'Шёпот', 'threshold': 0.3, 'active': True},
-                        {'id': 2, 'name': 'Норма', 'threshold': 0.6, 'active': True},
-                        {'id': 3, 'name': 'Крик', 'threshold': 0.9, 'active': True}
+                        {'id': 0, 'name': tr(
+                            'default_state_0'), 'threshold': 0.0, 'active': True},
+                        {'id': 1, 'name': tr(
+                            'default_state_1'), 'threshold': 0.3, 'active': True},
+                        {'id': 2, 'name': tr(
+                            'default_state_2'), 'threshold': 0.6, 'active': True},
+                        {'id': 3, 'name': tr(
+                            'default_state_3'), 'threshold': 0.9, 'active': True}
                     ]
 
                 self.items.clear()
@@ -2562,10 +2574,14 @@ class ModelEditor(tk.Toplevel):
         self.model = {"name": name, "layers": [],
                       "groups": [], "width": 700, "height": 700}
         self.mouth_states = [
-            {'id': 0, 'name': 'Тишина', 'threshold': 0.0, 'active': True},
-            {'id': 1, 'name': 'Шёпот', 'threshold': 0.3, 'active': True},
-            {'id': 2, 'name': 'Норма', 'threshold': 0.6, 'active': True},
-            {'id': 3, 'name': 'Крик', 'threshold': 0.9, 'active': True}
+            {'id': 0, 'name': tr('default_state_0'),
+             'threshold': 0.0, 'active': True},
+            {'id': 1, 'name': tr('default_state_1'),
+             'threshold': 0.3, 'active': True},
+            {'id': 2, 'name': tr('default_state_2'),
+             'threshold': 0.6, 'active': True},
+            {'id': 3, 'name': tr('default_state_3'),
+             'threshold': 0.9, 'active': True}
         ]
         self.model_dir = None
         self.original_slot = None
@@ -2731,7 +2747,8 @@ class ModelEditor(tk.Toplevel):
         with open(json_path, "r", encoding="utf-8") as f:
             self.model = json.load(f)
 
-        self.model_name_var.set(self.model.get("name", "Без названия"))
+        self.model_name_var.set(self.model.get(
+            "name", tr('default_model_name')))
 
         self.canvas_width = self.model.get("width", 700)
         self.canvas_height = self.model.get("height", 700)
@@ -2743,10 +2760,14 @@ class ModelEditor(tk.Toplevel):
             self.mouth_states = self.model['mouth_states']
         else:
             self.mouth_states = [
-                {'id': 0, 'name': 'Тишина', 'threshold': 0.0, 'active': True},
-                {'id': 1, 'name': 'Шёпот', 'threshold': 0.3, 'active': True},
-                {'id': 2, 'name': 'Норма', 'threshold': 0.6, 'active': True},
-                {'id': 3, 'name': 'Крик', 'threshold': 0.9, 'active': True}
+                {'id': 0, 'name': tr('default_state_0'),
+                 'threshold': 0.0, 'active': True},
+                {'id': 1, 'name': tr('default_state_1'),
+                 'threshold': 0.3, 'active': True},
+                {'id': 2, 'name': tr('default_state_2'),
+                 'threshold': 0.6, 'active': True},
+                {'id': 3, 'name': tr('default_state_3'),
+                 'threshold': 0.9, 'active': True}
             ]
 
         # Создаем временную папку

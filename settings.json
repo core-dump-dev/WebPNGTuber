@@ -29,5 +29,6 @@
     "thresh": true,
     "states": true
   },
-  "host_api_index": 2
+  "host_api_index": 2,
+  "language": "ru"
 }
