@@ -1,5 +1,9 @@
 # WebPNGTuber - Advanced PNG Tuber Editor
 
+<p align="center">
+  <a href="README.ru.md">Русский</a> &nbsp;|&nbsp; <a href="README.md">English</a>
+</p>
+
 WebPNGTuber is an open-source application for creating and managing PNG Tuber models. It combines ease of use with advanced functionality, allowing you to build interactive avatars that react to your voice.
 
 ## ✨ Key Features
