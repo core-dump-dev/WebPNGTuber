@@ -167,7 +167,8 @@ class App:
                                  image=photo, compound="top",
                                  command=lambda i=idx: self.load_slot(i))
                 btn.pack(fill="both", expand=True, padx=0, pady=0)
-                self._register_widget_i18n(btn, 'slot', suffix=f" {idx+1}")  # сложный текст – обновим отдельно
+                # сложный текст – обновим отдельно
+                self._register_widget_i18n(btn, 'slot', suffix=f" {idx+1}")
 
                 if photo:
                     btn.photo = photo
@@ -184,7 +185,8 @@ class App:
         self._register_widget_i18n(settings_frame, 'settings_frame')
 
         # Управление
-        control_frame = ttk.LabelFrame(settings_frame, text=tr('settings_frame'))
+        control_frame = ttk.LabelFrame(
+            settings_frame, text=tr('settings_frame'))
         control_frame.pack(fill="x", pady=(0, 3), padx=3)
         self._register_widget_i18n(control_frame, 'settings_frame')
 
@@ -213,18 +215,24 @@ class App:
             command=self.change_port
         )
         self.port_btn.pack(fill="x", padx=2, pady=2)
-        self._register_widget_i18n(self.port_btn, 'port_btn', port=self.webserver_port)
+        self._register_widget_i18n(
+            self.port_btn, 'port_btn', port=self.webserver_port)  # с параметром
 
         # ---- Выбор языка ----
         lang_frame = ttk.Frame(settings_frame)
         lang_frame.pack(fill="x", pady=2, padx=3)
         lang_label = ttk.Label(lang_frame, text="Язык / Language:")
         lang_label.pack(side="left", padx=2)
+        self._register_widget_i18n(
+            lang_label, 'lang_label')  # добавим ключ в JSON
 
         available_codes = i18n.get_available_languages()
-        available_display = [i18n.get_language_display_name(code) for code in available_codes]
-        self.lang_var = tk.StringVar(value=i18n.get_language_display_name(i18n.lang))
-        lang_combo = ttk.Combobox(lang_frame, textvariable=self.lang_var, state="readonly", width=12)
+        available_display = [i18n.get_language_display_name(
+            code) for code in available_codes]
+        self.lang_var = tk.StringVar(
+            value=i18n.get_language_display_name(i18n.lang))
+        lang_combo = ttk.Combobox(
+            lang_frame, textvariable=self.lang_var, state="readonly", width=12)
         lang_combo['values'] = available_display
         if self.lang_var.get() in available_display:
             lang_combo.current(available_display.index(self.lang_var.get()))
@@ -233,7 +241,7 @@ class App:
         lang_combo.pack(side="left", padx=2)
         lang_combo.bind('<<ComboboxSelected>>', self.on_lang_change)
         # Отключаем прокрутку колесиком для комбобокса
-        lang_combo.bind('<MouseWheel>', lambda e: 'break')
+        self._disable_mousewheel(lang_combo)
 
         # Настройки микрофона
         mic_frame = ttk.LabelFrame(settings_frame, text=tr('mic_frame'))
@@ -241,32 +249,30 @@ class App:
         self._register_widget_i18n(mic_frame, 'mic_frame')
 
         # === НОВОЕ: выбор Host API ===
-        audio_api_label = ttk.Label(mic_frame, text=tr('audio_api'))
-        audio_api_label.pack(anchor='w', padx=2, pady=(2, 0))
-        self._register_widget_i18n(audio_api_label, 'audio_api')
-
+        api_label = ttk.Label(mic_frame, text=tr('audio_api'))
+        api_label.pack(anchor='w', padx=2, pady=(2, 0))
+        self._register_widget_i18n(api_label, 'audio_api')
         api_row = ttk.Frame(mic_frame)
         api_row.pack(fill='x', padx=2, pady=(0, 2))
         self.host_api_combo = ttk.Combobox(api_row, state="readonly", width=20)
         self.host_api_combo.pack(side='left', fill='x', expand=True)
-        self.host_api_combo.bind('<<ComboboxSelected>>', self.on_host_api_change)
-        self.host_api_combo.bind('<MouseWheel>', lambda e: 'break')
+        self.host_api_combo.bind(
+            '<<ComboboxSelected>>', self.on_host_api_change)
+        self._disable_mousewheel(self.host_api_combo)
 
         # Выбор устройства
         device_label = ttk.Label(mic_frame, text=tr('device'))
         device_label.pack(anchor='w', padx=2, pady=(2, 0))
         self._register_widget_i18n(device_label, 'device')
-
         device_row = ttk.Frame(mic_frame)
         device_row.pack(fill='x', padx=2, pady=(0, 2))
 
         self.device_var = tk.StringVar(
             value=self.settings.get('mic_device', ''))
         self.device_combo = ttk.Combobox(
-            device_row, textvariable=self.device_var, width=18)
+            device_row, textvariable=self.device_var, state="readonly", width=18)
         self.device_combo.pack(side='left', fill='x', expand=True)
-        self.device_combo.bind('<<ComboboxSelected>>', self.on_device_change)
-        self.device_combo.bind('<MouseWheel>', lambda e: 'break')
+        self._disable_mousewheel(self.device_combo)
 
         refresh_btn = ttk.Button(device_row, text="↻",
                                  width=3, command=self.refresh_devices)
@@ -281,7 +287,6 @@ class App:
         level_label = ttk.Label(mic_frame, text=tr('level'))
         level_label.pack(anchor="w", padx=2, pady=(2, 0))
         self._register_widget_i18n(level_label, 'level')
-
         self.vol_label = ttk.Label(mic_frame, text="0.00")
         self.vol_label.pack(anchor="w", padx=2, pady=(0, 2))
 
@@ -292,7 +297,6 @@ class App:
         sens_label = ttk.Label(sens_frame, text=tr('sensitivity'))
         sens_label.pack(anchor="w", side="left")
         self._register_widget_i18n(sens_label, 'sensitivity')
-
         self.sensitivity = tk.DoubleVar(value=self._round_to_step(
             self.settings.get('sensitivity', 1.5), 0.05))
         self.sens_percent_label = ttk.Label(
@@ -334,7 +338,6 @@ class App:
         indicator_label = ttk.Label(mic_frame, text=tr('indicator'))
         indicator_label.pack(anchor="w", padx=2, pady=(3, 0))
         self._register_widget_i18n(indicator_label, 'indicator')
-
         self.level_canvas = tk.Canvas(
             mic_frame, width=180, height=25, bg="#f0f0f0")
         self.level_canvas.bind("<Configure>", self.on_canvas_resize)
@@ -372,11 +375,14 @@ class App:
         effects_header.pack(fill="x")
 
         self.effects_expanded = self.sections_state.get('effects', True)
-        effects_text = "▼ " + tr('effects_frame') if self.effects_expanded else "▶ " + tr('effects_frame')
+        effects_text = "▼ " + \
+            tr('effects_frame') if self.effects_expanded else "▶ " + \
+            tr('effects_frame')
         self.effects_header_label = ttk.Label(
             effects_header, text=effects_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.effects_header_label.pack(side="left", padx=2, pady=2)
-        self._register_widget_i18n(self.effects_header_label, 'effects_frame', prefix="▼ " if self.effects_expanded else "▶ ")
+        self._register_widget_i18n(
+            self.effects_header_label, 'effects_frame', prefix="▼ " if self.effects_expanded else "▶ ")
         effects_header.bind(
             "<Button-1>", lambda e: self.toggle_section("effects"))
         self.effects_header_label.bind(
@@ -433,11 +439,14 @@ class App:
         wave_header.pack(fill="x")
 
         self.wave_expanded = self.sections_state.get('wave', True)
-        wave_text = "▼ " + tr('wave_settings') if self.wave_expanded else "▶ " + tr('wave_settings')
+        wave_text = "▼ " + \
+            tr('wave_settings') if self.wave_expanded else "▶ " + \
+            tr('wave_settings')
         self.wave_header_label = ttk.Label(
             wave_header, text=wave_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.wave_header_label.pack(side="left", padx=2, pady=2)
-        self._register_widget_i18n(self.wave_header_label, 'wave_settings', prefix="▼ " if self.wave_expanded else "▶ ")
+        self._register_widget_i18n(
+            self.wave_header_label, 'wave_settings', prefix="▼ " if self.wave_expanded else "▶ ")
         wave_header.bind("<Button-1>", lambda e: self.toggle_section("wave"))
         self.wave_header_label.bind(
             "<Button-1>", lambda e: self.toggle_section("wave"))
@@ -454,7 +463,6 @@ class App:
         amp_label = ttk.Label(amplitude_frame, text=tr('wave_amplitude'))
         amp_label.pack(anchor="w", side="left")
         self._register_widget_i18n(amp_label, 'wave_amplitude')
-
         self.wave_amplitude = tk.DoubleVar(value=self._round_to_step(
             self.wave_params.get('amplitude', 7.0), 0.25))
         self.wave_amplitude_label = ttk.Label(
@@ -473,7 +481,6 @@ class App:
         freq_label = ttk.Label(frequency_frame, text=tr('wave_frequency'))
         freq_label.pack(anchor="w", side="left")
         self._register_widget_i18n(freq_label, 'wave_frequency')
-
         self.wave_frequency = tk.DoubleVar(value=self._round_to_step(
             self.wave_params.get('frequency', 1.0), 0.25))
         self.wave_frequency_label = ttk.Label(
@@ -492,7 +499,6 @@ class App:
         speed_label = ttk.Label(speed_frame, text=tr('wave_speed'))
         speed_label.pack(anchor="w", side="left")
         self._register_widget_i18n(speed_label, 'wave_speed')
-
         self.wave_speed = tk.IntVar(
             value=int(self.wave_params.get('speed', 3)))
         self.wave_speed_label = ttk.Label(
@@ -513,11 +519,13 @@ class App:
         idle_header.pack(fill="x")
 
         self.idle_expanded = self.sections_state.get('idle', True)
-        idle_text = "▼ " + tr('idle_mode') if self.idle_expanded else "▶ " + tr('idle_mode')
+        idle_text = "▼ " + \
+            tr('idle_mode') if self.idle_expanded else "▶ " + tr('idle_mode')
         self.idle_header_label = ttk.Label(
             idle_header, text=idle_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.idle_header_label.pack(side="left", padx=2, pady=2)
-        self._register_widget_i18n(self.idle_header_label, 'idle_mode', prefix="▼ " if self.idle_expanded else "▶ ")
+        self._register_widget_i18n(
+            self.idle_header_label, 'idle_mode', prefix="▼ " if self.idle_expanded else "▶ ")
         idle_header.bind("<Button-1>", lambda e: self.toggle_section("idle"))
         self.idle_header_label.bind(
             "<Button-1>", lambda e: self.toggle_section("idle"))
@@ -539,7 +547,6 @@ class App:
         timeout_label = ttk.Label(idle_grid, text=tr('idle_timeout'))
         timeout_label.pack(anchor="w", padx=3, pady=(3, 0))
         self._register_widget_i18n(timeout_label, 'idle_timeout')
-
         self.idle_timeout = tk.DoubleVar(
             value=self.settings.get('idle_timeout', 5.0))
         idle_entry = ttk.Entry(
@@ -551,7 +558,6 @@ class App:
         fade_label = ttk.Label(idle_grid, text=tr('idle_fade'))
         fade_label.pack(anchor="w", padx=3, pady=(3, 0))
         self._register_widget_i18n(fade_label, 'idle_fade')
-
         self.idle_fade_duration = tk.DoubleVar(
             value=self.settings.get('idle_fade_duration', 0.3))
         fade_entry = ttk.Entry(
@@ -563,7 +569,6 @@ class App:
         restore_label = ttk.Label(idle_grid, text=tr('idle_restore'))
         restore_label.pack(anchor="w", padx=3, pady=(3, 0))
         self._register_widget_i18n(restore_label, 'idle_restore')
-
         self.idle_restore_duration = tk.DoubleVar(
             value=self.settings.get('idle_restore_duration', 0.1))
         restore_entry = ttk.Entry(
@@ -579,11 +584,13 @@ class App:
         thresh_header.pack(fill="x")
 
         self.thresh_expanded = self.sections_state.get('thresh', True)
-        thresh_text = "▼ " + tr('thresholds') if self.thresh_expanded else "▶ " + tr('thresholds')
+        thresh_text = "▼ " + \
+            tr('thresholds') if self.thresh_expanded else "▶ " + tr('thresholds')
         self.thresh_header_label = ttk.Label(
             thresh_header, text=thresh_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.thresh_header_label.pack(side="left", padx=2, pady=2)
-        self._register_widget_i18n(self.thresh_header_label, 'thresholds', prefix="▼ " if self.thresh_expanded else "▶ ")
+        self._register_widget_i18n(
+            self.thresh_header_label, 'thresholds', prefix="▼ " if self.thresh_expanded else "▶ ")
         thresh_header.bind(
             "<Button-1>", lambda e: self.toggle_section("thresh"))
         self.thresh_header_label.bind(
@@ -600,11 +607,14 @@ class App:
         states_header.pack(fill="x")
 
         self.states_expanded = self.sections_state.get('states', True)
-        states_text = "▼ " + tr('active_states') if self.states_expanded else "▶ " + tr('active_states')
+        states_text = "▼ " + \
+            tr('active_states') if self.states_expanded else "▶ " + \
+            tr('active_states')
         self.states_header_label = ttk.Label(
             states_header, text=states_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.states_header_label.pack(side="left", padx=2, pady=2)
-        self._register_widget_i18n(self.states_header_label, 'active_states', prefix="▼ " if self.states_expanded else "▶ ")
+        self._register_widget_i18n(
+            self.states_header_label, 'active_states', prefix="▼ " if self.states_expanded else "▶ ")
         states_header.bind(
             "<Button-1>", lambda e: self.toggle_section("states"))
         self.states_header_label.bind(
@@ -646,6 +656,15 @@ class App:
         # Запускаем монитор устройств для автоматического обнаружения подключения/отключения микрофона
         self.start_device_monitor()
 
+    # === ВСПОМОГАТЕЛЬНЫЙ МЕТОД ДЛЯ ОТКЛЮЧЕНИЯ ПРОКРУТКИ КОЛЕСИКОМ ===
+    def _disable_mousewheel(self, widget):
+        """Отключает прокрутку колесиком мыши для комбобокса."""
+        def on_mousewheel(event):
+            return "break"  # блокируем событие
+        widget.bind("<MouseWheel>", on_mousewheel)
+        widget.bind("<Button-4>", on_mousewheel)   # для Linux
+        widget.bind("<Button-5>", on_mousewheel)   # для Linux
+
     # === МЕТОДЫ ДЛЯ ДИНАМИЧЕСКОЙ СМЕНЫ ЯЗЫКА ===
 
     def _register_widget_i18n(self, widget, key, **kwargs):
@@ -661,6 +680,7 @@ class App:
                 try:
                     kwargs = getattr(widget, '_i18n_kwargs', {})
                     new_text = tr(widget._i18n_key, **kwargs)
+                    # Для кнопок и меток используем config(text=...)
                     try:
                         widget.config(text=new_text)
                     except:
@@ -690,12 +710,16 @@ class App:
                 try:
                     with open(json_path, "r", encoding="utf-8") as f:
                         model_data = json.load(f)
-                    model_name = model_data.get('name', f"{tr('slot')} {idx+1}")
-                    btn.config(text=f"{prefix}{tr('slot')} {idx+1}\n{model_name[:15]}")
+                    model_name = model_data.get(
+                        'name', f"{tr('slot')} {idx+1}")
+                    btn.config(
+                        text=f"{prefix}{tr('slot')} {idx+1}\n{model_name[:15]}")
                 except:
-                    btn.config(text=f"{prefix}{tr('slot')} {idx+1}\n{tr('error')}")
+                    btn.config(
+                        text=f"{prefix}{tr('slot')} {idx+1}\n{tr('error')}")
             else:
-                btn.config(text=f"{prefix}{tr('slot')} {idx+1}\n{tr('empty_slot')}")
+                btn.config(
+                    text=f"{prefix}{tr('slot')} {idx+1}\n{tr('empty_slot')}")
 
         # Обновляем заголовки сворачиваемых секций
         self._update_section_header('effects', self.effects_expanded)
@@ -710,10 +734,6 @@ class App:
         # Если редактор открыт – обновим и его
         if hasattr(self, 'editor') and self.editor and self.editor.winfo_exists():
             self.editor.refresh_ui_texts()
-
-        # Принудительно обновляем текст чекбоксов, которые не были обновлены через _register_widget_i18n
-        # (они уже зарегистрированы, но на всякий случай)
-        # В данном случае все они зарегистрированы через _register_widget_i18n
 
     def _update_section_header(self, section, expanded):
         """Обновляет текст заголовка секции."""
@@ -741,12 +761,13 @@ class App:
                 new_lang = code
                 break
         if new_lang and new_lang != i18n.lang:
-            i18n.set_lang(new_lang)          # меняем язык и уведомляем подписчиков
+            # меняем язык и уведомляем подписчиков
+            i18n.set_lang(new_lang)
             self.settings['language'] = new_lang
             self.save_settings()
             # Заголовок окна и все тексты обновятся через callback refresh_ui_texts
 
-    # === ОСТАЛЬНЫЕ МЕТОДЫ (без изменений) ===
+    # === ОСТАЛЬНЫЕ МЕТОДЫ (без изменений, но с использованием tr) ===
 
     def refresh_host_apis(self):
         """Обновляет список Host API в комбобоксе"""
@@ -931,13 +952,16 @@ class App:
                     try:
                         with open(json_path, "r", encoding="utf-8") as f:
                             model_data = json.load(f)
-                        model_name = model_data.get('name', f"{tr('slot')} {idx+1}")
+                        model_name = model_data.get(
+                            'name', f"{tr('slot')} {idx+1}")
                         btn.config(
                             text=f"{prefix}{tr('slot')} {idx+1}\n{model_name[:15]}")
                     except:
-                        btn.config(text=f"{prefix}{tr('slot')} {idx+1}\n{tr('error')}")
+                        btn.config(
+                            text=f"{prefix}{tr('slot')} {idx+1}\n{tr('error')}")
                 else:
-                    btn.config(text=f"{prefix}{tr('slot')} {idx+1}\n{tr('empty_slot')}")
+                    btn.config(
+                        text=f"{prefix}{tr('slot')} {idx+1}\n{tr('empty_slot')}")
                 photo = self.load_preview_for_slot(idx)
                 btn.config(image=photo)
                 btn.photo = photo
@@ -1017,7 +1041,8 @@ class App:
 
                 old_port = self.webserver_port
                 self.webserver_port = new_port
-                self.port_btn.config(text=tr('port_btn', port=self.webserver_port))
+                self.port_btn.config(
+                    text=tr('port_btn', port=self.webserver_port))
                 self.webserver = WebServer(
                     self.renderer, port=self.webserver_port)
                 self.save_settings()
@@ -1428,10 +1453,14 @@ class App:
                 "layers": [],
                 "groups": [],
                 "mouth_states": [
-                    {'id': 0, 'name': tr('default_state_0'), 'threshold': 0.0, 'active': True},
-                    {'id': 1, 'name': tr('default_state_1'), 'threshold': 0.3, 'active': True},
-                    {'id': 2, 'name': tr('default_state_2'), 'threshold': 0.6, 'active': True},
-                    {'id': 3, 'name': tr('default_state_3'), 'threshold': 0.9, 'active': True}
+                    {'id': 0, 'name': tr('default_state_0'),
+                     'threshold': 0.0, 'active': True},
+                    {'id': 1, 'name': tr('default_state_1'),
+                     'threshold': 0.3, 'active': True},
+                    {'id': 2, 'name': tr('default_state_2'),
+                     'threshold': 0.6, 'active': True},
+                    {'id': 3, 'name': tr('default_state_3'),
+                     'threshold': 0.9, 'active': True}
                 ]
             }
             self.renderer.model_dir = slot_dir
@@ -1443,10 +1472,14 @@ class App:
                 data = json.load(f)
             if 'mouth_states' not in data or not data['mouth_states']:
                 data['mouth_states'] = [
-                    {'id': 0, 'name': tr('default_state_0'), 'threshold': 0.0, 'active': True},
-                    {'id': 1, 'name': tr('default_state_1'), 'threshold': 0.3, 'active': True},
-                    {'id': 2, 'name': tr('default_state_2'), 'threshold': 0.6, 'active': True},
-                    {'id': 3, 'name': tr('default_state_3'), 'threshold': 0.9, 'active': True}
+                    {'id': 0, 'name': tr('default_state_0'),
+                     'threshold': 0.0, 'active': True},
+                    {'id': 1, 'name': tr('default_state_1'),
+                     'threshold': 0.3, 'active': True},
+                    {'id': 2, 'name': tr('default_state_2'),
+                     'threshold': 0.6, 'active': True},
+                    {'id': 3, 'name': tr('default_state_3'),
+                     'threshold': 0.9, 'active': True}
                 ]
             self.renderer.load_model(data, slot_dir)
             if self.webserver:
