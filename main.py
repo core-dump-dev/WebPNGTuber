@@ -221,10 +221,11 @@ class App:
         # ---- Выбор языка ----
         lang_frame = ttk.Frame(settings_frame)
         lang_frame.pack(fill="x", pady=2, padx=3)
-        lang_label = ttk.Label(lang_frame, text="Язык / Language:")
+        lang_label = ttk.Label(lang_frame, text=tr('language_select'))
         lang_label.pack(side="left", padx=2)
+        self._register_widget_i18n(lang_label, 'language_select')
         # добавим ключ для обновления
-        self._register_widget_i18n(lang_label, 'lang_label')
+        self._register_widget_i18n(lang_label, 'language_select')
 
         available_codes = i18n.get_available_languages()
         available_display = [i18n.get_language_display_name(

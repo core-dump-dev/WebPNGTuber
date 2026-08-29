@@ -171,5 +171,6 @@
   "default_state_0": "Тишина",
   "default_state_1": "Шёпот",
   "default_state_2": "Норма",
-  "default_state_3": "Крик"
+  "default_state_3": "Крик",
+  "language_select": "Язык / Language:"
 }
