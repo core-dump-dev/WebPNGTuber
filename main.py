@@ -47,7 +47,7 @@ class App:
         root.title(tr('app_title'))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Установка размера окна: компактное
+        # Установка размера окна: компактное (изменено пользователем на 500)
         root.geometry("800x500")
         root.minsize(800, 500)
         logger.info("Application started")
@@ -223,8 +223,8 @@ class App:
         lang_frame.pack(fill="x", pady=2, padx=3)
         lang_label = ttk.Label(lang_frame, text="Язык / Language:")
         lang_label.pack(side="left", padx=2)
-        self._register_widget_i18n(
-            lang_label, 'lang_label')  # добавим ключ в JSON
+        # добавим ключ для обновления
+        self._register_widget_i18n(lang_label, 'lang_label')
 
         available_codes = i18n.get_available_languages()
         available_display = [i18n.get_language_display_name(
@@ -242,6 +242,7 @@ class App:
         lang_combo.bind('<<ComboboxSelected>>', self.on_lang_change)
         # Отключаем прокрутку колесиком для комбобокса
         self._disable_mousewheel(lang_combo)
+        # Для комбобокса не нужно обновлять текст, он сам отображает выбранное значение
 
         # Настройки микрофона
         mic_frame = ttk.LabelFrame(settings_frame, text=tr('mic_frame'))
@@ -272,13 +273,13 @@ class App:
         self.device_combo = ttk.Combobox(
             device_row, textvariable=self.device_var, state="readonly", width=18)
         self.device_combo.pack(side='left', fill='x', expand=True)
-        self._disable_mousewheel(self.device_combo)
 
         refresh_btn = ttk.Button(device_row, text="↻",
                                  width=3, command=self.refresh_devices)
         refresh_btn.pack(side='left', padx=(2, 0))
 
         self.device_combo.bind('<<ComboboxSelected>>', self.on_device_change)
+        self._disable_mousewheel(self.device_combo)
 
         # Заполняем список Host API и устройств
         self.refresh_host_apis()
@@ -656,14 +657,13 @@ class App:
         # Запускаем монитор устройств для автоматического обнаружения подключения/отключения микрофона
         self.start_device_monitor()
 
-    # === ВСПОМОГАТЕЛЬНЫЙ МЕТОД ДЛЯ ОТКЛЮЧЕНИЯ ПРОКРУТКИ КОЛЕСИКОМ ===
     def _disable_mousewheel(self, widget):
-        """Отключает прокрутку колесиком мыши для комбобокса."""
-        def on_mousewheel(event):
-            return "break"  # блокируем событие
-        widget.bind("<MouseWheel>", on_mousewheel)
-        widget.bind("<Button-4>", on_mousewheel)   # для Linux
-        widget.bind("<Button-5>", on_mousewheel)   # для Linux
+        """Отключает прокрутку колесиком для Combobox и других виджетов."""
+        def block_mousewheel(event):
+            return "break"
+        widget.bind('<MouseWheel>', block_mousewheel)
+        widget.bind('<Button-4>', block_mousewheel)
+        widget.bind('<Button-5>', block_mousewheel)
 
     # === МЕТОДЫ ДЛЯ ДИНАМИЧЕСКОЙ СМЕНЫ ЯЗЫКА ===
 
@@ -680,7 +680,7 @@ class App:
                 try:
                     kwargs = getattr(widget, '_i18n_kwargs', {})
                     new_text = tr(widget._i18n_key, **kwargs)
-                    # Для кнопок и меток используем config(text=...)
+                    # Для кнопок, меток, чекбоксов, радиокнопок, фреймов используем config(text=...)
                     try:
                         widget.config(text=new_text)
                     except:
