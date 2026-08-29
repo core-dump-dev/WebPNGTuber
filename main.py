@@ -48,8 +48,8 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Установка размера окна: компактное
-        root.geometry("800x470")
-        root.minsize(800, 470)
+        root.geometry("800x500")
+        root.minsize(800, 500)
         logger.info("Application started")
 
         # Флаг инициализации для предотвращения сохранения при начальной загрузке
