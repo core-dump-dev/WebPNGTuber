@@ -47,7 +47,7 @@ class App:
         root.title(tr('app_title'))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Установка размера окна: компактное
+        # Установка размера окна: компактное (изменено пользователем на 500)
         root.geometry("800x500")
         root.minsize(800, 500)
         logger.info("Application started")
@@ -124,6 +124,9 @@ class App:
             'states': True
         })
 
+        # Регистрируем callback для обновления UI при смене языка
+        i18n.register_callback(self.refresh_ui_texts)
+
         # UI layout - три колонки в ряд
         main_frame = ttk.Frame(root, padding=3)
         main_frame.pack(fill="both", expand=True)
@@ -142,6 +145,7 @@ class App:
         # ---- КОЛОНКА 1: Модели ----
         models_frame = ttk.LabelFrame(main_frame, text=tr('models_frame'))
         models_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 3), pady=0)
+        self._register_widget_i18n(models_frame, 'models_frame')
 
         self.model_slots = []
         self.slot_previews = [None] * 6
@@ -163,6 +167,8 @@ class App:
                                  image=photo, compound="top",
                                  command=lambda i=idx: self.load_slot(i))
                 btn.pack(fill="both", expand=True, padx=0, pady=0)
+                # сложный текст – обновим отдельно
+                self._register_widget_i18n(btn, 'slot', suffix=f" {idx+1}")
 
                 if photo:
                     btn.photo = photo
@@ -176,19 +182,23 @@ class App:
         # ---- КОЛОНКА 2: Основные настройки (микрофон и управление) ----
         settings_frame = ttk.LabelFrame(main_frame, text=tr('settings_frame'))
         settings_frame.grid(row=0, column=1, sticky="nsew", padx=3, pady=0)
+        self._register_widget_i18n(settings_frame, 'settings_frame')
 
         # Управление
         control_frame = ttk.LabelFrame(
             settings_frame, text=tr('settings_frame'))
         control_frame.pack(fill="x", pady=(0, 3), padx=3)
+        self._register_widget_i18n(control_frame, 'settings_frame')
 
         self.editor_btn = ttk.Button(control_frame, text=tr('editor_btn'),
                                      command=self.open_editor)
         self.editor_btn.pack(fill="x", padx=2, pady=2)
+        self._register_widget_i18n(self.editor_btn, 'editor_btn')
 
         self.server_btn = ttk.Button(control_frame, text=tr('server_btn'),
                                      command=self.toggle_server)
         self.server_btn.pack(fill="x", padx=2, pady=2)
+        self._register_widget_i18n(self.server_btn, 'server_btn')
 
         self.link_btn = ttk.Button(
             control_frame,
@@ -197,6 +207,7 @@ class App:
             state="disabled"
         )
         self.link_btn.pack(fill="x", padx=2, pady=2)
+        self._register_widget_i18n(self.link_btn, 'link_btn')
 
         self.port_btn = ttk.Button(
             control_frame,
@@ -204,6 +215,8 @@ class App:
             command=self.change_port
         )
         self.port_btn.pack(fill="x", padx=2, pady=2)
+        self._register_widget_i18n(
+            self.port_btn, 'port_btn', port=self.webserver_port)  # с параметром
 
         # ---- Выбор языка ----
         lang_frame = ttk.Frame(settings_frame)
@@ -224,14 +237,17 @@ class App:
             lang_combo.current(0)
         lang_combo.pack(side="left", padx=2)
         lang_combo.bind('<<ComboboxSelected>>', self.on_lang_change)
+        # Для комбобокса не нужно обновлять текст, он сам отображает выбранное значение
 
         # Настройки микрофона
         mic_frame = ttk.LabelFrame(settings_frame, text=tr('mic_frame'))
         mic_frame.pack(fill="x", pady=(0, 3), padx=3)
+        self._register_widget_i18n(mic_frame, 'mic_frame')
 
         # === НОВОЕ: выбор Host API ===
         ttk.Label(mic_frame, text=tr('audio_api')).pack(
             anchor='w', padx=2, pady=(2, 0))
+        # у метки нет ключа, но можно сохранить, если нужно
         api_row = ttk.Frame(mic_frame)
         api_row.pack(fill='x', padx=2, pady=(0, 2))
         self.host_api_combo = ttk.Combobox(api_row, state="readonly", width=20)
@@ -293,6 +309,7 @@ class App:
             value=self.settings.get('noise_gate_enabled', True))
         ttk.Checkbutton(noise_gate_frame, text=tr('noise_gate'), variable=self.noise_gate_enabled,
                         command=self.toggle_noise_gate).pack(side="left")
+        # у чекбокса можно сохранить ключ, но он не обновляется динамически, т.к. текст не меняется? Но можно.
 
         self.noise_gate_value_label = ttk.Label(noise_gate_frame, text="0.010")
         self.noise_gate_value_label.pack(side="right", padx=2)
@@ -320,6 +337,7 @@ class App:
             main_frame, text=tr('advanced_frame'))
         expandable_frame.grid(
             row=0, column=2, sticky="nsew", padx=(3, 0), pady=0)
+        self._register_widget_i18n(expandable_frame, 'advanced_frame')
 
         self.expand_canvas = tk.Canvas(expandable_frame, bg="#f0f0f0")
         expand_scrollbar = ttk.Scrollbar(
@@ -352,6 +370,8 @@ class App:
         self.effects_header_label = ttk.Label(
             effects_header, text=effects_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.effects_header_label.pack(side="left", padx=2, pady=2)
+        self._register_widget_i18n(
+            self.effects_header_label, 'effects_frame', prefix="▼ " if self.effects_expanded else "▶ ")
         effects_header.bind(
             "<Button-1>", lambda e: self.toggle_section("effects"))
         self.effects_header_label.bind(
@@ -402,6 +422,8 @@ class App:
         self.wave_header_label = ttk.Label(
             wave_header, text=wave_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.wave_header_label.pack(side="left", padx=2, pady=2)
+        self._register_widget_i18n(
+            self.wave_header_label, 'wave_settings', prefix="▼ " if self.wave_expanded else "▶ ")
         wave_header.bind("<Button-1>", lambda e: self.toggle_section("wave"))
         self.wave_header_label.bind(
             "<Button-1>", lambda e: self.toggle_section("wave"))
@@ -476,6 +498,8 @@ class App:
         self.idle_header_label = ttk.Label(
             idle_header, text=idle_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.idle_header_label.pack(side="left", padx=2, pady=2)
+        self._register_widget_i18n(
+            self.idle_header_label, 'idle_mode', prefix="▼ " if self.idle_expanded else "▶ ")
         idle_header.bind("<Button-1>", lambda e: self.toggle_section("idle"))
         self.idle_header_label.bind(
             "<Button-1>", lambda e: self.toggle_section("idle"))
@@ -534,6 +558,8 @@ class App:
         self.thresh_header_label = ttk.Label(
             thresh_header, text=thresh_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.thresh_header_label.pack(side="left", padx=2, pady=2)
+        self._register_widget_i18n(
+            self.thresh_header_label, 'thresholds', prefix="▼ " if self.thresh_expanded else "▶ ")
         thresh_header.bind(
             "<Button-1>", lambda e: self.toggle_section("thresh"))
         self.thresh_header_label.bind(
@@ -556,6 +582,8 @@ class App:
         self.states_header_label = ttk.Label(
             states_header, text=states_text, font=("Arial", 9, "bold"), cursor="hand2")
         self.states_header_label.pack(side="left", padx=2, pady=2)
+        self._register_widget_i18n(
+            self.states_header_label, 'active_states', prefix="▼ " if self.states_expanded else "▶ ")
         states_header.bind(
             "<Button-1>", lambda e: self.toggle_section("states"))
         self.states_header_label.bind(
@@ -597,9 +625,94 @@ class App:
         # Запускаем монитор устройств для автоматического обнаружения подключения/отключения микрофона
         self.start_device_monitor()
 
-    # === НОВЫЙ ОБРАБОТЧИК СМЕНЫ ЯЗЫКА ===
+    # === МЕТОДЫ ДЛЯ ДИНАМИЧЕСКОЙ СМЕНЫ ЯЗЫКА ===
+
+    def _register_widget_i18n(self, widget, key, **kwargs):
+        """Сохраняет ключ перевода и дополнительные параметры для виджета."""
+        widget._i18n_key = key
+        widget._i18n_kwargs = kwargs
+
+    def refresh_ui_texts(self):
+        """Обновляет все тексты в интерфейсе согласно текущему языку."""
+        def update_widgets(widget):
+            # Обновляем текст, если есть ключ
+            if hasattr(widget, '_i18n_key'):
+                try:
+                    kwargs = getattr(widget, '_i18n_kwargs', {})
+                    new_text = tr(widget._i18n_key, **kwargs)
+                    # Для кнопок и меток используем config(text=...)
+                    try:
+                        widget.config(text=new_text)
+                    except:
+                        pass
+                except:
+                    pass
+            # Рекурсивно обходим дочерние элементы
+            try:
+                for child in widget.winfo_children():
+                    update_widgets(child)
+            except:
+                pass
+
+        # Обновляем все виджеты в главном окне
+        update_widgets(self.root)
+        # Обновляем заголовок окна
+        self.root.title(tr('app_title'))
+        # Обновляем кнопку порта с параметром
+        self.port_btn.config(text=tr('port_btn', port=self.webserver_port))
+        # Обновляем текст на кнопках слотов (они имеют сложный текст)
+        for idx, btn in enumerate(self.model_slots):
+            slot_dir = os.path.join(MODELS_DIR, f"slot{idx+1}")
+            json_path = os.path.join(slot_dir, "model.json")
+            is_current = (idx + 1 == self.current_slot)
+            prefix = "★ " if is_current else " "
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        model_data = json.load(f)
+                    model_name = model_data.get(
+                        'name', f"{tr('slot')} {idx+1}")
+                    btn.config(
+                        text=f"{prefix}{tr('slot')} {idx+1}\n{model_name[:15]}")
+                except:
+                    btn.config(
+                        text=f"{prefix}{tr('slot')} {idx+1}\n{tr('error')}")
+            else:
+                btn.config(
+                    text=f"{prefix}{tr('slot')} {idx+1}\n{tr('empty_slot')}")
+
+        # Обновляем заголовки сворачиваемых секций
+        self._update_section_header('effects', self.effects_expanded)
+        self._update_section_header('wave', self.wave_expanded)
+        self._update_section_header('idle', self.idle_expanded)
+        self._update_section_header('thresh', self.thresh_expanded)
+        self._update_section_header('states', self.states_expanded)
+
+        # Обновляем язык в комбобоксе (отображаемое название)
+        self.lang_var.set(i18n.get_language_display_name(i18n.lang))
+
+        # Если редактор открыт – обновим и его
+        if hasattr(self, 'editor') and self.editor and self.editor.winfo_exists():
+            self.editor.refresh_ui_texts()
+
+    def _update_section_header(self, section, expanded):
+        """Обновляет текст заголовка секции."""
+        key_map = {
+            'effects': 'effects_frame',
+            'wave': 'wave_settings',
+            'idle': 'idle_mode',
+            'thresh': 'thresholds',
+            'states': 'active_states'
+        }
+        if section in key_map:
+            label = getattr(self, f"{section}_header_label", None)
+            if label:
+                prefix = "▼ " if expanded else "▶ "
+                label.config(text=prefix + tr(key_map[section]))
+
+    # === ОБРАБОТЧИК СМЕНЫ ЯЗЫКА ===
     def on_lang_change(self, event=None):
-        """Обработчик смены языка."""
+        """Обработчик смены языка (без перезапуска)."""
         new_display = self.lang_var.get()
         available_codes = i18n.get_available_languages()
         new_lang = None
@@ -608,17 +721,11 @@ class App:
                 new_lang = code
                 break
         if new_lang and new_lang != i18n.lang:
+            # меняем язык и уведомляем подписчиков
             i18n.set_lang(new_lang)
             self.settings['language'] = new_lang
             self.save_settings()
-            if messagebox.askyesno(
-                tr('info'),
-                "Для применения языка необходимо перезапустить приложение. Перезапустить сейчас?"
-            ):
-                import sys
-                os.execl(sys.executable, sys.executable, *sys.argv)
-            else:
-                self.root.title(tr('app_title'))
+            # Заголовок окна и все тексты обновятся через callback refresh_ui_texts
 
     # === ОСТАЛЬНЫЕ МЕТОДЫ (без изменений, но с использованием tr) ===
 
@@ -1058,52 +1165,48 @@ class App:
             if self.effects_expanded:
                 self.effects_content.pack_forget()
                 self.effects_expanded = False
-                self.effects_header_label.config(
-                    text="▶ " + tr('effects_frame'))
+                self._update_section_header('effects', False)
             else:
                 self.effects_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.effects_expanded = True
-                self.effects_header_label.config(
-                    text="▼ " + tr('effects_frame'))
+                self._update_section_header('effects', True)
         elif section_name == "wave":
             if self.wave_expanded:
                 self.wave_content.pack_forget()
                 self.wave_expanded = False
-                self.wave_header_label.config(text="▶ " + tr('wave_settings'))
+                self._update_section_header('wave', False)
             else:
                 self.wave_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.wave_expanded = True
-                self.wave_header_label.config(text="▼ " + tr('wave_settings'))
+                self._update_section_header('wave', True)
         elif section_name == "idle":
             if self.idle_expanded:
                 self.idle_content.pack_forget()
                 self.idle_expanded = False
-                self.idle_header_label.config(text="▶ " + tr('idle_mode'))
+                self._update_section_header('idle', False)
             else:
                 self.idle_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.idle_expanded = True
-                self.idle_header_label.config(text="▼ " + tr('idle_mode'))
+                self._update_section_header('idle', True)
         elif section_name == "thresh":
             if self.thresh_expanded:
                 self.thresh_content.pack_forget()
                 self.thresh_expanded = False
-                self.thresh_header_label.config(text="▶ " + tr('thresholds'))
+                self._update_section_header('thresh', False)
             else:
                 self.thresh_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.thresh_expanded = True
-                self.thresh_header_label.config(text="▼ " + tr('thresholds'))
+                self._update_section_header('thresh', True)
                 self.refresh_thresholds_ui()
         elif section_name == "states":
             if self.states_expanded:
                 self.states_content.pack_forget()
                 self.states_expanded = False
-                self.states_header_label.config(
-                    text="▶ " + tr('active_states'))
+                self._update_section_header('states', False)
             else:
                 self.states_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.states_expanded = True
-                self.states_header_label.config(
-                    text="▼ " + tr('active_states'))
+                self._update_section_header('states', True)
                 self.refresh_states_ui()
         self.save_settings()
 
@@ -1368,6 +1471,7 @@ class App:
                 current_slot=self.current_slot,
                 renderer=self.renderer
             )
+            self.editor = editor  # сохраняем ссылку для обновления
 
             def on_editor_close():
                 try:
@@ -1393,6 +1497,7 @@ class App:
                 except Exception as e:
                     logger.error(f"Error restarting audio: {e}")
                 editor.destroy()
+                self.editor = None
             editor.protocol("WM_DELETE_WINDOW", on_editor_close)
         except Exception as e:
             import traceback
@@ -1479,6 +1584,8 @@ class App:
                 logger.error(f"Error stopping web server: {e}")
         self.link_btn.config(state="disabled")
         self.save_settings()
+        # Отписываемся от обновлений языка
+        i18n.unregister_callback(self.refresh_ui_texts)
         logger.info("Application closed")
         self.root.destroy()
 

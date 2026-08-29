@@ -14,6 +14,7 @@ class I18n:
     def __init__(self, lang=None):
         self.lang = lang or DEFAULT_LANG
         self.translations = {}
+        self._callbacks = []  # список функций для вызова при смене языка
         self.load_lang(self.lang)
 
     def load_lang(self, lang):
@@ -34,6 +35,21 @@ class I18n:
 
     def set_lang(self, lang):
         self.load_lang(lang)
+        # Уведомляем всех подписчиков
+        for cb in self._callbacks:
+            try:
+                cb()
+            except Exception as e:
+                print(f'Callback error: {e}')
+
+    def register_callback(self, callback):
+        """Регистрирует функцию, которая будет вызвана при смене языка."""
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+
+    def unregister_callback(self, callback):
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
 
     def get_available_languages(self):
         """Возвращает список кодов доступных языков (имён файлов без .json)."""

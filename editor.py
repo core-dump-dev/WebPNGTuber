@@ -18,7 +18,7 @@ import queue
 import weakref
 from functools import lru_cache
 import uuid
-from locale_loader import tr
+from locale_loader import tr, i18n
 
 # Определение базовой директории
 if getattr(sys, 'frozen', False):
@@ -281,6 +281,9 @@ class ModelEditor(tk.Toplevel):
         self.renderer = renderer  # Сохраняем ссылку на рендерер для синхронизации
         logger.info(f"Model editor opened, current slot: {current_slot}")
 
+        # Регистрируем callback для обновления UI при смене языка
+        i18n.register_callback(self.refresh_ui_texts)
+
         # Сохраняем настройки микрофона
         self.mic_device = device
         self.mic_noise_gate_threshold = noise_gate_threshold
@@ -401,8 +404,9 @@ class ModelEditor(tk.Toplevel):
         # Имя модели
         name_frame = ttk.LabelFrame(left, text=tr('editor_model_name'))
         name_frame.pack(fill="x", pady=2)
+        self._register_widget_i18n(name_frame, 'editor_model_name')
 
-        self.model_name_var = tk.StringVar(value="Без названия")
+        self.model_name_var = tk.StringVar(value=tr('default_model_name'))
         name_entry = ttk.Entry(name_frame, textvariable=self.model_name_var)
         name_entry.pack(fill="x", padx=5, pady=5)
         name_entry.bind("<Return>", self.update_model_name)
@@ -410,32 +414,50 @@ class ModelEditor(tk.Toplevel):
         # Панель с кнопками управления моделью
         button_row1 = ttk.Frame(left)
         button_row1.pack(fill="x", pady=2)
-        ttk.Button(button_row1, text=tr('editor_new'), command=self.new_model, width=10).pack(
-            side="left", padx=1, fill="x", expand=True)
-        ttk.Button(button_row1, text=tr('editor_load'), command=self.load_model,
-                   width=10).pack(side="left", padx=1, fill="x", expand=True)
-        ttk.Button(button_row1, text=tr('editor_save'), command=self.save_model,
-                   width=10).pack(side="left", padx=1, fill="x", expand=True)
+        new_btn = ttk.Button(button_row1, text=tr(
+            'editor_new'), command=self.new_model, width=10)
+        new_btn.pack(side="left", padx=1, fill="x", expand=True)
+        self._register_widget_i18n(new_btn, 'editor_new')
+
+        load_btn = ttk.Button(button_row1, text=tr(
+            'editor_load'), command=self.load_model, width=10)
+        load_btn.pack(side="left", padx=1, fill="x", expand=True)
+        self._register_widget_i18n(load_btn, 'editor_load')
+
+        save_btn = ttk.Button(button_row1, text=tr(
+            'editor_save'), command=self.save_model, width=10)
+        save_btn.pack(side="left", padx=1, fill="x", expand=True)
+        self._register_widget_i18n(save_btn, 'editor_save')
 
         button_row2 = ttk.Frame(left)
         button_row2.pack(fill="x", pady=2)
-        ttk.Button(button_row2, text=tr('editor_import'), command=self.import_images,
-                   width=15).pack(side="left", padx=1, fill="x", expand=True)
+        import_btn = ttk.Button(button_row2, text=tr(
+            'editor_import'), command=self.import_images, width=15)
+        import_btn.pack(side="left", padx=1, fill="x", expand=True)
+        self._register_widget_i18n(import_btn, 'editor_import')
 
         button_row3 = ttk.Frame(left)
         button_row3.pack(fill="x", pady=2)
-        ttk.Button(button_row3, text=tr('editor_export_zip'), command=self.export_zip,
-                   width=10).pack(side="left", padx=1, fill="x", expand=True)
-        ttk.Button(button_row3, text=tr('editor_import_zip'), command=self.import_zip,
-                   width=10).pack(side="left", padx=1, fill="x", expand=True)
+        export_zip_btn = ttk.Button(button_row3, text=tr(
+            'editor_export_zip'), command=self.export_zip, width=10)
+        export_zip_btn.pack(side="left", padx=1, fill="x", expand=True)
+        self._register_widget_i18n(export_zip_btn, 'editor_export_zip')
+
+        import_zip_btn = ttk.Button(button_row3, text=tr(
+            'editor_import_zip'), command=self.import_zip, width=10)
+        import_zip_btn.pack(side="left", padx=1, fill="x", expand=True)
+        self._register_widget_i18n(import_zip_btn, 'editor_import_zip')
 
         # Кнопка удаления модели
-        ttk.Button(left, text=tr('editor_delete_model'),
-                   command=self.delete_model).pack(fill="x", pady=2)
+        delete_model_btn = ttk.Button(left, text=tr(
+            'editor_delete_model'), command=self.delete_model)
+        delete_model_btn.pack(fill="x", pady=2)
+        self._register_widget_i18n(delete_model_btn, 'editor_delete_model')
 
         # Настройки холста
         canvas_frame = ttk.LabelFrame(left, text=tr('editor_canvas_settings'))
         canvas_frame.pack(fill="x", pady=10)
+        self._register_widget_i18n(canvas_frame, 'editor_canvas_settings')
 
         ttk.Label(canvas_frame, text=tr('editor_width')).grid(
             row=0, column=0, sticky="w", padx=2, pady=2)
@@ -453,33 +475,48 @@ class ModelEditor(tk.Toplevel):
         height_entry.grid(row=1, column=1, sticky="ew", padx=2, pady=2)
         height_entry.bind("<Return>", self.update_canvas_size)
 
-        ttk.Button(canvas_frame, text=tr('editor_apply'), command=self.update_canvas_size).grid(
-            row=2, column=0, columnspan=2, pady=5)
+        apply_canvas_btn = ttk.Button(canvas_frame, text=tr(
+            'editor_apply'), command=self.update_canvas_size)
+        apply_canvas_btn.grid(row=2, column=0, columnspan=2, pady=5)
+        self._register_widget_i18n(apply_canvas_btn, 'editor_apply')
 
         # Управление зумом
         zoom_frame = ttk.Frame(canvas_frame)
         zoom_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
-        ttk.Button(zoom_frame, text=tr('editor_zoom_in'), width=3,
-                   command=self.zoom_in).pack(side="left", padx=2)
-        ttk.Button(zoom_frame, text=tr('editor_zoom_out'), width=3,
-                   command=self.zoom_out).pack(side="left", padx=2)
-        ttk.Button(zoom_frame, text=tr('editor_zoom_reset'), width=6,
-                   command=self.zoom_reset).pack(side="left", padx=2)
+        zoom_in_btn = ttk.Button(zoom_frame, text=tr(
+            'editor_zoom_in'), width=3, command=self.zoom_in)
+        zoom_in_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(zoom_in_btn, 'editor_zoom_in')
+        zoom_out_btn = ttk.Button(zoom_frame, text=tr(
+            'editor_zoom_out'), width=3, command=self.zoom_out)
+        zoom_out_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(zoom_out_btn, 'editor_zoom_out')
+        zoom_reset_btn = ttk.Button(zoom_frame, text=tr(
+            'editor_zoom_reset'), width=6, command=self.zoom_reset)
+        zoom_reset_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(zoom_reset_btn, 'editor_zoom_reset')
 
         # Режим тестирования
         test_frame = ttk.LabelFrame(left, text=tr('editor_test_mode'))
         test_frame.pack(fill="x", pady=10)
+        self._register_widget_i18n(test_frame, 'editor_test_mode')
 
         self.test_mode_var = tk.StringVar(value="none")
-        ttk.Radiobutton(test_frame, text=tr('editor_microphone'), variable=self.test_mode_var,
-                        value="microphone", command=self.update_test_mode).pack(anchor="w")
-        ttk.Radiobutton(test_frame, text=tr('editor_off'), variable=self.test_mode_var,
-                        value="none", command=self.update_test_mode).pack(anchor="w")
+        mic_radio = ttk.Radiobutton(test_frame, text=tr('editor_microphone'), variable=self.test_mode_var,
+                                    value="microphone", command=self.update_test_mode)
+        mic_radio.pack(anchor="w")
+        self._register_widget_i18n(mic_radio, 'editor_microphone')
+        off_radio = ttk.Radiobutton(test_frame, text=tr('editor_off'), variable=self.test_mode_var,
+                                    value="none", command=self.update_test_mode)
+        off_radio.pack(anchor="w")
+        self._register_widget_i18n(off_radio, 'editor_off')
 
         # Индикатор уровня
         self.level_frame = ttk.Frame(test_frame)
         self.level_frame.pack(fill="x", pady=5)
-        ttk.Label(self.level_frame, text=tr('editor_level')).pack(side="left")
+        level_label = ttk.Label(self.level_frame, text=tr('editor_level'))
+        level_label.pack(side="left")
+        self._register_widget_i18n(level_label, 'editor_level')
         self.level_bar = ttk.Progressbar(
             self.level_frame, length=200, mode="determinate")
         self.level_bar.pack(side="left", fill="x", expand=True, padx=5)
@@ -492,8 +529,9 @@ class ModelEditor(tk.Toplevel):
         self.audio_processor.noise_gate_threshold = self.mic_noise_gate_threshold
         self.audio_processor.set_sensitivity(self.mic_sensitivity)
 
-        ttk.Label(left, text=tr('editor_imported')).pack(
-            anchor="w", pady=(8, 0))
+        imported_label = ttk.Label(left, text=tr('editor_imported'))
+        imported_label.pack(anchor="w", pady=(8, 0))
+        self._register_widget_i18n(imported_label, 'editor_imported')
 
         # Список импортированных изображений
         import_frame = ttk.Frame(left)
@@ -516,16 +554,20 @@ class ModelEditor(tk.Toplevel):
         preview_header = ttk.Frame(center)
         preview_header.pack(fill="x", padx=5, pady=(0, 5))
 
-        ttk.Label(preview_header, text=tr('editor_preview'), font=(
-            "Arial", 10, "bold")).pack(side="left", padx=(0, 10))
+        preview_label = ttk.Label(preview_header, text=tr(
+            'editor_preview'), font=("Arial", 10, "bold"))
+        preview_label.pack(side="left", padx=(0, 10))
+        self._register_widget_i18n(preview_label, 'editor_preview')
 
         # Кнопки отмены/повтора
-        undo_btn = ttk.Button(preview_header, text=tr('editor_undo'),
-                              width=2, command=self.undo)
+        undo_btn = ttk.Button(preview_header, text=tr(
+            'editor_undo'), width=2, command=self.undo)
         undo_btn.pack(side="left", padx=2)
-        redo_btn = ttk.Button(preview_header, text=tr('editor_redo'),
-                              width=2, command=self.redo)
+        self._register_widget_i18n(undo_btn, 'editor_undo')
+        redo_btn = ttk.Button(preview_header, text=tr(
+            'editor_redo'), width=2, command=self.redo)
         redo_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(redo_btn, 'editor_redo')
 
         preview_frame = ttk.Frame(center)
         preview_frame.pack(fill="both", expand=True)
@@ -568,6 +610,7 @@ class ModelEditor(tk.Toplevel):
         # ---- Вкладка "Элементы" ----
         items_frame = ttk.LabelFrame(items_tab, text=tr('editor_canvas_items'))
         items_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self._register_widget_i18n(items_frame, 'editor_canvas_items')
 
         # Древовидный список элементов
         items_list_frame = ttk.Frame(items_frame)
@@ -586,18 +629,27 @@ class ModelEditor(tk.Toplevel):
         # Кнопки управления
         btns_frame = ttk.Frame(items_frame)
         btns_frame.pack(fill="x", pady=(0, 10))
-        ttk.Button(btns_frame, text=tr('editor_bring_forward'), width=3,
-                   command=self.bring_forward).pack(side="left", padx=2)
-        ttk.Button(btns_frame, text=tr('editor_send_backward'), width=3,
-                   command=self.send_backward).pack(side="left", padx=2)
-        ttk.Button(btns_frame, text=tr('editor_group'), command=self.group_selected).pack(
-            side="left", padx=2, fill="x", expand=True)
-        ttk.Button(btns_frame, text=tr('editor_ungroup'), command=self.ungroup_selected).pack(
-            side="left", padx=2, fill="x", expand=True)
+        bring_btn = ttk.Button(btns_frame, text=tr(
+            'editor_bring_forward'), width=3, command=self.bring_forward)
+        bring_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(bring_btn, 'editor_bring_forward')
+        send_btn = ttk.Button(btns_frame, text=tr(
+            'editor_send_backward'), width=3, command=self.send_backward)
+        send_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(send_btn, 'editor_send_backward')
+        group_btn = ttk.Button(btns_frame, text=tr(
+            'editor_group'), command=self.group_selected)
+        group_btn.pack(side="left", padx=2, fill="x", expand=True)
+        self._register_widget_i18n(group_btn, 'editor_group')
+        ungroup_btn = ttk.Button(btns_frame, text=tr(
+            'editor_ungroup'), command=self.ungroup_selected)
+        ungroup_btn.pack(side="left", padx=2, fill="x", expand=True)
+        self._register_widget_i18n(ungroup_btn, 'editor_ungroup')
 
         # Свойства элемента
         props = ttk.LabelFrame(items_frame, text=tr('editor_item_props'))
         props.pack(fill="x", pady=(0, 5))
+        self._register_widget_i18n(props, 'editor_item_props')
 
         grid_frame = ttk.Frame(props)
         grid_frame.pack(fill="x", padx=5, pady=5)
@@ -646,37 +698,51 @@ class ModelEditor(tk.Toplevel):
         # Зеркалирование
         mirror_frame = ttk.Frame(props)
         mirror_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(mirror_frame, text=tr('editor_mirror')).pack(side="left")
+        mirror_label = ttk.Label(mirror_frame, text=tr('editor_mirror'))
+        mirror_label.pack(side="left")
+        self._register_widget_i18n(mirror_label, 'editor_mirror')
         self.flip_h_var = tk.BooleanVar(value=False)
         self.flip_v_var = tk.BooleanVar(value=False)
         self.flip_h_cb = ttk.Checkbutton(mirror_frame, text=tr('editor_mirror_h'), variable=self.flip_h_var,
                                          command=self.on_mirror_change)
         self.flip_h_cb.pack(side="left", padx=5)
+        self._register_widget_i18n(self.flip_h_cb, 'editor_mirror_h')
         self.flip_v_cb = ttk.Checkbutton(mirror_frame, text=tr('editor_mirror_v'), variable=self.flip_v_var,
                                          command=self.on_mirror_change)
         self.flip_v_cb.pack(side="left", padx=5)
+        self._register_widget_i18n(self.flip_v_cb, 'editor_mirror_v')
 
         # ВИДИМОСТЬ
         self.visible_var = tk.BooleanVar(value=True)
         self.visible_cb = ttk.Checkbutton(props, text=tr('editor_visible'), variable=self.visible_var,
                                           command=self.on_visible_change)
         self.visible_cb.pack(anchor="w", padx=5, pady=(0, 5))
+        self._register_widget_i18n(self.visible_cb, 'editor_visible')
 
-        ttk.Button(props, text=tr('editor_apply_props'),
-                   command=self.apply_props).pack(fill="x", padx=5, pady=5)
-        ttk.Button(props, text=tr('editor_delete_selected'),
-                   command=self.delete_selected_items).pack(fill="x", padx=5, pady=5)
+        apply_props_btn = ttk.Button(props, text=tr(
+            'editor_apply_props'), command=self.apply_props)
+        apply_props_btn.pack(fill="x", padx=5, pady=5)
+        self._register_widget_i18n(apply_props_btn, 'editor_apply_props')
+
+        delete_selected_btn = ttk.Button(props, text=tr(
+            'editor_delete_selected'), command=self.delete_selected_items)
+        delete_selected_btn.pack(fill="x", padx=5, pady=5)
+        self._register_widget_i18n(
+            delete_selected_btn, 'editor_delete_selected')
 
         # ---- Вкладка "Логика групп" ----
         groups_frame = ttk.LabelFrame(
             groups_tab, text=tr('editor_group_logic'))
         groups_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self._register_widget_i18n(groups_frame, 'editor_group_logic')
 
         # Выбранная группа
         group_info_frame = ttk.Frame(groups_frame)
         group_info_frame.pack(fill="x", pady=(0, 10))
-        ttk.Label(group_info_frame, text=tr('editor_selected_group')).pack(
-            side="left", padx=(0, 5))
+        group_info_label = ttk.Label(
+            group_info_frame, text=tr('editor_selected_group'))
+        group_info_label.pack(side="left", padx=(0, 5))
+        self._register_widget_i18n(group_info_label, 'editor_selected_group')
         self.group_label = ttk.Label(
             group_info_frame, text=tr('editor_no_group'), font=("Arial", 9, "bold"))
         self.group_label.pack(side="left")
@@ -685,6 +751,7 @@ class ModelEditor(tk.Toplevel):
         logic_frame = ttk.LabelFrame(
             groups_frame, text=tr('editor_state_to_layer'))
         logic_frame.pack(fill="x", pady=(0, 10))
+        self._register_widget_i18n(logic_frame, 'editor_state_to_layer')
 
         # Словарь для переменных состояний будет заполнен динамически
         self.state_vars = {}
@@ -697,34 +764,44 @@ class ModelEditor(tk.Toplevel):
         random_frame = ttk.LabelFrame(
             groups_tab, text=tr('editor_random_effect'))
         random_frame.pack(fill="x", pady=(0, 10))
+        self._register_widget_i18n(random_frame, 'editor_random_effect')
 
         self.random_effect_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(random_frame, text=tr('editor_random_effect'),
-                        variable=self.random_effect_var).pack(anchor="w", padx=5, pady=2)
+        random_cb = ttk.Checkbutton(random_frame, text=tr('editor_random_effect'),
+                                    variable=self.random_effect_var)
+        random_cb.pack(anchor="w", padx=5, pady=2)
+        self._register_widget_i18n(random_cb, 'editor_random_effect')
 
         interval_frame = ttk.Frame(random_frame)
         interval_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(interval_frame, text=tr(
-            'editor_random_interval')).pack(side="left")
+        interval_label = ttk.Label(
+            interval_frame, text=tr('editor_random_interval'))
+        interval_label.pack(side="left")
+        self._register_widget_i18n(interval_label, 'editor_random_interval')
         self.random_min_var = tk.DoubleVar(value=5.0)
         ttk.Entry(interval_frame, textvariable=self.random_min_var,
                   width=5).pack(side="left", padx=2)
-        ttk.Label(interval_frame, text=tr(
-            'editor_random_to')).pack(side="left")
+        to_label = ttk.Label(interval_frame, text=tr('editor_random_to'))
+        to_label.pack(side="left")
+        self._register_widget_i18n(to_label, 'editor_random_to')
         self.random_max_var = tk.DoubleVar(value=10.0)
         ttk.Entry(interval_frame, textvariable=self.random_max_var,
                   width=5).pack(side="left", padx=2)
-        ttk.Label(interval_frame, text=tr(
-            'editor_random_seconds')).pack(side="left")
+        sec_label = ttk.Label(interval_frame, text=tr('editor_random_seconds'))
+        sec_label.pack(side="left")
+        self._register_widget_i18n(sec_label, 'editor_random_seconds')
 
         # Настройки моргания
         blink_frame = ttk.LabelFrame(
             groups_tab, text=tr('editor_blink_settings'))
         blink_frame.pack(fill="x", pady=(0, 10))
+        self._register_widget_i18n(blink_frame, 'editor_blink_settings')
 
         freq_frame = ttk.Frame(blink_frame)
         freq_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(freq_frame, text=tr('editor_blink_freq')).pack(side="left")
+        freq_label = ttk.Label(freq_frame, text=tr('editor_blink_freq'))
+        freq_label.pack(side="left")
+        self._register_widget_i18n(freq_label, 'editor_blink_freq')
         self.blink_freq = tk.DoubleVar(value=0.0)
         self.blink_freq_entry = ttk.Entry(
             freq_frame, width=6, textvariable=self.blink_freq)
@@ -734,14 +811,20 @@ class ModelEditor(tk.Toplevel):
 
         btn_frame = ttk.Frame(blink_frame)
         btn_frame.pack(fill="x", padx=5, pady=(0, 5))
-        ttk.Button(btn_frame, text=tr('editor_blink_preview'), width=8,
-                   command=self.show_blink_preview).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text=tr('editor_blink_stop'), command=self.stop_blink_preview).pack(
-            side="left", padx=2)
+        preview_blink_btn = ttk.Button(btn_frame, text=tr('editor_blink_preview'), width=8,
+                                       command=self.show_blink_preview)
+        preview_blink_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(preview_blink_btn, 'editor_blink_preview')
+        stop_blink_btn = ttk.Button(btn_frame, text=tr(
+            'editor_blink_stop'), command=self.stop_blink_preview)
+        stop_blink_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(stop_blink_btn, 'editor_blink_stop')
 
         # Кнопка применения
-        ttk.Button(groups_frame, text=tr('editor_apply_logic'),
-                   command=self.apply_group_logic).pack(fill="x", pady=10)
+        apply_logic_btn = ttk.Button(groups_frame, text=tr(
+            'editor_apply_logic'), command=self.apply_group_logic)
+        apply_logic_btn.pack(fill="x", pady=10)
+        self._register_widget_i18n(apply_logic_btn, 'editor_apply_logic')
 
         # ---- Вкладка "Состояния рта" (НОВАЯ) ----
         self._create_mouth_states_ui(mouth_states_tab)
@@ -751,23 +834,66 @@ class ModelEditor(tk.Toplevel):
         except Exception as e:
             logger.error(f"Error loading icon: {e}")
 
+    def _register_widget_i18n(self, widget, key, **kwargs):
+        """Сохраняет ключ перевода для виджета."""
+        widget._i18n_key = key
+        widget._i18n_kwargs = kwargs
+
+    def refresh_ui_texts(self):
+        """Обновляет все тексты в интерфейсе редактора согласно текущему языку."""
+        def update_widgets(widget):
+            if hasattr(widget, '_i18n_key'):
+                try:
+                    kwargs = getattr(widget, '_i18n_kwargs', {})
+                    new_text = tr(widget._i18n_key, **kwargs)
+                    try:
+                        widget.config(text=new_text)
+                    except:
+                        pass
+                except:
+                    pass
+            try:
+                for child in widget.winfo_children():
+                    update_widgets(child)
+            except:
+                pass
+
+        update_widgets(self)
+        # Обновляем заголовок окна
+        self.title(tr('editor_title'))
+        # Обновляем имя модели (если оно не было изменено пользователем)
+        if self.model_name_var.get() == tr('default_model_name'):
+            self.model_name_var.set(tr('default_model_name'))
+        # Обновляем состояния рта, если они стандартные
+        # (можно перезагрузить модель, но лучше просто обновить UI списка)
+        self.refresh_mouth_states_list()
+        self.refresh_tree()  # обновить дерево (текст элементов)
+        self.redraw_canvas()
+
     def _create_mouth_states_ui(self, parent):
         """Создаёт UI для управления состояниями рта"""
         main_frame = ttk.Frame(parent)
         main_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Заголовок
-        ttk.Label(main_frame, text=tr('editor_mouth_states_manage'), font=(
-            "Arial", 9, "bold")).pack(anchor="w", pady=(0, 5))
+        title_label = ttk.Label(main_frame, text=tr(
+            'editor_mouth_states_manage'), font=("Arial", 9, "bold"))
+        title_label.pack(anchor="w", pady=(0, 5))
+        self._register_widget_i18n(title_label, 'editor_mouth_states_manage')
 
         # Верхняя панель с кнопками
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill="x", pady=(0, 5))
 
-        ttk.Button(btn_frame, text=tr('editor_add_state'), width=12,
-                   command=self.add_mouth_state).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text=tr('editor_delete_state'), width=8,
-                   command=self.delete_mouth_state).pack(side="left", padx=2)
+        add_state_btn = ttk.Button(btn_frame, text=tr(
+            'editor_add_state'), width=12, command=self.add_mouth_state)
+        add_state_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(add_state_btn, 'editor_add_state')
+
+        delete_state_btn = ttk.Button(btn_frame, text=tr(
+            'editor_delete_state'), width=8, command=self.delete_mouth_state)
+        delete_state_btn.pack(side="left", padx=2)
+        self._register_widget_i18n(delete_state_btn, 'editor_delete_state')
 
         # Панель со списком состояний
         list_frame = ttk.Frame(main_frame)
@@ -795,20 +921,24 @@ class ModelEditor(tk.Toplevel):
         # Панель свойств выбранного состояния
         props_frame = ttk.LabelFrame(main_frame, text=tr('editor_state_props'))
         props_frame.pack(fill="x", pady=(0, 5))
+        self._register_widget_i18n(props_frame, 'editor_state_props')
 
         props_grid = ttk.Frame(props_frame)
         props_grid.pack(fill="x", padx=5, pady=5)
 
         # Название
-        ttk.Label(props_grid, text=tr('editor_state_name')).grid(
-            row=0, column=0, sticky="w", padx=2, pady=2)
+        name_label = ttk.Label(props_grid, text=tr('editor_state_name'))
+        name_label.grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        self._register_widget_i18n(name_label, 'editor_state_name')
         self.state_name_entry = ttk.Entry(props_grid, width=20)
         self.state_name_entry.grid(
             row=0, column=1, sticky="ew", padx=2, pady=2)
 
         # Порог
-        ttk.Label(props_grid, text=tr('editor_state_threshold')).grid(row=1,
-                                                                      column=0, sticky="w", padx=2, pady=2)
+        threshold_label = ttk.Label(
+            props_grid, text=tr('editor_state_threshold'))
+        threshold_label.grid(row=1, column=0, sticky="w", padx=2, pady=2)
+        self._register_widget_i18n(threshold_label, 'editor_state_threshold')
         self.state_threshold_var = tk.DoubleVar(value=0.0)
         self.state_threshold_entry = ttk.Entry(
             props_grid, textvariable=self.state_threshold_var, width=8)
@@ -817,16 +947,25 @@ class ModelEditor(tk.Toplevel):
 
         # Активно
         self.state_active_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(props_grid, text=tr('editor_state_active'), variable=self.state_active_var).grid(
-            row=2, column=0, columnspan=2, sticky="w", padx=2, pady=2)
+        active_cb = ttk.Checkbutton(props_grid, text=tr(
+            'editor_state_active'), variable=self.state_active_var)
+        active_cb.grid(row=2, column=0, columnspan=2,
+                       sticky="w", padx=2, pady=2)
+        self._register_widget_i18n(active_cb, 'editor_state_active')
 
         # Кнопка "Применить"
-        ttk.Button(props_grid, text=tr('editor_state_apply'), command=self.apply_mouth_state_props).grid(
+        apply_state_btn = ttk.Button(props_grid, text=tr(
+            'editor_state_apply'), command=self.apply_mouth_state_props)
+        apply_state_btn.grid(
             row=3, column=0, columnspan=2, pady=5, sticky="ew")
+        self._register_widget_i18n(apply_state_btn, 'editor_state_apply')
 
         # Кнопка "Авто-распределить пороги"
-        ttk.Button(main_frame, text=tr('editor_auto_thresholds'),
-                   command=self.auto_distribute_thresholds).pack(fill="x", pady=5)
+        auto_thresholds_btn = ttk.Button(main_frame, text=tr('editor_auto_thresholds'),
+                                         command=self.auto_distribute_thresholds)
+        auto_thresholds_btn.pack(fill="x", pady=5)
+        self._register_widget_i18n(
+            auto_thresholds_btn, 'editor_auto_thresholds')
 
         # Обновляем список состояний
         self.refresh_mouth_states_list()
@@ -2528,6 +2667,8 @@ class ModelEditor(tk.Toplevel):
             except Exception as e:
                 logger.error(f"Error removing temporary directory: {e}")
 
+        # Отписываемся от обновлений языка
+        i18n.unregister_callback(self.refresh_ui_texts)
         self.grab_release()
         logger.info("Model editor closed")
         self.destroy()
