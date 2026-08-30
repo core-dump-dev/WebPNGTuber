@@ -8,13 +8,14 @@ WebPNGTuber is an open-source application for creating and managing PNG Tuber mo
 
 ## ✨ Key Features
 
-- 🎨 **Multi‑layer editor**: Build complex models from PNG and GIF images.
-- 🔊 **Audio reactions**: Configure 4 reaction levels (silence, whisper, normal, shout).
-- 👁️ **Automatic blinking**: Realistic eye animation with adjustable frequency.
-- 🌐 **Built‑in web server**: Stream to OBS via `http://localhost:6969`.
-- ⚙️ **Advanced settings**: Adjust sensitivity, noise reduction, effects.
+- 🎨 **Multi-layer editor**: Build complex models from PNG and GIF images.
+- 🔊 **Voice reactivity**: 4 levels (silence, whisper, normal, shout).
+- 👁️ **Auto-blink**: Realistic eye animation with adjustable frequency.
+- 🌐 **Built-in web server**: Stream to OBS via `http://localhost:6969`.
+- ⚙️ **Advanced settings**: Sensitivity, noise gate, effects.
 - 💾 **Slot system**: Save up to 6 models with previews.
-- 🌑 **Idle mode**: Automatically dim the avatar during inactivity.
+- 🌑 **Idle mode**: Auto‑dim avatar when inactive.
+- 🌍 **Multi‑language support**: Russian and English (translated with neural network). You can add your own translation by placing a `.json` file in the `locales` folder – it will appear automatically in the language selector.
 
 ## Model
 
