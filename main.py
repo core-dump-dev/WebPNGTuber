@@ -547,10 +547,12 @@ class App:
         amp_label = ttk.Label(amplitude_frame, text=tr('wave_amplitude'))
         amp_label.pack(anchor="w", side="left")
         self._register_widget_i18n(amp_label, 'wave_amplitude')
+        # ИЗМЕНЕНО: шаг амплитуды волны 0.1 (было 0.25)
         self.wave_amplitude = tk.DoubleVar(value=self._round_to_step(
-            self.wave_params.get('amplitude', 7.0), 0.25))
+            self.wave_params.get('amplitude', 7.0), 0.1))
+        # ИЗМЕНЕНО: формат метки .1f (было .2f)
         self.wave_amplitude_label = ttk.Label(
-            amplitude_frame, text=f"{self.wave_amplitude.get():.2f}")
+            amplitude_frame, text=f"{self.wave_amplitude.get():.1f}")
         self.wave_amplitude_label.pack(anchor="e", side="right", padx=5)
         wave_amp_scale = ttk.Scale(amplitude_frame, from_=0.5, to=10.0,
                                    variable=self.wave_amplitude, orient="horizontal", length=150)
@@ -565,10 +567,12 @@ class App:
         freq_label = ttk.Label(frequency_frame, text=tr('wave_frequency'))
         freq_label.pack(anchor="w", side="left")
         self._register_widget_i18n(freq_label, 'wave_frequency')
+        # ИЗМЕНЕНО: шаг частоты волны 0.1 (было 0.25)
         self.wave_frequency = tk.DoubleVar(value=self._round_to_step(
-            self.wave_params.get('frequency', 1.0), 0.25))
+            self.wave_params.get('frequency', 1.0), 0.1))
+        # ИЗМЕНЕНО: формат метки .1f (было .2f)
         self.wave_frequency_label = ttk.Label(
-            frequency_frame, text=f"{self.wave_frequency.get():.2f}")
+            frequency_frame, text=f"{self.wave_frequency.get():.1f}")
         self.wave_frequency_label.pack(anchor="e", side="right", padx=5)
         wave_freq_scale = ttk.Scale(frequency_frame, from_=0.1, to=2.0,
                                     variable=self.wave_frequency, orient="horizontal", length=150)
@@ -1165,14 +1169,20 @@ class App:
         self.noise_gate_value_label.config(text=f"{rounded_value:.3f}")
 
     def _on_wave_scale_move(self, param, value):
-        rounded_value = round(float(value))
+        # ИЗМЕНЕНО: amplitude/frequency теперь округляются до шага 0.1 (было round() до целого)
         if param == 'amplitude':
+            # Шаг 0.1
+            rounded_value = round(float(value) * 10) / 10
             self.wave_amplitude.set(rounded_value)
-            self.wave_amplitude_label.config(text=f"{rounded_value:.2f}")
+            self.wave_amplitude_label.config(text=f"{rounded_value:.1f}")
         elif param == 'frequency':
+            # Шаг 0.1
+            rounded_value = round(float(value) * 10) / 10
             self.wave_frequency.set(rounded_value)
-            self.wave_frequency_label.config(text=f"{rounded_value:.2f}")
+            self.wave_frequency_label.config(text=f"{rounded_value:.1f}")
         elif param == 'speed':
+            # Скорость — целые 0-5
+            rounded_value = round(float(value))
             self.wave_speed.set(rounded_value)
             self.wave_speed_label.config(text=f"{rounded_value}")
 
@@ -1199,9 +1209,11 @@ class App:
         self.save_settings()
 
     def update_wave_params(self):
+        # ИЗМЕНЕНО: amplitude/frequency округляются до 0.1 перед сохранением
+        # и передачей в рендерер (раньше сохранялись «грязные» float)
         self.wave_params = {
-            'amplitude': self.wave_amplitude.get(),
-            'frequency': self.wave_frequency.get(),
+            'amplitude': round(self.wave_amplitude.get() * 10) / 10,
+            'frequency': round(self.wave_frequency.get() * 10) / 10,
             'speed': self.wave_speed.get()
         }
         wave_enabled = self.wave_effect.get()
