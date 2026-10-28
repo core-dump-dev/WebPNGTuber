@@ -98,6 +98,22 @@ class App:
             'wave': False
         })
 
+        # Сила глобальных эффектов (shake/bounce/pulse)
+        self.effect_strength = self.settings.get('effect_strength', {
+            'shake': 1.0,
+            'bounce': 1.0,
+            'pulse': 1.0
+        })
+
+        # Переменные для UI-слайдеров создаём до UI,
+        # чтобы save_settings не падал при раннем вызове.
+        self.shake_strength_var = tk.DoubleVar(
+            value=self.effect_strength.get('shake', 1.0))
+        self.bounce_strength_var = tk.DoubleVar(
+            value=self.effect_strength.get('bounce', 1.0))
+        self.pulse_strength_var = tk.DoubleVar(
+            value=self.effect_strength.get('pulse', 1.0))
+
         # Параметры эффекта "Волна"
         self.wave_params = self.settings.get('wave_params', {
             'amplitude': 7.0,
@@ -106,6 +122,7 @@ class App:
         })
 
         self.renderer.set_effects(self.effects)
+        self.renderer.set_effect_strength(self.effect_strength)
         # Устанавливаем параметры эффекта "Волна" (только если он включен в effects)
         if self.effects.get('wave', False):
             self.renderer.set_wave(
@@ -433,6 +450,38 @@ class App:
                                   command=self.update_effects)
         wave_cb.pack(anchor="w", padx=3, pady=1)
         self._register_widget_i18n(wave_cb, 'wave')
+
+        # --- Сила глобальных эффектов (shake/bounce/pulse) ---
+        ttk.Separator(effects_grid, orient='horizontal').pack(
+            fill='x', padx=3, pady=(6, 2))
+
+        strength_title = ttk.Label(
+            effects_grid, text=tr('effects_strength_title'),
+            font=('Arial', 8, 'italic'))
+        strength_title.pack(anchor='w', padx=3, pady=(0, 2))
+        self._register_widget_i18n(strength_title, 'effects_strength_title')
+
+        def _add_strength_slider(parent, var, label_key):
+            row = ttk.Frame(parent)
+            row.pack(fill='x', padx=6, pady=1)
+            lbl = ttk.Label(row, text=tr(label_key), width=8, anchor='w')
+            lbl.pack(side='left')
+            self._register_widget_i18n(lbl, label_key)
+            val_lbl = ttk.Label(row, text=f"{var.get():.1f}", width=4)
+            val_lbl.pack(side='right')
+            scale = ttk.Scale(row, from_=0.0, to=2.0, variable=var,
+                              orient='horizontal')
+            scale.pack(side='left', fill='x', expand=True, padx=2)
+            scale.configure(
+                command=lambda v, vl=val_lbl: vl.config(text=f"{float(v):.1f}"))
+            scale.bind('<ButtonRelease-1>', lambda e: self.update_effects())
+
+        _add_strength_slider(
+            effects_grid, self.shake_strength_var, 'shake')
+        _add_strength_slider(
+            effects_grid, self.bounce_strength_var, 'bounce')
+        _add_strength_slider(
+            effects_grid, self.pulse_strength_var, 'pulse')
 
         # ---- Настройки эффекта "Волна" (второе место) ----
         wave_frame = ttk.Frame(self.expand_content)
@@ -1137,9 +1186,16 @@ class App:
             'random_effect': self.random_effect.get(),
             'wave': self.wave_effect.get()
         }
+        self.effect_strength = {
+            'shake': self.shake_strength_var.get(),
+            'bounce': self.bounce_strength_var.get(),
+            'pulse': self.pulse_strength_var.get()
+        }
         self.renderer.set_effects(effects)
+        self.renderer.set_effect_strength(self.effect_strength)
         self.update_wave_params()
-        logger.info(f"Effects updated: {effects}")
+        logger.info(
+            f"Effects updated: {effects}, strength: {self.effect_strength}")
         self.save_settings()
 
     def update_idle_setting(self):
@@ -1172,6 +1228,11 @@ class App:
                 'blink': self.blink.get(),
                 'random_effect': self.random_effect.get(),
                 'wave': self.wave_effect.get()
+            },
+            'effect_strength': {
+                'shake': self.shake_strength_var.get(),
+                'bounce': self.bounce_strength_var.get(),
+                'pulse': self.pulse_strength_var.get()
             },
             'wave_params': self.wave_params,
             'sensitivity': self.sensitivity.get(),
@@ -1584,6 +1645,7 @@ class App:
                     self.renderer.set_idle(self.idle_enabled.get(), self.idle_timeout.get(
                     ), self.idle_fade_duration.get(), self.idle_restore_duration.get())
                     self.renderer.set_effects(self.effects)
+                    self.renderer.set_effect_strength(self.effect_strength)
                     if self.wave_effect.get():
                         self.renderer.set_wave(
                             True, self.wave_params['amplitude'], self.wave_params['frequency'], self.wave_params['speed'])

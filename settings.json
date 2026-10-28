@@ -7,6 +7,11 @@
     "random_effect": true,
     "wave": false
   },
+  "effect_strength": {
+    "shake": 1.0,
+    "bounce": 1.0,
+    "pulse": 1.0
+  },
   "wave_params": {
     "amplitude": 7.0,
     "frequency": 1.0,

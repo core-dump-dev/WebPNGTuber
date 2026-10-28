@@ -47,6 +47,13 @@ class Renderer:
             'wave': False
         }
 
+        # Сила глобальных эффектов (shake/bounce/pulse)
+        self.effect_strength = {
+            'shake': 1.0,
+            'bounce': 1.0,
+            'pulse': 1.0
+        }
+
         # Параметры эффекта волны
         self.wave_enabled = False
         self.wave_amplitude = 7.0
@@ -90,7 +97,8 @@ class Renderer:
         self._background = np.zeros((height, width, 4), dtype=np.uint8)
 
         # Переиспользуемый буфер кадра (оптимизация)
-        self.frame_buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+        self.frame_buffer = np.zeros(
+            (self.height, self.width, 4), dtype=np.uint8)
 
         logger.info("Renderer initialized with dynamic mouth states support")
 
@@ -108,6 +116,11 @@ class Renderer:
     def set_effects(self, effects):
         self.effects.update(effects)
         logger.info(f"Effects updated: {self.effects}")
+
+    def set_effect_strength(self, strengths):
+        """Устанавливает силу глобальных эффектов (shake/bounce/pulse)."""
+        self.effect_strength.update(strengths)
+        logger.info(f"Effect strengths updated: {self.effect_strength}")
 
     def set_idle(self, enabled, timeout, fade_duration=0.3, restore_duration=0.1):
         """Устанавливает параметры idle-режима с плавным затемнением"""
@@ -420,7 +433,8 @@ class Renderer:
             (self.height, self.width, 4), dtype=np.uint8)
 
         # Пересоздаём буфер кадра под новый размер
-        self.frame_buffer = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+        self.frame_buffer = np.zeros(
+            (self.height, self.width, 4), dtype=np.uint8)
 
         # Загружаем слои
         for idx, layer in enumerate(self.model.get('layers', [])):
@@ -921,7 +935,8 @@ class Renderer:
                             original_frame = frames[current_gif_frame]
                             if original_frame is not None:
                                 image = self._create_discrete_wave_effect(
-                                    original_frame, self._current_wave_frame)  # БЕЗ .copy()
+                                    # БЕЗ .copy()
+                                    original_frame, self._current_wave_frame)
                                 # Сохраняем в кэш для будущего использования
                                 self._gif_wave_frames_cache[cache_key] = image
                     else:
@@ -944,7 +959,8 @@ class Renderer:
                         original_image = layer_info.get('image')
                         if original_image is not None:
                             image = self._create_discrete_wave_effect(
-                                original_image, self._current_wave_frame)  # БЕЗ .copy()
+                                # БЕЗ .copy()
+                                original_image, self._current_wave_frame)
                 else:
                     image = layer_info.get('image')
 
@@ -956,29 +972,10 @@ class Renderer:
                 image = image.copy()
                 image[:, :, 3] = (image[:, :, 3] * alpha).astype(np.uint8)
 
-            # Эффекты
+            # Эффекты shake/bounce/pulse больше не применяются к каждому слою,
+            # они применяются глобально после композитинга всех слоёв.
             offset_x = 0
             offset_y = 0
-
-            if bounce_enabled:
-                bounce_intensity = int(
-                    math.sin(current_time * 5) * min(10, self.audio_level * 20))
-                offset_y = bounce_intensity
-
-            if shake_enabled:
-                shake_intensity = min(1.0, self.audio_level * 5)
-                offset_x = int((random.random() - 0.5) * 10 * shake_intensity)
-                offset_y += int((random.random() - 0.5) * 10 *
-                               shake_intensity)
-
-            if pulse_enabled:
-                pulse_scale = 1.0 + (math.sin(current_time * 5)
-                                     * 0.1 * self.audio_level)
-                new_size = (
-                    int(image.shape[1] * pulse_scale), int(image.shape[0] * pulse_scale))
-                if new_size[0] > 0 and new_size[1] > 0:
-                    image = cv2.resize(
-                        image, new_size, interpolation=cv2.INTER_LINEAR)
 
             h, w = image.shape[:2]
             px = (width - w) // 2 + x + offset_x
@@ -1051,6 +1048,50 @@ class Renderer:
 
             except Exception as e:
                 logger.error(f"Error compositing layer {layer_name}: {e}")
+
+        # Применяем глобальные эффекты (дрожание/прыжки/пульсация)
+        # ко всей суммарной картинке одним warpAffine.
+        if shake_enabled or bounce_enabled or pulse_enabled:
+            strengths = self.effect_strength
+
+            g_offset_x = 0.0
+            g_offset_y = 0.0
+            g_scale = 1.0
+
+            if bounce_enabled:
+                s = strengths.get('bounce', 1.0)
+                if s > 0.001:
+                    g_offset_y += (math.sin(current_time * 5)
+                                   * self.audio_level * 15.0 * s)
+
+            if shake_enabled:
+                s = strengths.get('shake', 1.0)
+                if s > 0.001:
+                    shake_amount = self.audio_level * 20.0 * s
+                    g_offset_x += (random.random() - 0.5) * shake_amount
+                    g_offset_y += (random.random() - 0.5) * shake_amount
+
+            if pulse_enabled:
+                s = strengths.get('pulse', 1.0)
+                if s > 0.001:
+                    g_scale = 1.0 + (math.sin(current_time * 5)
+                                     * 0.1 * self.audio_level * s)
+                    g_scale = max(0.5, min(2.0, g_scale))
+
+            if (abs(g_offset_x) > 0.5 or abs(g_offset_y) > 0.5
+                    or abs(g_scale - 1.0) > 0.001):
+                cx = width / 2.0
+                cy = height / 2.0
+                M = cv2.getRotationMatrix2D((cx, cy), 0, g_scale)
+                M[0, 2] += g_offset_x
+                M[1, 2] += g_offset_y
+                transformed = cv2.warpAffine(
+                    frame, M, (width, height),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=(0, 0, 0, 0)
+                )
+                frame[:] = transformed
 
         # Применяем idle эффект с плавным затуханием
         if self.idle_enabled:
@@ -1140,7 +1181,8 @@ class Renderer:
                 last_fps_time = current_time
 
                 if fps < self.fps * 0.8:
-                    logger.warning(tr('renderer_low_fps', fps=fps, target=self.fps))
+                    logger.warning(
+                        tr('renderer_low_fps', fps=fps, target=self.fps))
 
             # Контроль FPS
             frame_time = current_time - frame_start
