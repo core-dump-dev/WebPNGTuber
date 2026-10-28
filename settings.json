@@ -29,6 +29,7 @@
   "webserver_port": 6969,
   "sections_state": {
     "effects": true,
+    "strength": true,
     "wave": true,
     "idle": true,
     "thresh": true,

@@ -18,6 +18,7 @@
   "settings_frame": "Main Settings",
   "advanced_frame": "Advanced Settings",
   "effects_frame": "Global Effects",
+  "effects_strength_title": "Effect Strength",
   "shake": "Shake",
   "bounce": "Bounce",
   "pulse": "Pulse",

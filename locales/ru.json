@@ -18,6 +18,7 @@
   "settings_frame": "Основные настройки",
   "advanced_frame": "Расширенные настройки",
   "effects_frame": "Глобальные эффекты",
+  "effects_strength_title": "Сила эффектов",
   "shake": "Дрожание",
   "bounce": "Прыжки",
   "pulse": "Пульсация",

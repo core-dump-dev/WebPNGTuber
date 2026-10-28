@@ -99,11 +99,18 @@ class App:
         })
 
         # Сила глобальных эффектов (shake/bounce/pulse)
+        # Приводим к шагу 0.1 на случай старых настроек
         self.effect_strength = self.settings.get('effect_strength', {
             'shake': 1.0,
             'bounce': 1.0,
             'pulse': 1.0
         })
+        self.effect_strength['shake'] = round(
+            self.effect_strength.get('shake', 1.0) * 10) / 10
+        self.effect_strength['bounce'] = round(
+            self.effect_strength.get('bounce', 1.0) * 10) / 10
+        self.effect_strength['pulse'] = round(
+            self.effect_strength.get('pulse', 1.0) * 10) / 10
 
         # Переменные для UI-слайдеров создаём до UI,
         # чтобы save_settings не падал при раннем вызове.
@@ -135,6 +142,7 @@ class App:
         # Состояние раскрытия секций (по умолчанию все открыты)
         self.sections_state = self.settings.get('sections_state', {
             'effects': True,
+            'strength': True,
             'wave': True,
             'idle': True,
             'thresh': True,
@@ -451,39 +459,64 @@ class App:
         wave_cb.pack(anchor="w", padx=3, pady=1)
         self._register_widget_i18n(wave_cb, 'wave')
 
-        # --- Сила глобальных эффектов (shake/bounce/pulse) ---
-        ttk.Separator(effects_grid, orient='horizontal').pack(
-            fill='x', padx=3, pady=(6, 2))
+        # ---- Сила эффектов (сворачиваемая секция, второе место) ----
+        strength_frame = ttk.Frame(self.expand_content)
+        strength_frame.pack(fill="x", pady=(0, 3))
+        strength_header = ttk.Frame(strength_frame)
+        strength_header.pack(fill="x")
 
-        strength_title = ttk.Label(
-            effects_grid, text=tr('effects_strength_title'),
-            font=('Arial', 8, 'italic'))
-        strength_title.pack(anchor='w', padx=3, pady=(0, 2))
-        self._register_widget_i18n(strength_title, 'effects_strength_title')
+        self.strength_expanded = self.sections_state.get('strength', True)
+        strength_text = "▼ " + \
+            tr('effects_strength_title') if self.strength_expanded else "▶ " + \
+            tr('effects_strength_title')
+        self.strength_header_label = ttk.Label(
+            strength_header, text=strength_text, font=("Arial", 9, "bold"), cursor="hand2")
+        self.strength_header_label.pack(side="left", padx=2, pady=2)
+        self._register_widget_i18n(
+            self.strength_header_label, 'effects_strength_title', prefix="▼ " if self.strength_expanded else "▶ ")
+        strength_header.bind(
+            "<Button-1>", lambda e: self.toggle_section("strength"))
+        self.strength_header_label.bind(
+            "<Button-1>", lambda e: self.toggle_section("strength"))
+        self.strength_content = ttk.Frame(strength_frame)
+
+        if self.strength_expanded:
+            self.strength_content.pack(fill="x", padx=3, pady=(0, 2))
+
+        strength_grid = ttk.Frame(self.strength_content)
+        strength_grid.pack(fill="x", padx=2, pady=2)
 
         def _add_strength_slider(parent, var, label_key):
             row = ttk.Frame(parent)
-            row.pack(fill='x', padx=6, pady=1)
+            row.pack(fill='x', padx=3, pady=2)
             lbl = ttk.Label(row, text=tr(label_key), width=8, anchor='w')
             lbl.pack(side='left')
             self._register_widget_i18n(lbl, label_key)
             val_lbl = ttk.Label(row, text=f"{var.get():.1f}", width=4)
             val_lbl.pack(side='right')
             scale = ttk.Scale(row, from_=0.0, to=2.0, variable=var,
-                              orient='horizontal')
+                              orient='horizontal', length=150)
             scale.pack(side='left', fill='x', expand=True, padx=2)
-            scale.configure(
-                command=lambda v, vl=val_lbl: vl.config(text=f"{float(v):.1f}"))
-            scale.bind('<ButtonRelease-1>', lambda e: self.update_effects())
+
+            def on_move(v, vl=val_lbl, vr=var):
+                # Шаг 0.1: округляем до ближайшего десятого
+                rounded = round(float(v) * 10) / 10
+                if abs(vr.get() - rounded) > 0.0001:
+                    vr.set(rounded)
+                vl.config(text=f"{rounded:.1f}")
+
+            scale.configure(command=on_move)
+            scale.bind('<ButtonRelease-1>',
+                       lambda e: self.update_effects())
 
         _add_strength_slider(
-            effects_grid, self.shake_strength_var, 'shake')
+            strength_grid, self.shake_strength_var, 'shake')
         _add_strength_slider(
-            effects_grid, self.bounce_strength_var, 'bounce')
+            strength_grid, self.bounce_strength_var, 'bounce')
         _add_strength_slider(
-            effects_grid, self.pulse_strength_var, 'pulse')
+            strength_grid, self.pulse_strength_var, 'pulse')
 
-        # ---- Настройки эффекта "Волна" (второе место) ----
+        # ---- Настройки эффекта "Волна" (третье место) ----
         wave_frame = ttk.Frame(self.expand_content)
         wave_frame.pack(fill="x", pady=(0, 3))
         wave_header = ttk.Frame(wave_frame)
@@ -563,7 +596,7 @@ class App:
         wave_speed_scale.bind("<ButtonRelease-1>",
                               lambda e: self.update_wave_params())
 
-        # ---- Idle-режим (третье место) ----
+        # ---- Idle-режим (четвертое место) ----
         idle_frame = ttk.Frame(self.expand_content)
         idle_frame.pack(fill="x", pady=(0, 3))
         idle_header = ttk.Frame(idle_frame)
@@ -628,7 +661,7 @@ class App:
         restore_entry.bind("<Return>", lambda e: self.update_idle_setting())
         restore_entry.bind("<FocusOut>", lambda e: self.update_idle_setting())
 
-        # ---- Пороги голоса (четвертое место) ----
+        # ---- Пороги голоса (пятое место) ----
         thresh_frame = ttk.Frame(self.expand_content)
         thresh_frame.pack(fill="x", pady=(0, 3))
         thresh_header = ttk.Frame(thresh_frame)
@@ -651,7 +684,7 @@ class App:
         if self.thresh_expanded:
             self.thresh_content.pack(fill="x", padx=3, pady=(0, 2))
 
-        # ---- Активные состояния (пятое место, в самом низу) ----
+        # ---- Активные состояния (шестое место, в самом низу) ----
         states_frame = ttk.Frame(self.expand_content)
         states_frame.pack(fill="x", pady=(0, 3))
         states_header = ttk.Frame(states_frame)
@@ -773,6 +806,7 @@ class App:
 
         # Обновляем заголовки сворачиваемых секций
         self._update_section_header('effects', self.effects_expanded)
+        self._update_section_header('strength', self.strength_expanded)
         self._update_section_header('wave', self.wave_expanded)
         self._update_section_header('idle', self.idle_expanded)
         self._update_section_header('thresh', self.thresh_expanded)
@@ -789,6 +823,7 @@ class App:
         """Обновляет текст заголовка секции."""
         key_map = {
             'effects': 'effects_frame',
+            'strength': 'effects_strength_title',
             'wave': 'wave_settings',
             'idle': 'idle_mode',
             'thresh': 'thresholds',
@@ -1186,10 +1221,11 @@ class App:
             'random_effect': self.random_effect.get(),
             'wave': self.wave_effect.get()
         }
+        # Округляем силы до шага 0.1 для стабильных значений
         self.effect_strength = {
-            'shake': self.shake_strength_var.get(),
-            'bounce': self.bounce_strength_var.get(),
-            'pulse': self.pulse_strength_var.get()
+            'shake': round(self.shake_strength_var.get() * 10) / 10,
+            'bounce': round(self.bounce_strength_var.get() * 10) / 10,
+            'pulse': round(self.pulse_strength_var.get() * 10) / 10
         }
         self.renderer.set_effects(effects)
         self.renderer.set_effect_strength(self.effect_strength)
@@ -1230,9 +1266,9 @@ class App:
                 'wave': self.wave_effect.get()
             },
             'effect_strength': {
-                'shake': self.shake_strength_var.get(),
-                'bounce': self.bounce_strength_var.get(),
-                'pulse': self.pulse_strength_var.get()
+                'shake': round(self.shake_strength_var.get() * 10) / 10,
+                'bounce': round(self.bounce_strength_var.get() * 10) / 10,
+                'pulse': round(self.pulse_strength_var.get() * 10) / 10
             },
             'wave_params': self.wave_params,
             'sensitivity': self.sensitivity.get(),
@@ -1247,6 +1283,7 @@ class App:
             'webserver_port': self.webserver_port,
             'sections_state': {
                 'effects': self.effects_expanded,
+                'strength': self.strength_expanded,
                 'wave': self.wave_expanded,
                 'idle': self.idle_expanded,
                 'thresh': self.thresh_expanded,
@@ -1272,6 +1309,15 @@ class App:
                 self.effects_content.pack(fill="x", padx=3, pady=(0, 2))
                 self.effects_expanded = True
                 self._update_section_header('effects', True)
+        elif section_name == "strength":
+            if self.strength_expanded:
+                self.strength_content.pack_forget()
+                self.strength_expanded = False
+                self._update_section_header('strength', False)
+            else:
+                self.strength_content.pack(fill="x", padx=3, pady=(0, 2))
+                self.strength_expanded = True
+                self._update_section_header('strength', True)
         elif section_name == "wave":
             if self.wave_expanded:
                 self.wave_content.pack_forget()
